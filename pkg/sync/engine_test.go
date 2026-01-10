@@ -2,6 +2,7 @@ package sync
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/ConfabulousDev/confab/pkg/config"
+	pkghttp "github.com/ConfabulousDev/confab/pkg/http"
 	"github.com/klauspost/compress/zstd"
 )
 
@@ -842,6 +844,309 @@ func TestEngine_SyncAll_AgentFileAppearsLater(t *testing.T) {
 	}
 	if !agentUploaded {
 		t.Error("expected agent-deadbeef.jsonl to be uploaded")
+	}
+}
+
+// TestEngine_SyncAll_RefreshStateAfterUploadFailure tests that when a chunk upload
+// fails (e.g., timeout), the engine refreshes state from the backend before the next
+// sync attempt. This handles the case where the server received and stored the chunk
+// but the response didn't reach the client.
+func TestEngine_SyncAll_RefreshStateAfterUploadFailure(t *testing.T) {
+	// Track chunk requests and init requests
+	var initCount int32
+	var chunkCount int32
+
+	// State tracking - simulates server having received the first chunk
+	serverLastSyncedLine := 0
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		body, _ := readRequestBody(r)
+
+		switch r.URL.Path {
+		case "/api/v1/sync/init":
+			atomic.AddInt32(&initCount, 1)
+			// Return current server state
+			json.NewEncoder(w).Encode(InitResponse{
+				SessionID: "test-session-id",
+				Files: map[string]FileState{
+					"transcript.jsonl": {LastSyncedLine: serverLastSyncedLine},
+				},
+			})
+
+		case "/api/v1/sync/chunk":
+			count := atomic.AddInt32(&chunkCount, 1)
+
+			var req ChunkRequest
+			json.Unmarshal(body, &req)
+
+			if count == 1 {
+				// First chunk upload: server receives data but then "times out"
+				// Simulate server successfully storing lines 1-5
+				serverLastSyncedLine = req.FirstLine + len(req.Lines) - 1
+
+				// Return 503 Service Unavailable to simulate timeout/error
+				w.WriteHeader(http.StatusServiceUnavailable)
+				w.Write([]byte("Service Unavailable"))
+				return
+			}
+
+			// Subsequent uploads succeed
+			lastLine := req.FirstLine + len(req.Lines) - 1
+			serverLastSyncedLine = lastLine
+			json.NewEncoder(w).Encode(ChunkResponse{
+				LastSyncedLine: lastLine,
+			})
+
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	tmpDir, transcriptPath := setupTestEnv(t, server.URL)
+
+	// Create transcript with 10 lines
+	var content string
+	for i := 1; i <= 10; i++ {
+		content += fmt.Sprintf(`{"line":%d}`, i) + "\n"
+	}
+	os.WriteFile(transcriptPath, []byte(content), 0644)
+
+	engine := NewWithClient(
+		mustNewClient(t, server.URL, tmpDir),
+		nil,
+		EngineConfig{
+			ExternalID:     "refresh-state-test",
+			TranscriptPath: transcriptPath,
+			CWD:            tmpDir,
+		},
+	)
+
+	// Initialize
+	if err := engine.Init(); err != nil {
+		t.Fatalf("Init failed: %v", err)
+	}
+
+	// First init call
+	if initCount != 1 {
+		t.Errorf("expected 1 init call after Init(), got %d", initCount)
+	}
+
+	// First SyncAll - upload will fail but server received the data
+	chunks1, err := engine.SyncAll()
+	if err == nil {
+		t.Error("expected error from first SyncAll")
+	}
+	if chunks1 != 0 {
+		t.Errorf("expected 0 successful chunks, got %d", chunks1)
+	}
+
+	// Should have called init again to refresh state after failure
+	if initCount != 2 {
+		t.Errorf("expected 2 init calls (1 for Init + 1 for refresh after failure), got %d", initCount)
+	}
+
+	// Server now has lines 1-10 synced (simulated)
+	// The engine should have refreshed its state from the backend
+
+	// Second SyncAll - should detect no new data needed (or start from correct position)
+	chunks2, err := engine.SyncAll()
+	if err != nil {
+		t.Fatalf("second SyncAll failed: %v", err)
+	}
+
+	// After refresh, server has all 10 lines, so there should be nothing more to sync
+	if chunks2 != 0 {
+		t.Errorf("expected 0 chunks on second sync (server already has all lines), got %d", chunks2)
+	}
+
+	// Verify no additional chunk uploads were attempted (beyond the initial failed one)
+	if chunkCount != 1 {
+		t.Errorf("expected only 1 chunk request (the failed one), got %d", chunkCount)
+	}
+}
+
+// TestEngine_SyncAll_RefreshStateOnContiguityError tests the specific scenario from CF-240:
+// 1. First upload times out (server received lines 346-352, so last_synced_line = 352)
+// 2. Client retries from line 346 (doesn't know server has it)
+// 3. Server returns 400 "first_line must be 353"
+// 4. Engine should refresh state and retry from 353
+func TestEngine_SyncAll_RefreshStateOnContiguityError(t *testing.T) {
+	var initCount int32
+	var chunkCount int32
+	serverLastSyncedLine := 0
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		body, _ := readRequestBody(r)
+
+		switch r.URL.Path {
+		case "/api/v1/sync/init":
+			atomic.AddInt32(&initCount, 1)
+			json.NewEncoder(w).Encode(InitResponse{
+				SessionID: "test-session-id",
+				Files: map[string]FileState{
+					"transcript.jsonl": {LastSyncedLine: serverLastSyncedLine},
+				},
+			})
+
+		case "/api/v1/sync/chunk":
+			count := atomic.AddInt32(&chunkCount, 1)
+
+			var req ChunkRequest
+			json.Unmarshal(body, &req)
+
+			if count == 1 {
+				// First upload: server receives but connection times out
+				// Server advances to line 5
+				serverLastSyncedLine = 5
+				w.WriteHeader(http.StatusServiceUnavailable)
+				w.Write([]byte("timeout"))
+				return
+			}
+
+			// After refresh, client should send from line 6
+			// If client sends from wrong line, return 400
+			expectedFirstLine := serverLastSyncedLine + 1
+			if req.FirstLine != expectedFirstLine {
+				w.WriteHeader(http.StatusBadRequest)
+				json.NewEncoder(w).Encode(map[string]string{
+					"error": fmt.Sprintf("first_line must be %d (got %d) - chunks must be contiguous",
+						expectedFirstLine, req.FirstLine),
+				})
+				return
+			}
+
+			lastLine := req.FirstLine + len(req.Lines) - 1
+			serverLastSyncedLine = lastLine
+			json.NewEncoder(w).Encode(ChunkResponse{
+				LastSyncedLine: lastLine,
+			})
+
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	tmpDir, transcriptPath := setupTestEnv(t, server.URL)
+
+	// Create transcript with 10 lines
+	var content string
+	for i := 1; i <= 10; i++ {
+		content += fmt.Sprintf(`{"line":%d}`, i) + "\n"
+	}
+	os.WriteFile(transcriptPath, []byte(content), 0644)
+
+	engine := NewWithClient(
+		mustNewClient(t, server.URL, tmpDir),
+		nil,
+		EngineConfig{
+			ExternalID:     "contiguity-test",
+			TranscriptPath: transcriptPath,
+			CWD:            tmpDir,
+		},
+	)
+
+	if err := engine.Init(); err != nil {
+		t.Fatalf("Init failed: %v", err)
+	}
+
+	// First SyncAll - will fail with "timeout" but trigger refresh
+	_, err := engine.SyncAll()
+	if err == nil {
+		t.Error("expected error from first SyncAll")
+	}
+
+	// Verify init was called to refresh state
+	if initCount != 2 {
+		t.Errorf("expected 2 init calls (initial + refresh), got %d", initCount)
+	}
+
+	// Second SyncAll - should succeed because state was refreshed
+	// Client should now send from line 6 (after server's last_synced_line of 5)
+	chunks, err := engine.SyncAll()
+	if err != nil {
+		t.Errorf("second SyncAll should succeed after refresh, got error: %v", err)
+	}
+
+	// Should have uploaded remaining lines (6-10)
+	if chunks != 1 {
+		t.Errorf("expected 1 chunk on second sync, got %d", chunks)
+	}
+
+	// Final state check
+	if serverLastSyncedLine != 10 {
+		t.Errorf("expected server to have all 10 lines, got %d", serverLastSyncedLine)
+	}
+}
+
+// TestEngine_SyncAll_AuthErrorDuringRefreshPropagated tests that when refresh fails
+// with an auth error (e.g., token expired mid-sync), the auth error is propagated
+// so the daemon can handle it properly.
+func TestEngine_SyncAll_AuthErrorDuringRefreshPropagated(t *testing.T) {
+	var initCount int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		switch r.URL.Path {
+		case "/api/v1/sync/init":
+			count := atomic.AddInt32(&initCount, 1)
+			if count == 1 {
+				// First init succeeds
+				json.NewEncoder(w).Encode(InitResponse{
+					SessionID: "test-session-id",
+					Files: map[string]FileState{
+						"transcript.jsonl": {LastSyncedLine: 0},
+					},
+				})
+			} else {
+				// Second init (refresh) fails with auth error - token expired
+				w.WriteHeader(http.StatusUnauthorized)
+				w.Write([]byte(`{"error":"token expired"}`))
+			}
+
+		case "/api/v1/sync/chunk":
+			// Chunk upload fails with 503
+			w.WriteHeader(http.StatusServiceUnavailable)
+			w.Write([]byte("Service Unavailable"))
+
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	tmpDir, transcriptPath := setupTestEnv(t, server.URL)
+	os.WriteFile(transcriptPath, []byte(`{"line":1}`+"\n"), 0644)
+
+	engine := NewWithClient(
+		mustNewClient(t, server.URL, tmpDir),
+		nil,
+		EngineConfig{
+			ExternalID:     "auth-during-refresh-test",
+			TranscriptPath: transcriptPath,
+			CWD:            tmpDir,
+		},
+	)
+
+	if err := engine.Init(); err != nil {
+		t.Fatalf("Init failed: %v", err)
+	}
+
+	// SyncAll should fail - chunk upload fails, refresh fails with auth error
+	_, err := engine.SyncAll()
+	if err == nil {
+		t.Fatal("expected error from SyncAll")
+	}
+
+	// The returned error should be the auth error from refresh, not the original 503
+	if !errors.Is(err, pkghttp.ErrUnauthorized) {
+		t.Errorf("expected ErrUnauthorized to be propagated, got: %v", err)
 	}
 }
 

@@ -2,6 +2,7 @@ package sync
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/user"
@@ -10,6 +11,7 @@ import (
 	"github.com/ConfabulousDev/confab/pkg/config"
 	"github.com/ConfabulousDev/confab/pkg/discovery"
 	"github.com/ConfabulousDev/confab/pkg/git"
+	"github.com/ConfabulousDev/confab/pkg/http"
 	"github.com/ConfabulousDev/confab/pkg/logger"
 	"github.com/ConfabulousDev/confab/pkg/redactor"
 	"github.com/ConfabulousDev/confab/pkg/types"
@@ -216,10 +218,26 @@ func (e *Engine) SyncAll() (int, error) {
 				// Upload chunk
 				lastLine, err := e.client.UploadChunk(e.sessionID, chunk.FileName, chunk.FileType, chunk.FirstLine, chunk.Lines, chunk.Metadata)
 				if err != nil {
-					logger.Error("Failed to upload chunk: file=%s error=%v", chunk.FileName, err)
+					logger.Error("Failed to upload chunk: file=%s first_line=%d lines=%d error=%v",
+						chunk.FileName, chunk.FirstLine, len(chunk.Lines), err)
 					if firstErr == nil {
 						firstErr = err
 					}
+
+					// Refresh state from backend to handle partial success (e.g., timeout where
+					// server stored data but response didn't reach us). This ensures we resume
+					// from the correct position on the next sync attempt.
+					// Skip for auth errors (handled at daemon level) or session not found (can't recover).
+					if !errors.Is(err, http.ErrUnauthorized) && !errors.Is(err, http.ErrSessionNotFound) {
+						if refreshErr := e.refreshStateFromBackend(); refreshErr != nil {
+							logger.Error("Failed to refresh state from backend: %v", refreshErr)
+							// Auth errors from refresh should be propagated so daemon can handle them
+							if errors.Is(refreshErr, http.ErrUnauthorized) {
+								firstErr = refreshErr
+							}
+						}
+					}
+
 					break
 				}
 
@@ -285,4 +303,25 @@ func (e *Engine) GetSyncStats() map[string]int {
 func (e *Engine) Reset() {
 	e.initialized = false
 	e.sessionID = ""
+}
+
+// refreshStateFromBackend calls Init to get current backend state and updates tracker.
+// This should be called after upload failures to handle cases where the server
+// received data but we didn't get a response (e.g., timeout).
+func (e *Engine) refreshStateFromBackend() error {
+	// Call Init without metadata - we just want to refresh file states
+	resp, err := e.client.Init(e.externalID, e.transcriptPath, nil)
+	if err != nil {
+		return err
+	}
+
+	// Update tracker with backend state
+	backendState := make(map[string]FileState)
+	for fileName, state := range resp.Files {
+		backendState[fileName] = FileState{LastSyncedLine: state.LastSyncedLine}
+	}
+	e.tracker.InitFromBackendState(backendState)
+
+	logger.Info("Refreshed sync state from backend: files=%d", len(resp.Files))
+	return nil
 }
