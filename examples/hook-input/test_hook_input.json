@@ -1,0 +1,8 @@
+{
+  "session_id": "62d346b1-08c1-4949-8229-f1eb8b44cb46",
+  "transcript_path": "~/.claude/projects/dev_alpha_claude-backup/62d346b1-08c1-4949-8229-f1eb8b44cb46.jsonl",
+  "cwd": "/home/user/projects/my-project",
+  "permission_mode": "default",
+  "hook_event_name": "SessionEnd",
+  "reason": "exit"
+}

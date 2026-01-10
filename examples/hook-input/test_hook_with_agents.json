@@ -1,0 +1,8 @@
+{
+  "session_id": "test-session-123",
+  "transcript_path": "/home/user/.claude/projects/my-project/test-session-123.jsonl",
+  "cwd": "/home/user/projects/my-project",
+  "permission_mode": "default",
+  "hook_event_name": "SessionEnd",
+  "reason": "exit"
+}
