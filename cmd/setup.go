@@ -41,9 +41,6 @@ func runSetup(cmd *cobra.Command, args []string) error {
 		backendURL = "https://confabulous.dev"
 	}
 
-	fmt.Println("=== Confab Setup ===")
-	fmt.Println()
-
 	// Check if API key was provided directly
 	needsLogin := true
 	if apiKey != "" {
@@ -61,7 +58,7 @@ func runSetup(cmd *cobra.Command, args []string) error {
 				fmt.Println("Checking existing authentication...")
 				if err := verifyAPIKey(cfg); err == nil {
 					logger.Info("Existing API key is valid, skipping login")
-					fmt.Println("✅ Already authenticated")
+					fmt.Println("Already authenticated")
 					fmt.Println()
 					needsLogin = false
 				} else {
@@ -93,7 +90,7 @@ func runSetup(cmd *cobra.Command, args []string) error {
 		logger.Warn("Failed to initialize redaction config: %v", err)
 	} else if added {
 		logger.Info("Initialized default redaction config")
-		fmt.Println("✅ Redaction enabled (default patterns)")
+		fmt.Println("Redaction enabled (default patterns)")
 	}
 
 	// Install hooks
@@ -108,41 +105,26 @@ func runSetup(cmd *cobra.Command, args []string) error {
 		logger.Error("Failed to install sync hooks: %v", err)
 		return fmt.Errorf("failed to install sync hooks: %w", err)
 	}
-	fmt.Println("✅ Sync hooks installed (SessionStart + SessionEnd)")
 
 	if err := config.InstallPreToolUseHooks(); err != nil {
 		logger.Error("Failed to install PreToolUse hooks: %v", err)
 		return fmt.Errorf("failed to install PreToolUse hooks: %w", err)
 	}
-	fmt.Println("✅ PreToolUse hook installed (git commit trailers)")
 
 	if err := config.InstallPostToolUseHooks(); err != nil {
 		logger.Error("Failed to install PostToolUse hooks: %v", err)
 		return fmt.Errorf("failed to install PostToolUse hooks: %w", err)
 	}
-	fmt.Println("✅ PostToolUse hook installed (GitHub PR linking)")
 
 	if err := config.InstallUserPromptSubmitHook(); err != nil {
 		logger.Error("Failed to install UserPromptSubmit hook: %v", err)
 		return fmt.Errorf("failed to install UserPromptSubmit hook: %w", err)
 	}
-	fmt.Println("✅ UserPromptSubmit hook installed (teleport support)")
 
 	settingsPath, _ := config.GetSettingsPath()
 	logger.Info("Hooks installed in %s", settingsPath)
-	fmt.Println()
 
-	fmt.Println("=== Setup Complete ===")
-	fmt.Println()
-	fmt.Println("Confab will now:")
-	fmt.Println("  - Sync sessions incrementally (every 30 seconds)")
-	fmt.Println("  - Add session URLs to git commits and PRs")
-	fmt.Println("  - Link created PRs to sessions on Confabulous")
-	fmt.Println()
-	fmt.Println("Try it out:")
-	fmt.Println("  1. Start a new Claude Code session")
-	fmt.Println("  2. Your session data will sync in the background")
-	fmt.Println("  3. Run 'confab status' to check your setup")
+	fmt.Println("✅ Setup complete. Claude Code sessions will sync to", backendURL)
 
 	return nil
 }
