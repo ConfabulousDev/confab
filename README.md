@@ -1,6 +1,10 @@
-# Confab CLI
+# Confabulous.dev CLI: `confab`
 
-Command-line tool for capturing and uploading Claude Code sessions to cloud storage.
+Understand your Claude Code sessions. Sync transcripts to https://confabulous.dev for exploration, sharing and analysis.
+
+The `confab` CLI hooks into Claude Code session lifecycle to sync data in real-time.
+
+Works seamlessly - your `claude` workflow stays exactly the same.
 
 ## Installation
 
