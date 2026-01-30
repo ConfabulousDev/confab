@@ -16,12 +16,10 @@ import (
 )
 
 const (
-	confabSessionURLBase = "https://confabulous.dev/sessions/"
-
 	// Git commit trailer format
 	commitTrailerPrefix = "Confabulous-Link: "
 
-	// PR body link format: 📝 [Confabulous link](https://confabulous.dev/sessions/{id})
+	// PR body link format: 📝 [Confabulous link]({session_url})
 	prLinkPrefix = "📝 [Confabulous link]("
 	prLinkSuffix = ")"
 )
@@ -46,10 +44,10 @@ var hookPreToolUseCmd = &cobra.Command{
 	Long: `Handler for PreToolUse hook events from Claude Code.
 
 For git commit commands, ensures the commit message includes a
-Confab session URL trailer (Confab-Session-URL: https://confabulous.dev/sessions/{session_id}).
+Confab session URL trailer (Confabulous-Link: {backend_url}/sessions/{session_id}).
 
 For PR creation (gh pr create, GitHub MCP tool), ensures the PR body includes a
-Confab session link (📝 [Confabulous link](https://confabulous.dev/sessions/{session_id})).
+Confab session link (📝 [Confabulous link]({backend_url}/sessions/{session_id})).
 
 For all other tool calls, exits silently (code 0) to allow normal flow.
 
@@ -118,7 +116,11 @@ func handlePreToolUse(r io.Reader, w io.Writer) error {
 		return nil
 	}
 
-	sessionURL := formatSessionURL(confabSessionID)
+	sessionURL, err := formatSessionURL(confabSessionID)
+	if err != nil {
+		logger.Warn("Confab link skipped: %v", err)
+		return nil
+	}
 
 	// Check if session URL is already present
 	if containsSessionURL(command, confabSessionID) {
@@ -161,7 +163,11 @@ func handleMCPPRCreate(hookInput *types.HookInput, w io.Writer) error {
 		return nil
 	}
 
-	sessionURL := formatSessionURL(confabSessionID)
+	sessionURL, err := formatSessionURL(confabSessionID)
+	if err != nil {
+		logger.Warn("Confab link skipped: %v", err)
+		return nil
+	}
 
 	// Check if session URL is already in the body field
 	if body, ok := hookInput.ToolInput["body"].(string); ok {
@@ -227,13 +233,24 @@ func findGitPushPosition(command string) int {
 // containsSessionURL checks if the command already includes the session URL.
 // This handles various quoting styles by checking for the URL anywhere in the command.
 func containsSessionURL(command, sessionID string) bool {
-	sessionURL := formatSessionURL(sessionID)
+	sessionURL, err := formatSessionURL(sessionID)
+	if err != nil {
+		return false
+	}
 	return strings.Contains(command, sessionURL)
 }
 
-// formatSessionURL returns the session URL
-func formatSessionURL(sessionID string) string {
-	return confabSessionURLBase + sessionID
+// formatSessionURL returns the session URL derived from the configured backend URL.
+// Returns error if backend URL is not configured.
+func formatSessionURL(sessionID string) (string, error) {
+	cfg, err := config.GetUploadConfig()
+	if err != nil {
+		return "", fmt.Errorf("failed to get config: %w", err)
+	}
+	if cfg.BackendURL == "" {
+		return "", fmt.Errorf("backend URL not configured")
+	}
+	return strings.TrimSuffix(cfg.BackendURL, "/") + "/sessions/" + sessionID, nil
 }
 
 // formatTrailerLine returns the formatted trailer line

@@ -13,8 +13,12 @@ import (
 	"github.com/ConfabulousDev/confab/pkg/types"
 )
 
+// testBackendURL is the backend URL used in tests
+const testBackendURL = "https://test.example.com"
+
 // setupTestState creates a daemon state file for testing and returns a cleanup function.
 // It creates the state in a temp directory by overriding HOME.
+// Also creates a config file with a test backend URL.
 func setupTestState(t *testing.T, claudeSessionID, confabSessionID string) func() {
 	t.Helper()
 
@@ -32,6 +36,15 @@ func setupTestState(t *testing.T, claudeSessionID, confabSessionID string) func(
 	stateDir := filepath.Join(tempHome, ".confab", "sync")
 	if err := os.MkdirAll(stateDir, 0755); err != nil {
 		t.Fatalf("Failed to create state dir: %v", err)
+	}
+
+	// Create config with backend URL
+	cfg := &config.UploadConfig{
+		BackendURL: testBackendURL,
+		APIKey:     "cfb_test_key_for_testing_purposes_only",
+	}
+	if err := config.SaveUploadConfig(cfg); err != nil {
+		t.Fatalf("Failed to save test config: %v", err)
 	}
 
 	// Create state with ConfabSessionID
@@ -114,6 +127,31 @@ func TestFindGitPushPosition(t *testing.T) {
 func TestContainsSessionURL(t *testing.T) {
 	sessionID := "abc123"
 
+	// Set up temp home with config
+	tempHome, err := os.MkdirTemp("", "confab-test-home-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp home: %v", err)
+	}
+	defer os.RemoveAll(tempHome)
+
+	origHome := os.Getenv("HOME")
+	os.Setenv("HOME", tempHome)
+	defer os.Setenv("HOME", origHome)
+
+	// Create config with backend URL
+	cfg := &config.UploadConfig{
+		BackendURL: testBackendURL,
+		APIKey:     "cfb_test_key_for_testing_purposes_only",
+	}
+	if err := config.SaveUploadConfig(cfg); err != nil {
+		t.Fatalf("Failed to save test config: %v", err)
+	}
+
+	sessionURL, err := formatSessionURL(sessionID)
+	if err != nil {
+		t.Fatalf("formatSessionURL() error = %v", err)
+	}
+
 	tests := []struct {
 		name    string
 		command string
@@ -121,12 +159,12 @@ func TestContainsSessionURL(t *testing.T) {
 	}{
 		{
 			name:    "has session URL in commit",
-			command: `git commit -m "Fix bug\n\nConfabulous-Link: https://confabulous.dev/sessions/abc123"`,
+			command: `git commit -m "Fix bug\n\nConfabulous-Link: ` + sessionURL + `"`,
 			want:    true,
 		},
 		{
 			name:    "has session URL in PR",
-			command: `gh pr create --title "Fix" --body "📝 [Confabulous link](https://confabulous.dev/sessions/abc123)"`,
+			command: `gh pr create --title "Fix" --body "📝 [Confabulous link](` + sessionURL + `)"`,
 			want:    true,
 		},
 		{
@@ -136,12 +174,12 @@ func TestContainsSessionURL(t *testing.T) {
 		},
 		{
 			name:    "wrong session ID",
-			command: `git commit -m "Fix bug\n\nConfabulous-Link: https://confabulous.dev/sessions/xyz789"`,
+			command: `git commit -m "Fix bug\n\nConfabulous-Link: ` + testBackendURL + `/sessions/xyz789"`,
 			want:    false,
 		},
 		{
 			name:    "URL in heredoc",
-			command: "git commit -m \"$(cat <<'EOF'\nFix bug\n\nConfabulous-Link: https://confabulous.dev/sessions/abc123\nEOF\n)\"",
+			command: "git commit -m \"$(cat <<'EOF'\nFix bug\n\nConfabulous-Link: " + sessionURL + "\nEOF\n)\"",
 			want:    true,
 		},
 	}
@@ -157,8 +195,31 @@ func TestContainsSessionURL(t *testing.T) {
 }
 
 func TestFormatSessionURL(t *testing.T) {
-	got := formatSessionURL("test-session-123")
-	want := "https://confabulous.dev/sessions/test-session-123"
+	// Set up temp home with config
+	tempHome, err := os.MkdirTemp("", "confab-test-home-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp home: %v", err)
+	}
+	defer os.RemoveAll(tempHome)
+
+	origHome := os.Getenv("HOME")
+	os.Setenv("HOME", tempHome)
+	defer os.Setenv("HOME", origHome)
+
+	// Create config with backend URL
+	cfg := &config.UploadConfig{
+		BackendURL: "https://my-backend.example.com",
+		APIKey:     "cfb_test_key_for_testing_purposes_only",
+	}
+	if err := config.SaveUploadConfig(cfg); err != nil {
+		t.Fatalf("Failed to save test config: %v", err)
+	}
+
+	got, err := formatSessionURL("test-session-123")
+	if err != nil {
+		t.Fatalf("formatSessionURL() error = %v", err)
+	}
+	want := "https://my-backend.example.com/sessions/test-session-123"
 	if got != want {
 		t.Errorf("formatSessionURL() = %q, want %q", got, want)
 	}
@@ -266,11 +327,15 @@ func TestHandlePreToolUse_GitCommitWithoutTrailer(t *testing.T) {
 func TestHandlePreToolUse_GitCommitWithTrailer(t *testing.T) {
 	claudeSessionID := "claude-session-123"
 	confabSessionID := "confab-session-456"
-	sessionURL := formatSessionURL(confabSessionID)
 
-	// Set up test state with Confab session ID
+	// Set up test state with Confab session ID (must be before formatSessionURL)
 	cleanup := setupTestState(t, claudeSessionID, confabSessionID)
 	defer cleanup()
+
+	sessionURL, err := formatSessionURL(confabSessionID)
+	if err != nil {
+		t.Fatalf("formatSessionURL() error = %v", err)
+	}
 
 	input := types.HookInput{
 		SessionID:     claudeSessionID,
@@ -285,7 +350,7 @@ func TestHandlePreToolUse_GitCommitWithTrailer(t *testing.T) {
 	r := strings.NewReader(string(inputJSON))
 	var w bytes.Buffer
 
-	err := handlePreToolUse(r, &w)
+	err = handlePreToolUse(r, &w)
 	if err != nil {
 		t.Errorf("Expected nil error, got %v", err)
 	}
@@ -523,11 +588,15 @@ func TestHandlePreToolUse_PRCreateWithoutLink(t *testing.T) {
 func TestHandlePreToolUse_PRCreateWithLink(t *testing.T) {
 	claudeSessionID := "claude-session-123"
 	confabSessionID := "confab-session-456"
-	sessionURL := formatSessionURL(confabSessionID)
 
-	// Set up test state with Confab session ID
+	// Set up test state with Confab session ID (must be before formatSessionURL)
 	cleanup := setupTestState(t, claudeSessionID, confabSessionID)
 	defer cleanup()
+
+	sessionURL, err := formatSessionURL(confabSessionID)
+	if err != nil {
+		t.Fatalf("formatSessionURL() error = %v", err)
+	}
 
 	input := types.HookInput{
 		SessionID:     claudeSessionID,
@@ -542,7 +611,7 @@ func TestHandlePreToolUse_PRCreateWithLink(t *testing.T) {
 	r := strings.NewReader(string(inputJSON))
 	var w bytes.Buffer
 
-	err := handlePreToolUse(r, &w)
+	err = handlePreToolUse(r, &w)
 	if err != nil {
 		t.Errorf("Expected nil error, got %v", err)
 	}
@@ -641,11 +710,15 @@ func TestHandlePreToolUse_MCPGitHubPRWithoutLink(t *testing.T) {
 func TestHandlePreToolUse_MCPGitHubPRWithLink(t *testing.T) {
 	claudeSessionID := "claude-session-123"
 	confabSessionID := "confab-session-456"
-	sessionURL := formatSessionURL(confabSessionID)
 
-	// Set up test state with Confab session ID
+	// Set up test state with Confab session ID (must be before formatSessionURL)
 	cleanup := setupTestState(t, claudeSessionID, confabSessionID)
 	defer cleanup()
+
+	sessionURL, err := formatSessionURL(confabSessionID)
+	if err != nil {
+		t.Fatalf("formatSessionURL() error = %v", err)
+	}
 
 	input := types.HookInput{
 		SessionID:     claudeSessionID,
@@ -665,7 +738,7 @@ func TestHandlePreToolUse_MCPGitHubPRWithLink(t *testing.T) {
 	r := strings.NewReader(string(inputJSON))
 	var w bytes.Buffer
 
-	err := handlePreToolUse(r, &w)
+	err = handlePreToolUse(r, &w)
 	if err != nil {
 		t.Errorf("Expected nil error, got %v", err)
 	}

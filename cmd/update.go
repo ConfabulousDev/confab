@@ -1,12 +1,13 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -17,8 +18,11 @@ import (
 )
 
 const (
-	latestVersionURL = "https://confabulous.dev/cli/latest_version"
-	installScriptURL = "https://confabulous.dev/install"
+	// GitHub repository for releases
+	githubRepo = "ConfabulousDev/confab"
+
+	// GitHub API URL for latest release
+	githubReleasesAPI = "https://api.github.com/repos/" + githubRepo + "/releases/latest"
 )
 
 var checkOnly bool
@@ -70,8 +74,8 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 	fmt.Println("Updating confab...")
 	fmt.Println()
 
-	if err := runInstallScript(); err != nil {
-		logger.Error("Failed to run install script: %v", err)
+	if err := installLatestRelease(); err != nil {
+		logger.Error("Failed to install update: %v", err)
 		return fmt.Errorf("update failed: %w", err)
 	}
 
@@ -79,28 +83,52 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// fetchLatestVersion fetches the latest version string from the server
-func fetchLatestVersion() (string, error) {
+// githubRelease represents the relevant fields from GitHub's release API
+type githubRelease struct {
+	TagName string `json:"tag_name"`
+	Assets  []struct {
+		Name               string `json:"name"`
+		BrowserDownloadURL string `json:"browser_download_url"`
+	} `json:"assets"`
+}
+
+// fetchLatestRelease fetches the latest release info from GitHub
+func fetchLatestRelease() (*githubRelease, error) {
 	client := &http.Client{
 		Timeout: 10 * time.Second,
 	}
 
-	resp, err := client.Get(latestVersionURL)
+	req, err := http.NewRequest("GET", githubReleasesAPI, nil)
 	if err != nil {
-		return "", err
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/vnd.github.v3+json")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("server returned %d", resp.StatusCode)
+		return nil, fmt.Errorf("GitHub API returned %d", resp.StatusCode)
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	var release githubRelease
+	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
+		return nil, fmt.Errorf("failed to parse GitHub response: %w", err)
+	}
+
+	return &release, nil
+}
+
+// fetchLatestVersion fetches the latest version string from GitHub releases
+func fetchLatestVersion() (string, error) {
+	release, err := fetchLatestRelease()
 	if err != nil {
 		return "", err
 	}
-
-	return strings.TrimSpace(string(body)), nil
+	return release.TagName, nil
 }
 
 // isNewerVersion returns true if latest is newer than current
@@ -140,52 +168,94 @@ func parseVersion(v string) [3]int {
 	return parts
 }
 
-// runInstallScript downloads and executes the install script
-func runInstallScript() error {
-	// Fetch install script
-	client := &http.Client{
-		Timeout: 30 * time.Second,
+// getAssetName returns the expected asset name for the current platform
+func getAssetName() string {
+	return fmt.Sprintf("confab_%s_%s", runtime.GOOS, runtime.GOARCH)
+}
+
+// findAssetURL finds the download URL for the current platform from a release
+func findAssetURL(release *githubRelease) (string, error) {
+	expectedName := getAssetName()
+
+	for _, asset := range release.Assets {
+		if asset.Name == expectedName {
+			return asset.BrowserDownloadURL, nil
+		}
 	}
 
-	resp, err := client.Get(installScriptURL)
+	return "", fmt.Errorf("no binary found for %s/%s (looked for %s)", runtime.GOOS, runtime.GOARCH, expectedName)
+}
+
+// downloadBinary downloads a binary from the given URL to the specified path
+func downloadBinary(url, destPath string) error {
+	client := &http.Client{
+		Timeout: 120 * time.Second,
+	}
+
+	resp, err := client.Get(url)
 	if err != nil {
-		return fmt.Errorf("failed to download install script: %w", err)
+		return fmt.Errorf("failed to download binary: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("server returned %d", resp.StatusCode)
+		return fmt.Errorf("download failed with status %d", resp.StatusCode)
 	}
 
-	// Write to temp file
-	tmpFile, err := os.CreateTemp("", "confab-install-*.sh")
+	// Write to temp file first for atomic replacement
+	tmpPath := destPath + ".tmp"
+	tmpFile, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0755)
 	if err != nil {
 		return fmt.Errorf("failed to create temp file: %w", err)
 	}
-	tmpPath := tmpFile.Name()
-	defer os.Remove(tmpPath)
 
-	if _, err := io.Copy(tmpFile, resp.Body); err != nil {
-		tmpFile.Close()
-		return fmt.Errorf("failed to write install script: %w", err)
-	}
+	_, err = io.Copy(tmpFile, resp.Body)
 	tmpFile.Close()
-
-	// Make executable
-	if err := os.Chmod(tmpPath, 0755); err != nil {
-		return fmt.Errorf("failed to make script executable: %w", err)
+	if err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("failed to write binary: %w", err)
 	}
 
-	// Execute
-	cmd := exec.Command(tmpPath)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Stdin = os.Stdin
-
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("install script failed: %w", err)
+	// Atomic rename
+	if err := os.Rename(tmpPath, destPath); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("failed to install binary: %w", err)
 	}
 
+	return nil
+}
+
+// installLatestRelease downloads and installs the latest release
+func installLatestRelease() error {
+	release, err := fetchLatestRelease()
+	if err != nil {
+		return fmt.Errorf("failed to fetch release info: %w", err)
+	}
+
+	assetURL, err := findAssetURL(release)
+	if err != nil {
+		return err
+	}
+
+	// Install to ~/.local/bin/confab
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("failed to get home directory: %w", err)
+	}
+
+	binDir := filepath.Join(homeDir, ".local", "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		return fmt.Errorf("failed to create bin directory: %w", err)
+	}
+
+	destPath := filepath.Join(binDir, "confab")
+
+	fmt.Printf("Downloading %s...\n", release.TagName)
+	if err := downloadBinary(assetURL, destPath); err != nil {
+		return err
+	}
+
+	fmt.Printf("Installed to %s\n", destPath)
 	return nil
 }
 
@@ -309,14 +379,12 @@ func NotifyIfUpdateAvailable() {
 	fmt.Fprintf(os.Stderr, "Update available: %s -> %s (run 'confab update' to install)\n", current, latest)
 }
 
-// downloadNewBinary downloads the install script, runs it, and returns the path
-// to the new binary
+// downloadNewBinary downloads the latest release and returns the path to the new binary
 func downloadNewBinary() (string, error) {
-	if err := runInstallScript(); err != nil {
+	if err := installLatestRelease(); err != nil {
 		return "", err
 	}
 
-	// The install script puts the binary at ~/.local/bin/confab
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return "", err

@@ -8,18 +8,15 @@
    git push origin v0.X.Y
    ```
 
-2. **Update latest_version file in confab-web**
+2. **Create GitHub Release**
 
-   Edit `frontend/public/cli/latest_version` to contain the new version:
-   ```
-   v0.X.Y
-   ```
+   Create a GitHub release for the tag with the following assets:
+   - `confab_darwin_amd64` - macOS Intel
+   - `confab_darwin_arm64` - macOS Apple Silicon
+   - `confab_linux_amd64` - Linux x86_64
+   - `confab_linux_arm64` - Linux ARM64
 
-   Commit and deploy confab-web so the CLI auto-update check sees the new version.
-
-3. **Build and upload release binary**
-
-   The install script at `confabulous.dev/install` downloads from GitHub releases or a CDN. Ensure the binary is available there.
+   The CLI auto-update mechanism fetches the latest release from GitHub.
 
 ## Version Format
 
@@ -28,7 +25,7 @@
 
 ## Auto-Update Behavior
 
-- `confab update` checks `confabulous.dev/cli/latest_version` for the latest version
+- `confab update` checks GitHub releases API for the latest version
 - The SessionStart hook auto-updates and re-execs if a new version is available
 - User-facing commands (`list`, `save`, `status`) show an update notice but don't auto-install
 - Checks are rate-limited to once per hour per machine
