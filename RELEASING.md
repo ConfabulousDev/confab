@@ -2,15 +2,13 @@
 
 ## Steps
 
-1. **Update version and tag**
+1. **Tag and push**
    ```bash
    git tag v0.X.Y
    git push origin v0.X.Y
    ```
 
-2. **Create GitHub Release**
-
-   Create a GitHub release for the tag with the following assets:
+2. **GoReleaser handles the rest** — a GitHub Actions workflow runs GoReleaser on tag push, which builds cross-platform binaries and creates the GitHub release with these assets:
    - `confab_darwin_amd64` - macOS Intel
    - `confab_darwin_arm64` - macOS Apple Silicon
    - `confab_linux_amd64` - Linux x86_64

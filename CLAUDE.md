@@ -50,6 +50,15 @@ Confab installs hooks in `~/.claude/settings.json`:
 
 The daemon also monitors its parent PID and shuts down if Claude Code exits unexpectedly.
 
+## Releasing
+
+Tag and push — GoReleaser handles the rest. See [RELEASING.md](RELEASING.md) for details.
+
+```bash
+git tag v0.X.Y
+git push origin v0.X.Y
+```
+
 ## Testing Notes
 
 - Integration tests in `pkg/daemon/integration_test.go` test the full sync lifecycle
