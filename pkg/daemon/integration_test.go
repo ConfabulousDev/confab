@@ -41,6 +41,7 @@ func readRequestBody(r *http.Request) ([]byte, error) {
 // mockBackend tracks requests and provides configurable responses
 type mockBackend struct {
 	t              *testing.T
+	mu             stdsync.Mutex // protects initRequests and chunkRequests
 	initRequests   []sync.InitRequest
 	chunkRequests  []sync.ChunkRequest
 	initResponse   *sync.InitResponse
@@ -48,6 +49,20 @@ type mockBackend struct {
 	chunkError     bool
 	requestCount   int32
 	failUntilCount int32 // fail requests until this count is reached
+}
+
+// getInitRequests returns a snapshot of the init requests received so far.
+func (m *mockBackend) getInitRequests() []sync.InitRequest {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]sync.InitRequest(nil), m.initRequests...)
+}
+
+// getChunkRequests returns a snapshot of the chunk requests received so far.
+func (m *mockBackend) getChunkRequests() []sync.ChunkRequest {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]sync.ChunkRequest(nil), m.chunkRequests...)
 }
 
 func newMockBackend(t *testing.T) *mockBackend {
@@ -94,7 +109,9 @@ func (m *mockBackend) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
+		m.mu.Lock()
 		m.initRequests = append(m.initRequests, req)
+		m.mu.Unlock()
 		json.NewEncoder(w).Encode(m.initResponse)
 
 	case "/api/v1/sync/chunk":
@@ -110,7 +127,9 @@ func (m *mockBackend) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
+		m.mu.Lock()
 		m.chunkRequests = append(m.chunkRequests, req)
+		m.mu.Unlock()
 
 		// Return last synced line as first + len(lines) - 1
 		lastLine := req.FirstLine + len(req.Lines) - 1
@@ -189,10 +208,11 @@ func TestDaemonSyncCycle(t *testing.T) {
 	}
 
 	// Verify init was called
-	if len(mock.initRequests) == 0 {
+	initReqs := mock.getInitRequests()
+	if len(initReqs) == 0 {
 		t.Fatal("Expected init request, got none")
 	}
-	initReq := mock.initRequests[0]
+	initReq := initReqs[0]
 	if initReq.ExternalID != "test-external-id" {
 		t.Errorf("Expected external_id 'test-external-id', got %q", initReq.ExternalID)
 	}
@@ -201,10 +221,11 @@ func TestDaemonSyncCycle(t *testing.T) {
 	}
 
 	// Verify chunk was uploaded
-	if len(mock.chunkRequests) == 0 {
+	chunkReqs := mock.getChunkRequests()
+	if len(chunkReqs) == 0 {
 		t.Fatal("Expected chunk request, got none")
 	}
-	chunkReq := mock.chunkRequests[0]
+	chunkReq := chunkReqs[0]
 	if chunkReq.SessionID != "test-session-id" {
 		t.Errorf("Expected session_id 'test-session-id', got %q", chunkReq.SessionID)
 	}
@@ -259,7 +280,7 @@ func TestDaemonRetryOnBackendError(t *testing.T) {
 	}
 
 	// Eventually should have succeeded with init
-	if len(mock.initRequests) == 0 {
+	if len(mock.getInitRequests()) == 0 {
 		t.Error("Expected at least one successful init request after retries")
 	}
 }
@@ -308,14 +329,15 @@ func TestDaemonAgentDiscovery(t *testing.T) {
 	<-errCh
 
 	// Verify both transcript and agent were uploaded
-	if len(mock.chunkRequests) < 2 {
-		t.Fatalf("Expected at least 2 chunk requests (transcript + agent), got %d", len(mock.chunkRequests))
+	chunkReqs := mock.getChunkRequests()
+	if len(chunkReqs) < 2 {
+		t.Fatalf("Expected at least 2 chunk requests (transcript + agent), got %d", len(chunkReqs))
 	}
 
 	// Find transcript and agent uploads
 	var transcriptChunk, agentChunk *sync.ChunkRequest
-	for i := range mock.chunkRequests {
-		req := &mock.chunkRequests[i]
+	for i := range chunkReqs {
+		req := &chunkReqs[i]
 		if req.FileType == "transcript" {
 			transcriptChunk = req
 		} else if req.FileType == "agent" {
@@ -379,11 +401,12 @@ func TestDaemonIncrementalSync(t *testing.T) {
 	<-errCh
 
 	// Verify only new lines were uploaded
-	if len(mock.chunkRequests) == 0 {
+	chunkReqs := mock.getChunkRequests()
+	if len(chunkReqs) == 0 {
 		t.Fatal("Expected chunk request, got none")
 	}
 
-	chunkReq := mock.chunkRequests[0]
+	chunkReq := chunkReqs[0]
 	if chunkReq.FirstLine != 3 {
 		t.Errorf("Expected first_line 3 (after synced line 2), got %d", chunkReq.FirstLine)
 	}
@@ -434,18 +457,19 @@ func TestDaemonMultipleSyncCycles(t *testing.T) {
 	<-errCh
 
 	// Should have multiple chunk uploads
-	if len(mock.chunkRequests) < 2 {
-		t.Errorf("Expected at least 2 chunk uploads (initial + appended), got %d", len(mock.chunkRequests))
+	chunkReqs := mock.getChunkRequests()
+	if len(chunkReqs) < 2 {
+		t.Errorf("Expected at least 2 chunk uploads (initial + appended), got %d", len(chunkReqs))
 	}
 
 	// First chunk should be line 1
-	if mock.chunkRequests[0].FirstLine != 1 {
-		t.Errorf("First chunk should start at line 1, got %d", mock.chunkRequests[0].FirstLine)
+	if chunkReqs[0].FirstLine != 1 {
+		t.Errorf("First chunk should start at line 1, got %d", chunkReqs[0].FirstLine)
 	}
 
 	// Second chunk should be lines 2-3
-	if len(mock.chunkRequests) >= 2 {
-		secondChunk := mock.chunkRequests[1]
+	if len(chunkReqs) >= 2 {
+		secondChunk := chunkReqs[1]
 		if secondChunk.FirstLine != 2 {
 			t.Errorf("Second chunk should start at line 2, got %d", secondChunk.FirstLine)
 		}
@@ -481,7 +505,7 @@ func TestDaemonTranscriptAppearsLate(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// Transcript should not exist yet, no init should have happened
-	if len(mock.initRequests) > 0 {
+	if len(mock.getInitRequests()) > 0 {
 		t.Error("Init should not happen before transcript exists")
 	}
 
@@ -496,10 +520,10 @@ func TestDaemonTranscriptAppearsLate(t *testing.T) {
 	<-errCh
 
 	// Now init should have happened
-	if len(mock.initRequests) == 0 {
+	if len(mock.getInitRequests()) == 0 {
 		t.Error("Expected init request after transcript appeared")
 	}
-	if len(mock.chunkRequests) == 0 {
+	if len(mock.getChunkRequests()) == 0 {
 		t.Error("Expected chunk upload after transcript appeared")
 	}
 }
@@ -540,7 +564,7 @@ func TestDaemonAgentFileNotExistYet(t *testing.T) {
 	// Should have synced transcript but no agent (file doesn't exist)
 	transcriptUploads := 0
 	agentUploads := 0
-	for _, req := range mock.chunkRequests {
+	for _, req := range mock.getChunkRequests() {
 		if req.FileType == "transcript" {
 			transcriptUploads++
 		} else if req.FileType == "agent" {
@@ -566,7 +590,7 @@ func TestDaemonAgentFileNotExistYet(t *testing.T) {
 
 	// Now should have agent upload
 	agentUploads = 0
-	for _, req := range mock.chunkRequests {
+	for _, req := range mock.getChunkRequests() {
 		if req.FileType == "agent" {
 			agentUploads++
 		}
@@ -615,12 +639,13 @@ func TestDaemonBackendHasMoreLines(t *testing.T) {
 
 	<-errCh
 
-	if len(mock.chunkRequests) == 0 {
+	chunkReqs := mock.getChunkRequests()
+	if len(chunkReqs) == 0 {
 		t.Fatal("Expected chunk request")
 	}
 
 	// Should start from line 6 (after backend's line 5)
-	chunkReq := mock.chunkRequests[0]
+	chunkReq := chunkReqs[0]
 	if chunkReq.FirstLine != 6 {
 		t.Errorf("Expected first_line 6, got %d", chunkReq.FirstLine)
 	}
@@ -661,13 +686,14 @@ func TestDaemonEmptyTranscript(t *testing.T) {
 	<-errCh
 
 	// Init should happen
-	if len(mock.initRequests) == 0 {
+	if len(mock.getInitRequests()) == 0 {
 		t.Error("Expected init request even for empty transcript")
 	}
 
 	// No chunks should be uploaded (nothing to sync)
-	if len(mock.chunkRequests) > 0 {
-		t.Errorf("Expected no chunk uploads for empty transcript, got %d", len(mock.chunkRequests))
+	chunkReqs := mock.getChunkRequests()
+	if len(chunkReqs) > 0 {
+		t.Errorf("Expected no chunk uploads for empty transcript, got %d", len(chunkReqs))
 	}
 }
 
@@ -699,7 +725,7 @@ func TestDaemonShutdownFinalSync(t *testing.T) {
 	// Wait for initial sync (happens immediately on start)
 	time.Sleep(100 * time.Millisecond)
 
-	initialChunks := len(mock.chunkRequests)
+	initialChunks := len(mock.getChunkRequests())
 
 	// Append content that won't be synced by interval (10s is too long)
 	f, _ := os.OpenFile(transcriptPath, os.O_APPEND|os.O_WRONLY, 0644)
@@ -715,9 +741,10 @@ func TestDaemonShutdownFinalSync(t *testing.T) {
 	<-errCh
 
 	// Should have more chunks after shutdown (final sync picked up line 2)
-	if len(mock.chunkRequests) <= initialChunks {
+	finalChunks := len(mock.getChunkRequests())
+	if finalChunks <= initialChunks {
 		t.Errorf("Expected final sync to upload new content, had %d chunks before, %d after",
-			initialChunks, len(mock.chunkRequests))
+			initialChunks, finalChunks)
 	}
 }
 
@@ -767,7 +794,7 @@ func TestDaemonMultipleAgentFiles(t *testing.T) {
 	// Count uploads by type
 	transcriptUploads := 0
 	agentFiles := make(map[string]bool)
-	for _, req := range mock.chunkRequests {
+	for _, req := range mock.getChunkRequests() {
 		if req.FileType == "transcript" {
 			transcriptUploads++
 		} else if req.FileType == "agent" {
@@ -821,7 +848,7 @@ func TestDaemonAgentAppearsMidSession(t *testing.T) {
 
 	// Verify no agent uploads yet
 	agentUploadsBefore := 0
-	for _, req := range mock.chunkRequests {
+	for _, req := range mock.getChunkRequests() {
 		if req.FileType == "agent" {
 			agentUploadsBefore++
 		}
@@ -847,7 +874,7 @@ func TestDaemonAgentAppearsMidSession(t *testing.T) {
 
 	// Now should have agent upload
 	agentUploadsAfter := 0
-	for _, req := range mock.chunkRequests {
+	for _, req := range mock.getChunkRequests() {
 		if req.FileType == "agent" && req.FileName == "agent-12345678.jsonl" {
 			agentUploadsAfter++
 		}
@@ -918,17 +945,19 @@ func TestDaemonConcurrentStartup(t *testing.T) {
 
 	// Key assertion: at least one successful init and chunk upload happened
 	// (we don't care which daemon "won", just that syncing worked)
-	if len(mock.initRequests) == 0 {
+	initReqs := mock.getInitRequests()
+	chunkReqs := mock.getChunkRequests()
+	if len(initReqs) == 0 {
 		t.Error("Expected at least one init request from concurrent daemons")
 	}
-	if len(mock.chunkRequests) == 0 {
+	if len(chunkReqs) == 0 {
 		t.Error("Expected at least one chunk upload from concurrent daemons")
 	}
 
 	// Verify no duplicate uploads of the same content (idempotency)
 	// Both daemons might upload, but the backend should handle dedup
 	t.Logf("Concurrent test: %d init requests, %d chunk requests",
-		len(mock.initRequests), len(mock.chunkRequests))
+		len(initReqs), len(chunkReqs))
 }
 
 // TestDaemonFileTruncation tests that daemon handles file truncation gracefully.
@@ -971,7 +1000,7 @@ func TestDaemonFileTruncation(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 
 	// Verify initial content was synced
-	initialChunks := len(mock.chunkRequests)
+	initialChunks := len(mock.getChunkRequests())
 	if initialChunks == 0 {
 		t.Fatal("Expected initial chunk upload")
 	}
@@ -1005,7 +1034,7 @@ func TestDaemonFileTruncation(t *testing.T) {
 	<-errCh
 
 	// Daemon should have continued running and completed gracefully
-	t.Logf("Truncation test: daemon handled truncation, total chunks=%d", len(mock.chunkRequests))
+	t.Logf("Truncation test: daemon handled truncation, total chunks=%d", len(mock.getChunkRequests()))
 }
 
 // TestDaemonHTTPErrors tests that daemon handles various HTTP errors gracefully.
@@ -1611,7 +1640,7 @@ func TestDaemonSIGTERMFinalSync(t *testing.T) {
 	// Wait for initial sync (happens immediately on first iteration)
 	time.Sleep(150 * time.Millisecond)
 
-	initialChunks := len(mock.chunkRequests)
+	initialChunks := len(mock.getChunkRequests())
 	if initialChunks == 0 {
 		t.Fatal("Expected initial chunk upload")
 	}
@@ -1646,7 +1675,8 @@ func TestDaemonSIGTERMFinalSync(t *testing.T) {
 	_ = proc // Silence unused warning
 
 	// Key assertion: final sync should have uploaded the new lines
-	finalChunks := len(mock.chunkRequests)
+	chunkReqs := mock.getChunkRequests()
+	finalChunks := len(chunkReqs)
 	if finalChunks <= initialChunks {
 		t.Errorf("Expected final sync to upload new content: had %d chunks before shutdown, %d after",
 			initialChunks, finalChunks)
@@ -1654,7 +1684,7 @@ func TestDaemonSIGTERMFinalSync(t *testing.T) {
 
 	// Verify the final chunk contains the new lines (2 and 3)
 	if finalChunks > initialChunks {
-		lastChunk := mock.chunkRequests[finalChunks-1]
+		lastChunk := chunkReqs[finalChunks-1]
 		if lastChunk.FirstLine != 2 {
 			t.Errorf("Final sync chunk should start at line 2, got %d", lastChunk.FirstLine)
 		}
@@ -1713,7 +1743,7 @@ func TestDaemonParentProcessExit(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 
 	// Verify daemon is running and syncing
-	if len(mock.initRequests) == 0 {
+	if len(mock.getInitRequests()) == 0 {
 		t.Fatal("Expected daemon to initialize before parent kill")
 	}
 
@@ -1733,7 +1763,7 @@ func TestDaemonParentProcessExit(t *testing.T) {
 	}
 
 	// Verify final sync occurred (shutdown should trigger it)
-	if len(mock.chunkRequests) == 0 {
+	if len(mock.getChunkRequests()) == 0 {
 		t.Error("Expected at least one chunk upload (initial or final sync)")
 	}
 }
