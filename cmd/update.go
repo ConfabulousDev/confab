@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -168,33 +170,36 @@ func parseVersion(v string) [3]int {
 	return parts
 }
 
-// getAssetName returns the expected asset name for the current platform
-func getAssetName() string {
-	return fmt.Sprintf("confab_%s_%s", runtime.GOOS, runtime.GOARCH)
+// findAssetURL finds the download URL for the current platform from a release.
+// GoReleaser produces assets named confab_<version>_<os>_<arch>.tar.gz,
+// so we match by the _<os>_<arch>.tar.gz suffix.
+func findAssetURL(release *githubRelease) (string, error) {
+	return findAssetURLForPlatform(release, runtime.GOOS, runtime.GOARCH)
 }
 
-// findAssetURL finds the download URL for the current platform from a release
-func findAssetURL(release *githubRelease) (string, error) {
-	expectedName := getAssetName()
+// findAssetURLForPlatform finds the download URL for the given OS/arch from a release.
+func findAssetURLForPlatform(release *githubRelease, goos, goarch string) (string, error) {
+	suffix := fmt.Sprintf("_%s_%s.tar.gz", goos, goarch)
 
 	for _, asset := range release.Assets {
-		if asset.Name == expectedName {
+		if strings.HasSuffix(asset.Name, suffix) {
 			return asset.BrowserDownloadURL, nil
 		}
 	}
 
-	return "", fmt.Errorf("no binary found for %s/%s (looked for %s)", runtime.GOOS, runtime.GOARCH, expectedName)
+	return "", fmt.Errorf("no asset found for %s/%s", goos, goarch)
 }
 
-// downloadBinary downloads a binary from the given URL to the specified path
-func downloadBinary(url, destPath string) error {
+// downloadAndExtract downloads a .tar.gz asset from the given URL,
+// extracts the "confab" binary from it, and writes it to destPath atomically.
+func downloadAndExtract(url, destPath string) error {
 	client := &http.Client{
 		Timeout: 120 * time.Second,
 	}
 
 	resp, err := client.Get(url)
 	if err != nil {
-		return fmt.Errorf("failed to download binary: %w", err)
+		return fmt.Errorf("failed to download archive: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -202,27 +207,61 @@ func downloadBinary(url, destPath string) error {
 		return fmt.Errorf("download failed with status %d", resp.StatusCode)
 	}
 
-	// Write to temp file first for atomic replacement
-	tmpPath := destPath + ".tmp"
-	tmpFile, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0755)
+	return extractConfabBinary(resp.Body, destPath)
+}
+
+// extractConfabBinary reads a gzipped tar archive from r, finds the "confab"
+// binary entry, and writes it to destPath atomically via a temp file.
+func extractConfabBinary(r io.Reader, destPath string) error {
+	gz, err := gzip.NewReader(r)
 	if err != nil {
-		return fmt.Errorf("failed to create temp file: %w", err)
+		return fmt.Errorf("failed to decompress archive: %w", err)
+	}
+	defer gz.Close()
+
+	tr := tar.NewReader(gz)
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("failed to read archive: %w", err)
+		}
+
+		// Match the binary by base name — GoReleaser places it at the archive root
+		if filepath.Base(hdr.Name) != "confab" {
+			continue
+		}
+
+		// Write to temp file first for atomic replacement
+		tmpPath := destPath + ".tmp"
+		tmpFile, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0755)
+		if err != nil {
+			return fmt.Errorf("failed to create temp file: %w", err)
+		}
+
+		_, copyErr := io.Copy(tmpFile, tr)
+		closeErr := tmpFile.Close()
+		if copyErr != nil {
+			os.Remove(tmpPath)
+			return fmt.Errorf("failed to write binary: %w", copyErr)
+		}
+		if closeErr != nil {
+			os.Remove(tmpPath)
+			return fmt.Errorf("failed to close temp file: %w", closeErr)
+		}
+
+		// Atomic rename
+		if err := os.Rename(tmpPath, destPath); err != nil {
+			os.Remove(tmpPath)
+			return fmt.Errorf("failed to install binary: %w", err)
+		}
+
+		return nil
 	}
 
-	_, err = io.Copy(tmpFile, resp.Body)
-	tmpFile.Close()
-	if err != nil {
-		os.Remove(tmpPath)
-		return fmt.Errorf("failed to write binary: %w", err)
-	}
-
-	// Atomic rename
-	if err := os.Rename(tmpPath, destPath); err != nil {
-		os.Remove(tmpPath)
-		return fmt.Errorf("failed to install binary: %w", err)
-	}
-
-	return nil
+	return fmt.Errorf("confab binary not found in archive")
 }
 
 // installLatestRelease downloads and installs the latest release
@@ -251,7 +290,7 @@ func installLatestRelease() error {
 	destPath := filepath.Join(binDir, "confab")
 
 	fmt.Printf("Downloading %s...\n", release.TagName)
-	if err := downloadBinary(assetURL, destPath); err != nil {
+	if err := downloadAndExtract(assetURL, destPath); err != nil {
 		return err
 	}
 
