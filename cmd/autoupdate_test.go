@@ -30,20 +30,9 @@ func TestIsAutoUpdateEnabled(t *testing.T) {
 	}
 }
 
-func TestShouldCheckForUpdateRespectsConfig(t *testing.T) {
-	// Save original version and restore after test
-	origVersion := version
-	defer func() { version = origVersion }()
-	version = "1.0.0"
-
-	// Use a temp config file
-	tmpDir := t.TempDir()
-	configPath := filepath.Join(tmpDir, "config.json")
-	t.Setenv("CONFAB_CONFIG_PATH", configPath)
-
-	// With auto_update disabled, shouldCheckForUpdate returns false
-	disabled := false
-	cfg := &config.UploadConfig{AutoUpdate: &disabled}
+// writeTestConfig marshals cfg to JSON and writes it to configPath.
+func writeTestConfig(t *testing.T, configPath string, cfg *config.UploadConfig) {
+	t.Helper()
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		t.Fatalf("marshal config: %v", err)
@@ -51,6 +40,27 @@ func TestShouldCheckForUpdateRespectsConfig(t *testing.T) {
 	if err := os.WriteFile(configPath, data, 0600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
+}
+
+// setupUpdateTest sets version to a non-dev value and creates a temp config path.
+// Returns the config path. Restores the original version on cleanup.
+func setupUpdateTest(t *testing.T) string {
+	t.Helper()
+	origVersion := version
+	t.Cleanup(func() { version = origVersion })
+	version = "1.0.0"
+
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.json")
+	t.Setenv("CONFAB_CONFIG_PATH", configPath)
+	return configPath
+}
+
+func TestShouldCheckForUpdateRespectsConfig(t *testing.T) {
+	configPath := setupUpdateTest(t)
+
+	// With auto_update disabled, shouldCheckForUpdate returns false
+	writeTestConfig(t, configPath, &config.UploadConfig{AutoUpdate: boolPtr(false)})
 
 	if shouldCheckForUpdate() {
 		t.Error("shouldCheckForUpdate() = true, want false when auto_update is disabled")
@@ -58,15 +68,7 @@ func TestShouldCheckForUpdateRespectsConfig(t *testing.T) {
 
 	// With auto_update enabled, shouldCheckForUpdate returns true
 	// (no last-check file exists, so time check passes)
-	enabled := true
-	cfg.AutoUpdate = &enabled
-	data, err = json.MarshalIndent(cfg, "", "  ")
-	if err != nil {
-		t.Fatalf("marshal config: %v", err)
-	}
-	if err := os.WriteFile(configPath, data, 0600); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
+	writeTestConfig(t, configPath, &config.UploadConfig{AutoUpdate: boolPtr(true)})
 
 	if !shouldCheckForUpdate() {
 		t.Error("shouldCheckForUpdate() = false, want true when auto_update is enabled")
@@ -74,23 +76,10 @@ func TestShouldCheckForUpdateRespectsConfig(t *testing.T) {
 }
 
 func TestShouldCheckForUpdateDefaultEnabled(t *testing.T) {
-	origVersion := version
-	defer func() { version = origVersion }()
-	version = "1.0.0"
+	configPath := setupUpdateTest(t)
 
-	// Use a temp config file with no auto_update field (nil)
-	tmpDir := t.TempDir()
-	configPath := filepath.Join(tmpDir, "config.json")
-	t.Setenv("CONFAB_CONFIG_PATH", configPath)
-
-	cfg := &config.UploadConfig{}
-	data, err := json.MarshalIndent(cfg, "", "  ")
-	if err != nil {
-		t.Fatalf("marshal config: %v", err)
-	}
-	if err := os.WriteFile(configPath, data, 0600); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
+	// With no auto_update field (nil), defaults to enabled
+	writeTestConfig(t, configPath, &config.UploadConfig{})
 
 	if !shouldCheckForUpdate() {
 		t.Error("shouldCheckForUpdate() = false, want true when auto_update is nil (default)")

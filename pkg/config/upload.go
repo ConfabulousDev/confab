@@ -36,10 +36,7 @@ type RedactionConfig struct {
 // ShouldUseDefaultPatterns returns true if default patterns should be used.
 // Defaults to true if UseDefaultPatterns is nil.
 func (c *RedactionConfig) ShouldUseDefaultPatterns() bool {
-	if c.UseDefaultPatterns == nil {
-		return true
-	}
-	return *c.UseDefaultPatterns
+	return c.UseDefaultPatterns == nil || *c.UseDefaultPatterns
 }
 
 // RedactionPattern represents a single redaction pattern

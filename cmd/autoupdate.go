@@ -52,35 +52,29 @@ func runAutoupdateStatus(cmd *cobra.Command, args []string) error {
 }
 
 func runAutoupdateEnable(cmd *cobra.Command, args []string) error {
+	return setAutoUpdate(true)
+}
+
+func runAutoupdateDisable(cmd *cobra.Command, args []string) error {
+	return setAutoUpdate(false)
+}
+
+func setAutoUpdate(enabled bool) error {
 	cfg, err := config.GetUploadConfig()
 	if err != nil {
 		return fmt.Errorf("failed to read config: %w", err)
 	}
 
-	enabled := true
 	cfg.AutoUpdate = &enabled
 
 	if err := config.SaveUploadConfig(cfg); err != nil {
 		return fmt.Errorf("failed to save config: %w", err)
 	}
 
-	fmt.Println("Auto-update enabled")
-	return nil
-}
-
-func runAutoupdateDisable(cmd *cobra.Command, args []string) error {
-	cfg, err := config.GetUploadConfig()
-	if err != nil {
-		return fmt.Errorf("failed to read config: %w", err)
+	if enabled {
+		fmt.Println("Auto-update enabled")
+	} else {
+		fmt.Println("Auto-update disabled")
 	}
-
-	disabled := false
-	cfg.AutoUpdate = &disabled
-
-	if err := config.SaveUploadConfig(cfg); err != nil {
-		return fmt.Errorf("failed to save config: %w", err)
-	}
-
-	fmt.Println("Auto-update disabled")
 	return nil
 }

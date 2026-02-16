@@ -49,22 +49,15 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to check for updates: %w", err)
 	}
 
-	current := version
-	latestClean := strings.TrimPrefix(latest, "v")
-	currentClean := strings.TrimPrefix(current, "v")
+	logger.Info("Current version: %s, Latest version: %s", version, latest)
 
-	logger.Info("Current version: %s, Latest version: %s", current, latest)
-
-	// Check if update is needed
-	needsUpdate := isNewerVersion(currentClean, latestClean)
-
-	if !needsUpdate {
-		fmt.Printf("confab is up to date (v%s)\n", latestClean)
+	if !isNewerVersion(cleanVersion(version), cleanVersion(latest)) {
+		fmt.Printf("confab is up to date (v%s)\n", cleanVersion(latest))
 		return nil
 	}
 
 	// Show version info
-	fmt.Printf("Current version: %s\n", current)
+	fmt.Printf("Current version: %s\n", version)
 	fmt.Printf("Latest version:  %s\n", latest)
 	fmt.Println()
 
@@ -77,7 +70,7 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 	fmt.Println("Updating confab...")
 	fmt.Println()
 
-	if err := installLatestRelease(); err != nil {
+	if _, err := installLatestRelease(); err != nil {
 		logger.Error("Failed to install update: %v", err)
 		return fmt.Errorf("update failed: %w", err)
 	}
@@ -132,6 +125,11 @@ func fetchLatestVersion() (string, error) {
 		return "", err
 	}
 	return release.TagName, nil
+}
+
+// cleanVersion strips the "v" prefix from a version string.
+func cleanVersion(v string) string {
+	return strings.TrimPrefix(v, "v")
 }
 
 // isNewerVersion returns true if latest is newer than current
@@ -265,38 +263,39 @@ func extractConfabBinary(r io.Reader, destPath string) error {
 	return fmt.Errorf("confab binary not found in archive")
 }
 
-// installLatestRelease downloads and installs the latest release
-func installLatestRelease() error {
+// installLatestRelease downloads and installs the latest release.
+// Returns the path to the installed binary.
+func installLatestRelease() (string, error) {
 	release, err := fetchLatestRelease()
 	if err != nil {
-		return fmt.Errorf("failed to fetch release info: %w", err)
+		return "", fmt.Errorf("failed to fetch release info: %w", err)
 	}
 
 	assetURL, err := findAssetURL(release)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	// Install to ~/.local/bin/confab
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		return fmt.Errorf("failed to get home directory: %w", err)
+		return "", fmt.Errorf("failed to get home directory: %w", err)
 	}
 
 	binDir := filepath.Join(homeDir, ".local", "bin")
 	if err := os.MkdirAll(binDir, 0755); err != nil {
-		return fmt.Errorf("failed to create bin directory: %w", err)
+		return "", fmt.Errorf("failed to create bin directory: %w", err)
 	}
 
 	destPath := filepath.Join(binDir, "confab")
 
 	fmt.Printf("Downloading %s...\n", release.TagName)
 	if err := downloadAndExtract(assetURL, destPath); err != nil {
-		return err
+		return "", err
 	}
 
 	fmt.Printf("Installed to %s\n", destPath)
-	return nil
+	return destPath, nil
 }
 
 func init() {
@@ -318,21 +317,17 @@ func AutoUpdateIfNeeded() {
 		return
 	}
 
-	current := version
-	latestClean := strings.TrimPrefix(latest, "v")
-	currentClean := strings.TrimPrefix(current, "v")
-
-	if !isNewerVersion(currentClean, latestClean) {
-		logger.Debug("No update needed (current=%s, latest=%s)", current, latest)
+	if !isNewerVersion(cleanVersion(version), cleanVersion(latest)) {
+		logger.Debug("No update needed (current=%s, latest=%s)", version, latest)
 		writeLastCheckTime()
 		return
 	}
 
-	logger.Info("Update available: %s -> %s", current, latest)
-	fmt.Fprintf(os.Stderr, "Updating confab (%s -> %s)...\n", current, latest)
+	logger.Info("Update available: %s -> %s", version, latest)
+	fmt.Fprintf(os.Stderr, "Updating confab (%s -> %s)...\n", version, latest)
 
 	// Download and install new version
-	newBinary, err := downloadNewBinary()
+	newBinary, err := installLatestRelease()
 	if err != nil {
 		logger.Error("Auto-update failed: %v", err)
 		fmt.Fprintf(os.Stderr, "Auto-update failed: %v\n", err)
@@ -413,33 +408,10 @@ func NotifyIfUpdateAvailable() {
 
 	writeLastCheckTime()
 
-	current := version
-	latestClean := strings.TrimPrefix(latest, "v")
-	currentClean := strings.TrimPrefix(current, "v")
-
-	if !isNewerVersion(currentClean, latestClean) {
+	if !isNewerVersion(cleanVersion(version), cleanVersion(latest)) {
 		return
 	}
 
 	fmt.Fprintln(os.Stderr)
-	fmt.Fprintf(os.Stderr, "Update available: %s -> %s (run 'confab update' to install)\n", current, latest)
-}
-
-// downloadNewBinary downloads the latest release and returns the path to the new binary
-func downloadNewBinary() (string, error) {
-	if err := installLatestRelease(); err != nil {
-		return "", err
-	}
-
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-
-	newBinary := filepath.Join(homeDir, ".local", "bin", "confab")
-	if _, err := os.Stat(newBinary); err != nil {
-		return "", fmt.Errorf("new binary not found at %s", newBinary)
-	}
-
-	return newBinary, nil
+	fmt.Fprintf(os.Stderr, "Update available: %s -> %s (run 'confab update' to install)\n", version, latest)
 }
