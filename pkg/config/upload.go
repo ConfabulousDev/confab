@@ -15,8 +15,15 @@ import (
 type UploadConfig struct {
 	BackendURL string           `json:"backend_url"`
 	APIKey     string           `json:"api_key"`
-	LogLevel   string           `json:"log_level,omitempty"` // debug, info, warn, error (default: info)
+	LogLevel   string           `json:"log_level,omitempty"`  // debug, info, warn, error (default: info)
+	AutoUpdate *bool            `json:"auto_update,omitempty"` // nil = enabled (default), false = disabled
 	Redaction  *RedactionConfig `json:"redaction,omitempty"`
+}
+
+// IsAutoUpdateEnabled returns whether auto-update is enabled.
+// Defaults to true when AutoUpdate is nil (not set in config).
+func (c *UploadConfig) IsAutoUpdateEnabled() bool {
+	return c.AutoUpdate == nil || *c.AutoUpdate
 }
 
 // RedactionConfig holds redaction settings

@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ConfabulousDev/confab/pkg/config"
 	"github.com/ConfabulousDev/confab/pkg/logger"
 	"github.com/spf13/cobra"
 )
@@ -354,6 +355,12 @@ func AutoUpdateIfNeeded() {
 func shouldCheckForUpdate() bool {
 	// Don't auto-update dev builds
 	if version == "dev" {
+		return false
+	}
+
+	// Respect user's auto-update preference
+	cfg, err := config.GetUploadConfig()
+	if err == nil && !cfg.IsAutoUpdateEnabled() {
 		return false
 	}
 
