@@ -1,6 +1,6 @@
 # Confabulous.dev CLI: `confab`
 
-Understand your Claude Code sessions. Sync transcripts to https://confabulous.dev for exploration, sharing and analysis.
+Understand your Claude Code sessions. Sync transcripts to a backend (e.g. https://confabulous.dev) for exploration, sharing and analysis.
 
 The `confab` CLI hooks into Claude Code session lifecycle to sync data in real-time.
 
@@ -13,10 +13,10 @@ Supported on macOS and Linux.
 ```bash
 curl -fsSL https://confabulous.dev/install | bash
 # Follow the instructions to add confab to your PATH
-confab setup
+confab setup --backend-url https://confabulous.dev
 ```
 
-After setup, your Claude Code sessions will automatically sync to https://confabulous.dev.
+After setup, your Claude Code sessions will automatically sync to the configured backend.
 
 ### Building from Source
 
@@ -26,7 +26,7 @@ cd confab
 make build
 ./confab install
 # Follow the instructions to add confab to your PATH
-confab setup
+confab setup --backend-url https://confabulous.dev
 ```
 
 ## Usage
@@ -35,10 +35,10 @@ confab setup
 
 ```bash
 # Login and install hooks
-confab setup
+confab setup --backend-url https://confabulous.dev
 
 # Or login separately
-confab login
+confab login --backend-url https://confabulous.dev
 
 # Check status
 confab status

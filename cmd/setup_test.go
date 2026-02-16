@@ -384,29 +384,15 @@ func TestRunSetup_NeedsLogin(t *testing.T) {
 	verifyHooksInstalled(t)
 }
 
-func TestRunSetup_DefaultBackendURL(t *testing.T) {
-	// Save and restore the original doDeviceLoginFunc
-	origDoDeviceLogin := doDeviceLoginFunc
-	defer func() { doDeviceLoginFunc = origDoDeviceLogin }()
-
-	setupSetupTestEnv(t, "")
-
-	var loginBackendURL string
-	doDeviceLoginFunc = func(backendURL, keyName string) error {
-		loginBackendURL = backendURL
-		return nil // Return error to stop before hooks
+func TestSetupCmd_BackendURLRequired(t *testing.T) {
+	// Verify that --backend-url is marked as required
+	flag := setupCmd.Flags().Lookup("backend-url")
+	if flag == nil {
+		t.Fatal("expected backend-url flag to exist")
 	}
-
-	cmd := &cobra.Command{}
-	cmd.Flags().String("backend-url", "", "") // Empty = use default
-	cmd.Flags().String("api-key", "", "")
-
-	// This will fail because login returns error, but we can check the URL
-	runSetup(cmd, []string{})
-
-	expectedURL := "https://confabulous.dev"
-	if loginBackendURL != expectedURL {
-		t.Errorf("expected default backend URL %s, got %s", expectedURL, loginBackendURL)
+	annotations := flag.Annotations
+	if _, ok := annotations[cobra.BashCompOneRequiredFlag]; !ok {
+		t.Error("expected backend-url flag to be marked as required")
 	}
 }
 
@@ -547,13 +533,12 @@ func TestRunSetup_WithAPIKeyFlag_InvalidKey(t *testing.T) {
 	}
 }
 
-func TestRunSetup_WithAPIKeyFlag_DefaultBackendURL(t *testing.T) {
+func TestRunSetup_WithAPIKeyFlag_SavesBackendURL(t *testing.T) {
 	// Save and restore the original doDeviceLoginFunc
 	origDoDeviceLogin := doDeviceLoginFunc
 	defer func() { doDeviceLoginFunc = origDoDeviceLogin }()
 
-	// This test can't actually validate since it would hit production,
-	// but we can verify the URL is set correctly by checking saved config
+	// Verify the backend URL from the flag is saved to config
 	backend := &setupTestBackend{validateValid: true}
 	server := httptest.NewServer(backend)
 	defer server.Close()

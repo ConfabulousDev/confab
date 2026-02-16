@@ -636,3 +636,15 @@ func TestLoginWithAPIKey_NoExistingConfig(t *testing.T) {
 		t.Error("redaction should not be set by login alone")
 	}
 }
+
+func TestLoginCmd_BackendURLRequired(t *testing.T) {
+	// Verify that --backend-url is marked as required
+	flag := loginCmd.Flags().Lookup("backend-url")
+	if flag == nil {
+		t.Fatal("expected backend-url flag to exist")
+	}
+	annotations := flag.Annotations
+	if _, ok := annotations[cobra.BashCompOneRequiredFlag]; !ok {
+		t.Error("expected backend-url flag to be marked as required")
+	}
+}

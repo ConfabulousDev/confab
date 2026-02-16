@@ -36,11 +36,6 @@ func runSetup(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to get api-key flag: %w", err)
 	}
 
-	// Apply default backend URL early so we can compare against saved config
-	if backendURL == "" {
-		backendURL = "https://confabulous.dev"
-	}
-
 	// Check if API key was provided directly
 	needsLogin := true
 	if apiKey != "" {
@@ -132,6 +127,7 @@ func runSetup(cmd *cobra.Command, args []string) error {
 func init() {
 	rootCmd.AddCommand(setupCmd)
 
-	setupCmd.Flags().String("backend-url", "", "Backend API URL (default: https://confabulous.dev)")
+	setupCmd.Flags().String("backend-url", "", "Backend API URL (required)")
+	setupCmd.MarkFlagRequired("backend-url")
 	setupCmd.Flags().String("api-key", "", "API key (bypasses device auth flow)")
 }
