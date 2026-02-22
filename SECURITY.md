@@ -37,7 +37,7 @@ We take security vulnerabilities seriously. Please report them through GitHub Se
 - The sync daemon
 
 **Out of scope:**
-- Backend service (confabulous.dev) - report separately to backend team
+- Backend service (confab-web) - report via GitHub security advisories
 - Third-party dependencies - report to upstream maintainers
 
 ## Recognition
