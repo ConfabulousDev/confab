@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 280">
+  <defs>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#000" flood-opacity="0.08"/>
+    </filter>
+    <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0 0, 8 3, 0 6" fill="#94a3b8"/>
+    </marker>
+    <marker id="arrowGreen" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0 0, 8 3, 0 6" fill="#6ee7b7"/>
+    </marker>
+  </defs>
+
+  <!-- Background -->
+  <rect width="600" height="280" rx="8" fill="#f8fafc"/>
+
+  <!-- LOCAL label -->
+  <rect x="28" y="16" width="56" height="22" rx="4" fill="#f1f5f9"/>
+  <text x="56" y="31" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" font-weight="600" fill="#64748b">LOCAL</text>
+
+  <!-- Claude Code Session box -->
+  <rect x="40" y="52" width="220" height="52" rx="8" fill="#f5c9b8" filter="url(#shadow)"/>
+  <text x="150" y="75" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="16" font-weight="600" fill="#1a1a1a">Claude Code</text>
+  <text x="150" y="94" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="13" fill="#4a4a4a">Session</text>
+
+  <!-- Arrow: Claude Code → confab sidecar -->
+  <path d="M 150 104 L 150 148" stroke="#94a3b8" stroke-width="1.5" fill="none" marker-end="url(#arrow)"/>
+  <text x="170" y="132" font-family="system-ui, -apple-system, sans-serif" font-size="12" font-weight="500" fill="#94a3b8">hooks</text>
+
+  <!-- confab sidecar box -->
+  <rect x="40" y="150" width="220" height="52" rx="8" fill="#ffffff" filter="url(#shadow)" stroke="#e2e8f0" stroke-width="1"/>
+  <text x="150" y="173" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="16" font-weight="600" fill="#1a1a1a">confab</text>
+  <text x="150" y="192" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="13" fill="#4a4a4a">session sidecar</text>
+
+  <!-- YOUR SERVER label -->
+  <rect x="350" y="100" width="220" height="120" rx="10" fill="none" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="6 4"/>
+  <text x="460" y="210" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="10" font-weight="600" fill="#94a3b8" letter-spacing="1">YOUR SERVER</text>
+
+  <!-- Backend API box -->
+  <rect x="375" y="120" width="170" height="52" rx="8" fill="#ffffff" filter="url(#shadow)" stroke="#e2e8f0" stroke-width="1"/>
+  <text x="460" y="143" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="16" font-weight="600" fill="#1a1a1a">Backend API</text>
+  <text x="460" y="162" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="13" fill="#4a4a4a">+ Web UI</text>
+
+  <!-- Arrow: confab sidecar → Backend API (sync) -->
+  <path d="M 260 176 L 373 152" stroke="#6ee7b7" stroke-width="2" fill="none" marker-end="url(#arrowGreen)" stroke-dasharray="6 4"/>
+  <text x="305" y="152" font-family="system-ui, -apple-system, sans-serif" font-size="14" font-weight="600" fill="#10b981">sync</text>
+</svg>
