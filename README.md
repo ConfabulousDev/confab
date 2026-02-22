@@ -4,6 +4,8 @@ Sync and explore your Claude Code sessions. Connect `confab` to your Confab back
 
 Works seamlessly — your `claude` workflow stays exactly the same.
 
+![How Confab works](docs/how-it-works.svg)
+
 ## Install
 
 Supported on macOS and Linux.
