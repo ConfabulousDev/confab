@@ -1,51 +1,42 @@
-# Confabulous.dev CLI: `confab`
+# confab
 
-Understand your Claude Code sessions. Sync transcripts to a backend (e.g. https://confabulous.dev) for exploration, sharing and analysis.
+Sync and explore your Claude Code sessions. Connect `confab` to your Confab backend to capture transcripts in real-time for exploration, sharing, and analysis. Or use our hosted service at [confabulous.dev](https://confabulous.dev).
 
-The `confab` CLI hooks into Claude Code session lifecycle to sync data in real-time.
+Works seamlessly — your `claude` workflow stays exactly the same.
 
-Works seamlessly - your `claude` workflow stays exactly the same.
+## Install
 
-## Installation
-
-Supported on macOS and Linux.
+Supported on macOS and Linux. Replace the URL below with the one provided by your team.
 
 ```bash
-curl -fsSL https://confabulous.dev/install | bash
+curl -fsSL https://confab.yourcompany.com/install | bash
 # Follow the instructions to add confab to your PATH
-confab setup --backend-url https://confabulous.dev
+confab setup --backend-url https://confab.yourcompany.com
 ```
 
 After setup, your Claude Code sessions will automatically sync to the configured backend.
 
-### Building from Source
+## Connect to Your Backend
 
 ```bash
-git clone https://github.com/ConfabulousDev/confab.git
-cd confab
-make build
-./confab install
-# Follow the instructions to add confab to your PATH
-confab setup --backend-url https://confabulous.dev
-```
+# Initial setup — configures backend, authenticates, and installs hooks
+confab setup --backend-url https://confab.yourcompany.com
 
-## Usage
+# Login separately (if already set up)
+confab login --backend-url https://confab.yourcompany.com
 
-### Authentication
-
-```bash
-# Login and install hooks
-confab setup --backend-url https://confabulous.dev
-
-# Or login separately
-confab login --backend-url https://confabulous.dev
-
-# Check status
+# Check connection and hook status
 confab status
 
 # Logout
 confab logout
 ```
+
+## Self-Hosting the Backend
+
+To deploy your own Confab backend, see [confab-web](https://github.com/ConfabulousDev/confab-web).
+
+## Usage
 
 ### Sync Mode (Default)
 
@@ -91,41 +82,9 @@ confab save abc123de f9e8d7c6
 
 Sensitive data is automatically redacted before uploading. Redaction is enabled by default during `confab setup`.
 
-**Built-in patterns** detect common secrets without any configuration:
-- API keys (Anthropic, OpenAI, AWS, GitHub, Google, Stripe, Slack, etc.)
-- Private keys (RSA, EC, OpenSSH, PKCS#8)
-- JWT tokens
-- Database connection string passwords (PostgreSQL, MySQL, MongoDB, Redis)
-- Sensitive field names (`password`, `secret`, `token`, `api_key`, etc.)
+Built-in patterns detect common secrets (API keys, private keys, JWT tokens, database passwords, and more) without any configuration.
 
-To add custom patterns, edit `~/.confab/config.json`:
-
-```json
-{
-  "redaction": {
-    "enabled": true,
-    "use_default_patterns": true,
-    "patterns": [
-      {"name": "My Custom Key", "pattern": "mykey-[A-Za-z0-9]+", "type": "api_key"}
-    ]
-  }
-}
-```
-
-Custom patterns are added alongside the defaults. Set `use_default_patterns` to `false` to use only your custom patterns.
-
-Pattern options:
-- `pattern`: Regex to match in values
-- `field_pattern`: Regex to match JSON field names (redacts the field's value)
-- `type`: Label for the redaction marker (e.g., `[REDACTED:API_KEY]`)
-- `capture_group`: Redact only this capture group (for partial redaction)
-
-Test your patterns against a file:
-
-```bash
-confab redaction-test transcript.jsonl
-```
-
+See [Redaction](REDACTION.md) for configuration details.
 
 ## Configuration
 
@@ -147,6 +106,17 @@ confab redaction-test transcript.jsonl
 ```bash
 make build
 go test ./...
+```
+
+### Building from Source
+
+```bash
+git clone https://github.com/ConfabulousDev/confab.git
+cd confab
+make build
+./confab install
+# Follow the instructions to add confab to your PATH
+confab setup --backend-url https://confab.yourcompany.com
 ```
 
 ## License
