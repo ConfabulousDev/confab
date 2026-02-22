@@ -6,10 +6,10 @@ Works seamlessly — your `claude` workflow stays exactly the same.
 
 ## Install
 
-Supported on macOS and Linux. Replace the URL below with the one provided by your team.
+Supported on macOS and Linux.
 
 ```bash
-curl -fsSL https://confab.yourcompany.com/install | bash
+curl -fsSL https://raw.githubusercontent.com/ConfabulousDev/confab/main/install.sh | bash
 # Follow the instructions to add confab to your PATH
 confab setup --backend-url https://confab.yourcompany.com
 ```
