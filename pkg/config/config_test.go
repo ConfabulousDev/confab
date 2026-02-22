@@ -74,7 +74,7 @@ func TestValidateBackendURL(t *testing.T) {
 	}{
 		{
 			name:    "valid https URL",
-			url:     "https://confabulous.dev",
+			url:     "https://example.com",
 			wantErr: false,
 		},
 		{
@@ -89,12 +89,12 @@ func TestValidateBackendURL(t *testing.T) {
 		},
 		{
 			name:    "missing scheme",
-			url:     "confabulous.dev",
+			url:     "example.com",
 			wantErr: true,
 		},
 		{
 			name:    "invalid scheme",
-			url:     "ftp://confabulous.dev",
+			url:     "ftp://example.com",
 			wantErr: true,
 		},
 		{

@@ -1,6 +1,6 @@
 # confab
 
-Sync and explore your Claude Code sessions. Connect `confab` to your Confab backend to capture transcripts in real-time for exploration, sharing, and analysis. Or use our hosted service at [confabulous.dev](https://confabulous.dev).
+Sync and explore your Claude Code sessions. Connect `confab` to your Confab backend to capture transcripts in real-time for exploration, sharing, and analysis.
 
 Works seamlessly — your `claude` workflow stays exactly the same.
 

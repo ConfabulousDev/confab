@@ -226,8 +226,8 @@ func TestFormatSessionURL(t *testing.T) {
 }
 
 func TestFormatTrailerLine(t *testing.T) {
-	got := formatTrailerLine("https://confabulous.dev/sessions/abc123")
-	want := "Confab-Link: https://confabulous.dev/sessions/abc123"
+	got := formatTrailerLine("https://example.com/sessions/abc123")
+	want := "Confab-Link: https://example.com/sessions/abc123"
 	if got != want {
 		t.Errorf("formatTrailerLine() = %q, want %q", got, want)
 	}
@@ -533,8 +533,8 @@ func TestPositionBasedPrecedence(t *testing.T) {
 }
 
 func TestFormatPRLink(t *testing.T) {
-	got := formatPRLink("https://confabulous.dev/sessions/abc123")
-	want := "📝 [Confab link](https://confabulous.dev/sessions/abc123)"
+	got := formatPRLink("https://example.com/sessions/abc123")
+	want := "📝 [Confab link](https://example.com/sessions/abc123)"
 	if got != want {
 		t.Errorf("formatPRLink() = %q, want %q", got, want)
 	}
