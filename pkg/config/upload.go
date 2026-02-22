@@ -11,7 +11,7 @@ import (
 	"github.com/ConfabulousDev/confab/pkg/logger"
 )
 
-// UploadConfig holds cloud upload configuration
+// UploadConfig holds backend upload configuration
 type UploadConfig struct {
 	BackendURL string           `json:"backend_url"`
 	APIKey     string           `json:"api_key"`

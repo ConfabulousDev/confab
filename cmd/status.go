@@ -13,7 +13,7 @@ import (
 var statusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show confab status",
-	Long:  `Displays hook installation status and cloud authentication status.`,
+	Long:  `Displays hook installation status and backend authentication status.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		defer NotifyIfUpdateAvailable()
 
@@ -82,13 +82,13 @@ var statusCmd = &cobra.Command{
 
 		fmt.Println()
 
-		// Check cloud sync status
+		// Check backend sync status
 		cfg, err := config.GetUploadConfig()
 		if err != nil {
-			logger.Error("Failed to get cloud config: %v", err)
-			fmt.Println("Cloud Sync: ✗ Configuration error")
+			logger.Error("Failed to get backend config: %v", err)
+			fmt.Println("Backend Sync: ✗ Configuration error")
 		} else {
-			fmt.Println("Cloud Sync:")
+			fmt.Println("Backend Sync:")
 			if cfg.APIKey != "" {
 				fmt.Printf("  Backend: %s\n", cfg.BackendURL)
 

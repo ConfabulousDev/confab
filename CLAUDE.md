@@ -14,7 +14,7 @@ go test -run TestName ./pkg/daemon/...  # Run a single test
 
 ## Architecture Overview
 
-Confab is a CLI tool that captures Claude Code session transcripts and uploads them to a cloud backend. It operates in two modes:
+Confab is a CLI tool that captures Claude Code session transcripts and uploads them to a backend. It operates in two modes:
 
 ### Sync Mode (Primary)
 - **Daemon-based incremental sync**: When a Claude Code session starts, the `SessionStart` hook spawns a background daemon (`confab sync start`)

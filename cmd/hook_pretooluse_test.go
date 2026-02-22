@@ -159,12 +159,12 @@ func TestContainsSessionURL(t *testing.T) {
 	}{
 		{
 			name:    "has session URL in commit",
-			command: `git commit -m "Fix bug\n\nConfabulous-Link: ` + sessionURL + `"`,
+			command: `git commit -m "Fix bug\n\nConfab-Link: ` + sessionURL + `"`,
 			want:    true,
 		},
 		{
 			name:    "has session URL in PR",
-			command: `gh pr create --title "Fix" --body "📝 [Confabulous link](` + sessionURL + `)"`,
+			command: `gh pr create --title "Fix" --body "📝 [Confab link](` + sessionURL + `)"`,
 			want:    true,
 		},
 		{
@@ -174,12 +174,12 @@ func TestContainsSessionURL(t *testing.T) {
 		},
 		{
 			name:    "wrong session ID",
-			command: `git commit -m "Fix bug\n\nConfabulous-Link: ` + testBackendURL + `/sessions/xyz789"`,
+			command: `git commit -m "Fix bug\n\nConfab-Link: ` + testBackendURL + `/sessions/xyz789"`,
 			want:    false,
 		},
 		{
 			name:    "URL in heredoc",
-			command: "git commit -m \"$(cat <<'EOF'\nFix bug\n\nConfabulous-Link: " + sessionURL + "\nEOF\n)\"",
+			command: "git commit -m \"$(cat <<'EOF'\nFix bug\n\nConfab-Link: " + sessionURL + "\nEOF\n)\"",
 			want:    true,
 		},
 	}
@@ -227,7 +227,7 @@ func TestFormatSessionURL(t *testing.T) {
 
 func TestFormatTrailerLine(t *testing.T) {
 	got := formatTrailerLine("https://confabulous.dev/sessions/abc123")
-	want := "Confabulous-Link: https://confabulous.dev/sessions/abc123"
+	want := "Confab-Link: https://confabulous.dev/sessions/abc123"
 	if got != want {
 		t.Errorf("formatTrailerLine() = %q, want %q", got, want)
 	}
@@ -315,7 +315,7 @@ func TestHandlePreToolUse_GitCommitWithoutTrailer(t *testing.T) {
 	if response.HookSpecificOutput.PermissionDecision != "deny" {
 		t.Errorf("Expected permissionDecision 'deny', got %q", response.HookSpecificOutput.PermissionDecision)
 	}
-	if !strings.Contains(response.HookSpecificOutput.PermissionDecisionReason, "Confabulous-Link:") {
+	if !strings.Contains(response.HookSpecificOutput.PermissionDecisionReason, "Confab-Link:") {
 		t.Errorf("Expected reason to contain trailer instruction, got %q", response.HookSpecificOutput.PermissionDecisionReason)
 	}
 	// Verify the URL uses the Confab session ID, not Claude session ID
@@ -342,7 +342,7 @@ func TestHandlePreToolUse_GitCommitWithTrailer(t *testing.T) {
 		HookEventName: "PreToolUse",
 		ToolName:      config.ToolNameBash,
 		ToolInput: map[string]any{
-			"command": "git commit -m \"Fix bug\n\nConfabulous-Link: " + sessionURL + "\"",
+			"command": "git commit -m \"Fix bug\n\nConfab-Link: " + sessionURL + "\"",
 		},
 	}
 
@@ -534,7 +534,7 @@ func TestPositionBasedPrecedence(t *testing.T) {
 
 func TestFormatPRLink(t *testing.T) {
 	got := formatPRLink("https://confabulous.dev/sessions/abc123")
-	want := "📝 [Confabulous link](https://confabulous.dev/sessions/abc123)"
+	want := "📝 [Confab link](https://confabulous.dev/sessions/abc123)"
 	if got != want {
 		t.Errorf("formatPRLink() = %q, want %q", got, want)
 	}
@@ -576,7 +576,7 @@ func TestHandlePreToolUse_PRCreateWithoutLink(t *testing.T) {
 	if response.HookSpecificOutput.PermissionDecision != "deny" {
 		t.Errorf("Expected permissionDecision 'deny', got %q", response.HookSpecificOutput.PermissionDecision)
 	}
-	if !strings.Contains(response.HookSpecificOutput.PermissionDecisionReason, "Confabulous link") {
+	if !strings.Contains(response.HookSpecificOutput.PermissionDecisionReason, "Confab link") {
 		t.Errorf("Expected reason to contain PR link instruction, got %q", response.HookSpecificOutput.PermissionDecisionReason)
 	}
 	// Verify the URL uses the Confab session ID
@@ -603,7 +603,7 @@ func TestHandlePreToolUse_PRCreateWithLink(t *testing.T) {
 		HookEventName: "PreToolUse",
 		ToolName:      config.ToolNameBash,
 		ToolInput: map[string]any{
-			"command": `gh pr create --title "Fix bug" --body "Summary\n\n📝 [Confabulous link](` + sessionURL + `)"`,
+			"command": `gh pr create --title "Fix bug" --body "Summary\n\n📝 [Confab link](` + sessionURL + `)"`,
 		},
 	}
 
@@ -699,7 +699,7 @@ func TestHandlePreToolUse_MCPGitHubPRWithoutLink(t *testing.T) {
 	if response.HookSpecificOutput.PermissionDecision != "deny" {
 		t.Errorf("Expected permissionDecision 'deny', got %q", response.HookSpecificOutput.PermissionDecision)
 	}
-	if !strings.Contains(response.HookSpecificOutput.PermissionDecisionReason, "Confabulous link") {
+	if !strings.Contains(response.HookSpecificOutput.PermissionDecisionReason, "Confab link") {
 		t.Errorf("Expected reason to contain PR link instruction, got %q", response.HookSpecificOutput.PermissionDecisionReason)
 	}
 	if !strings.Contains(response.HookSpecificOutput.PermissionDecisionReason, confabSessionID) {
@@ -728,7 +728,7 @@ func TestHandlePreToolUse_MCPGitHubPRWithLink(t *testing.T) {
 			"owner": "myorg",
 			"repo":  "myrepo",
 			"title": "Fix bug",
-			"body":  "This PR fixes a bug\n\n📝 [Confabulous link](" + sessionURL + ")",
+			"body":  "This PR fixes a bug\n\n📝 [Confab link](" + sessionURL + ")",
 			"head":  "feature-branch",
 			"base":  "main",
 		},

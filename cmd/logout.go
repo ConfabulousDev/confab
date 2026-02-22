@@ -10,8 +10,8 @@ import (
 
 var logoutCmd = &cobra.Command{
 	Use:   "logout",
-	Short: "Clear API key and disable cloud sync",
-	Long:  `Removes the stored API key and disables cloud sync.`,
+	Short: "Clear API key and disable sync",
+	Long:  `Removes the stored API key and disables sync.`,
 	RunE:  runLogout,
 }
 
@@ -44,7 +44,7 @@ func runLogout(cmd *cobra.Command, args []string) error {
 	logger.Info("Logout successful, API key removed")
 	fmt.Println("✓ Logged out successfully")
 	fmt.Println()
-	fmt.Println("API key removed. Cloud sync is now disabled.")
+	fmt.Println("API key removed. Sync is now disabled.")
 	fmt.Println()
 	fmt.Println("To login again, run:")
 	fmt.Println("  confab login")

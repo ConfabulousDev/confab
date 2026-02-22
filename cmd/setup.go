@@ -14,7 +14,7 @@ var setupCmd = &cobra.Command{
 	Long: `Complete setup for confab in one command.
 
 This command:
-1. Authenticates with the cloud backend (if not already logged in)
+1. Authenticates with the backend (if not already logged in)
 2. Installs hooks (sync daemon + git commit trailers + PR linking)
 
 If you're already authenticated with a valid API key, the login step is skipped.

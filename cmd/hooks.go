@@ -22,7 +22,7 @@ var hooksAddCmd = &cobra.Command{
 Installs:
 - SessionStart + SessionEnd hooks for background sync daemon
 - PreToolUse hook to add session URLs to git commits and PRs
-- PostToolUse hook to track created PRs on Confabulous
+- PostToolUse hook to track created PRs on Confab
 - UserPromptSubmit hook for prompt logging (debug)`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger.Info("Running hooks add command")
@@ -58,7 +58,7 @@ Installs:
 		fmt.Println("Confab will now:")
 		fmt.Println("  - Sync sessions incrementally (every 30 seconds)")
 		fmt.Println("  - Add session URLs to git commits and PRs")
-		fmt.Println("  - Link created PRs to sessions on Confabulous")
+		fmt.Println("  - Link PRs to Confab sessions")
 
 		return nil
 	},

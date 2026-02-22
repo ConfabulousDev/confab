@@ -26,10 +26,10 @@ var hookPostToolUseCmd = &cobra.Command{
 	Long: `Handler for PostToolUse hook events from Claude Code.
 
 For successful PR creation (gh pr create, GitHub MCP tool), extracts the PR URL
-from the output and links it to the current Confabulous session.
+from the output and links it to the current Confab session.
 
 For successful git commits or pushes, retrieves the HEAD commit SHA via git
-rev-parse and links the GitHub commit URL to the current Confabulous session.
+rev-parse and links the GitHub commit URL to the current Confab session.
 
 For all other tool calls, exits silently (code 0).
 
@@ -120,7 +120,7 @@ func handleMCPPRCreateOutput(hookInput *types.HookInput) error {
 	return linkGitHubURL(hookInput.SessionID, prURL)
 }
 
-// linkGitHubURL links a GitHub URL (PR or commit) to the current Confabulous session
+// linkGitHubURL links a GitHub URL (PR or commit) to the current Confab session
 func linkGitHubURL(claudeSessionID, githubURL string) error {
 	logger.Info("Linking GitHub URL to session: %s", githubURL)
 
@@ -163,7 +163,7 @@ func linkGitHubURL(claudeSessionID, githubURL string) error {
 	return nil
 }
 
-// linkCommitToSession links a git commit to the current Confabulous session.
+// linkCommitToSession links a git commit to the current Confab session.
 // It gets the HEAD commit SHA and repo URL via git commands, then constructs
 // the GitHub commit URL.
 func linkCommitToSession(claudeSessionID, cwd string) error {

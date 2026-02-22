@@ -15,7 +15,7 @@ var syncCmd = &cobra.Command{
 during active Claude Code sessions.
 
 The daemon watches transcript files and uploads new content
-to the cloud every 30 seconds.
+to the backend every 30 seconds.
 
 Note: The "sync start" and "sync stop" commands are aliases for
 "hook session-start" and "hook session-end" respectively.`,

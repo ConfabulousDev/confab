@@ -13,7 +13,7 @@ import (
 
 var saveCmd = &cobra.Command{
 	Use:   "save <session-id> [session-id...]",
-	Short: "Save session data to cloud",
+	Short: "Save session data to the backend",
 	Long: `Upload session(s) by ID.
 
 Use 'confab list' to see available sessions and their IDs.

@@ -25,7 +25,7 @@ var doDeviceLoginFunc = doDeviceLoginImpl
 
 var loginCmd = &cobra.Command{
 	Use:   "login",
-	Short: "Authenticate with confab cloud backend",
+	Short: "Authenticate with the Confab backend",
 	Long: `Authenticates with the confab backend using device code flow.
 
 You'll receive a code to enter at a URL. This works on any machine, including

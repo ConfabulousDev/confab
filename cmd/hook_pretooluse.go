@@ -17,10 +17,10 @@ import (
 
 const (
 	// Git commit trailer format
-	commitTrailerPrefix = "Confabulous-Link: "
+	commitTrailerPrefix = "Confab-Link: "
 
-	// PR body link format: 📝 [Confabulous link]({session_url})
-	prLinkPrefix = "📝 [Confabulous link]("
+	// PR body link format: 📝 [Confab link]({session_url})
+	prLinkPrefix = "📝 [Confab link]("
 	prLinkSuffix = ")"
 )
 
@@ -44,10 +44,10 @@ var hookPreToolUseCmd = &cobra.Command{
 	Long: `Handler for PreToolUse hook events from Claude Code.
 
 For git commit commands, ensures the commit message includes a
-Confab session URL trailer (Confabulous-Link: {backend_url}/sessions/{session_id}).
+Confab session URL trailer (Confab-Link: {backend_url}/sessions/{session_id}).
 
 For PR creation (gh pr create, GitHub MCP tool), ensures the PR body includes a
-Confab session link (📝 [Confabulous link]({backend_url}/sessions/{session_id})).
+Confab session link (📝 [Confab link]({backend_url}/sessions/{session_id})).
 
 For all other tool calls, exits silently (code 0) to allow normal flow.
 
