@@ -2,13 +2,19 @@
 
 ## Steps
 
-1. **Tag and push**
+1. **Pull latest main**
+   ```bash
+   git checkout main
+   git pull origin main
+   ```
+
+2. **Tag and push**
    ```bash
    git tag v0.X.Y
    git push origin v0.X.Y
    ```
 
-2. **GoReleaser handles the rest** — a GitHub Actions workflow runs GoReleaser on tag push, which builds cross-platform binaries and creates the GitHub release with these assets:
+3. **GoReleaser handles the rest** — a GitHub Actions workflow runs GoReleaser on tag push, which builds cross-platform binaries and creates the GitHub release with these assets:
    - `confab_darwin_amd64` - macOS Intel
    - `confab_darwin_arm64` - macOS Apple Silicon
    - `confab_linux_amd64` - Linux x86_64
