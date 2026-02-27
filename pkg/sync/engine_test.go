@@ -346,7 +346,6 @@ func TestEngine_SyncAll_WithAgentDiscovery(t *testing.T) {
 	defer server.Close()
 
 	tmpDir, transcriptPath := setupTestEnv(t, server.URL)
-	transcriptDir := filepath.Dir(transcriptPath)
 
 	// Create transcript with agent reference
 	content := `{"type":"system","message":"start"}
@@ -354,8 +353,10 @@ func TestEngine_SyncAll_WithAgentDiscovery(t *testing.T) {
 `
 	os.WriteFile(transcriptPath, []byte(content), 0644)
 
-	// Create agent file
-	agentPath := filepath.Join(transcriptDir, "agent-abc12345.jsonl")
+	// Create agent file in subagents directory
+	subagentsDir := filepath.Join(filepath.Dir(transcriptPath), "transcript", "subagents")
+	os.MkdirAll(subagentsDir, 0755)
+	agentPath := filepath.Join(subagentsDir, "agent-abc12345.jsonl")
 	agentContent := `{"type":"agent","message":"agent line 1"}
 {"type":"agent","message":"agent line 2"}
 `
@@ -571,7 +572,10 @@ func TestEngine_SyncAll_TransitiveAgentDiscovery(t *testing.T) {
 	defer server.Close()
 
 	tmpDir, transcriptPath := setupTestEnv(t, server.URL)
-	transcriptDir := filepath.Dir(transcriptPath)
+
+	// Create subagents directory
+	subagentsDir := filepath.Join(filepath.Dir(transcriptPath), "transcript", "subagents")
+	os.MkdirAll(subagentsDir, 0755)
 
 	// Create transcript that references agent A
 	transcriptContent := `{"type":"system","message":"start"}
@@ -580,21 +584,21 @@ func TestEngine_SyncAll_TransitiveAgentDiscovery(t *testing.T) {
 	os.WriteFile(transcriptPath, []byte(transcriptContent), 0644)
 
 	// Agent A references agent B
-	agentAPath := filepath.Join(transcriptDir, "agent-aaaaaaaa.jsonl")
+	agentAPath := filepath.Join(subagentsDir, "agent-aaaaaaaa.jsonl")
 	agentAContent := `{"type":"agent","message":"agent A start"}
 {"type":"user","toolUseResult":{"agentId":"bbbbbbbb","result":"done"}}
 `
 	os.WriteFile(agentAPath, []byte(agentAContent), 0644)
 
 	// Agent B references agent C (3 levels deep)
-	agentBPath := filepath.Join(transcriptDir, "agent-bbbbbbbb.jsonl")
+	agentBPath := filepath.Join(subagentsDir, "agent-bbbbbbbb.jsonl")
 	agentBContent := `{"type":"agent","message":"agent B start"}
 {"type":"user","toolUseResult":{"agentId":"cccccccc","result":"done"}}
 `
 	os.WriteFile(agentBPath, []byte(agentBContent), 0644)
 
 	// Agent C is a leaf (no further references)
-	agentCPath := filepath.Join(transcriptDir, "agent-cccccccc.jsonl")
+	agentCPath := filepath.Join(subagentsDir, "agent-cccccccc.jsonl")
 	agentCContent := `{"type":"agent","message":"agent C - leaf"}
 `
 	os.WriteFile(agentCPath, []byte(agentCContent), 0644)
@@ -651,7 +655,10 @@ func TestEngine_SyncAll_AgentCycleDetection(t *testing.T) {
 	defer server.Close()
 
 	tmpDir, transcriptPath := setupTestEnv(t, server.URL)
-	transcriptDir := filepath.Dir(transcriptPath)
+
+	// Create subagents directory
+	subagentsDir := filepath.Join(filepath.Dir(transcriptPath), "transcript", "subagents")
+	os.MkdirAll(subagentsDir, 0755)
 
 	// Create transcript that references agent A
 	transcriptContent := `{"type":"system","message":"start"}
@@ -660,14 +667,14 @@ func TestEngine_SyncAll_AgentCycleDetection(t *testing.T) {
 	os.WriteFile(transcriptPath, []byte(transcriptContent), 0644)
 
 	// Agent A references agent B
-	agentAPath := filepath.Join(transcriptDir, "agent-aaaaaaaa.jsonl")
+	agentAPath := filepath.Join(subagentsDir, "agent-aaaaaaaa.jsonl")
 	agentAContent := `{"type":"agent","message":"agent A"}
 {"type":"user","toolUseResult":{"agentId":"bbbbbbbb","result":"done"}}
 `
 	os.WriteFile(agentAPath, []byte(agentAContent), 0644)
 
 	// Agent B references agent A (cycle!)
-	agentBPath := filepath.Join(transcriptDir, "agent-bbbbbbbb.jsonl")
+	agentBPath := filepath.Join(subagentsDir, "agent-bbbbbbbb.jsonl")
 	agentBContent := `{"type":"agent","message":"agent B"}
 {"type":"user","toolUseResult":{"agentId":"aaaaaaaa","result":"done"}}
 `
@@ -720,7 +727,10 @@ func TestEngine_SyncAll_MaxIterations(t *testing.T) {
 	defer server.Close()
 
 	tmpDir, transcriptPath := setupTestEnv(t, server.URL)
-	transcriptDir := filepath.Dir(transcriptPath)
+
+	// Create subagents directory
+	subagentsDir := filepath.Join(filepath.Dir(transcriptPath), "transcript", "subagents")
+	os.MkdirAll(subagentsDir, 0755)
 
 	// Create a chain of agents longer than maxSyncIterations (10)
 	// transcript -> agent-00000001 -> agent-00000002 -> ... -> agent-00000015
@@ -745,7 +755,7 @@ func TestEngine_SyncAll_MaxIterations(t *testing.T) {
 `, i)
 		}
 
-		agentPath := filepath.Join(transcriptDir, fmt.Sprintf("agent-%s.jsonl", agentID))
+		agentPath := filepath.Join(subagentsDir, fmt.Sprintf("agent-%s.jsonl", agentID))
 		os.WriteFile(agentPath, []byte(content), 0644)
 	}
 
@@ -795,10 +805,12 @@ func TestEngine_SyncAll_AgentFileAppearsLater(t *testing.T) {
 	defer server.Close()
 
 	tmpDir, transcriptPath := setupTestEnv(t, server.URL)
-	transcriptDir := filepath.Dir(transcriptPath)
+
+	// Create subagents directory
+	subagentsDir := filepath.Join(filepath.Dir(transcriptPath), "transcript", "subagents")
+	os.MkdirAll(subagentsDir, 0755)
 
 	// Create transcript that references an agent that doesn't exist yet
-	// Note: agent ID must be valid 8-char hex
 	transcriptContent := `{"type":"system","message":"start"}
 {"type":"user","toolUseResult":{"agentId":"deadbeef","result":"done"}}
 `
@@ -824,8 +836,8 @@ func TestEngine_SyncAll_AgentFileAppearsLater(t *testing.T) {
 		t.Errorf("expected 1 chunk on first sync, got %d", chunks1)
 	}
 
-	// Now create the agent file
-	agentPath := filepath.Join(transcriptDir, "agent-deadbeef.jsonl")
+	// Now create the agent file in subagents dir
+	agentPath := filepath.Join(subagentsDir, "agent-deadbeef.jsonl")
 	os.WriteFile(agentPath, []byte(`{"type":"agent","message":"late agent"}`+"\n"), 0644)
 
 	// Second sync - should discover and sync the agent file
@@ -1147,6 +1159,245 @@ func TestEngine_SyncAll_AuthErrorDuringRefreshPropagated(t *testing.T) {
 	// The returned error should be the auth error from refresh, not the original 503
 	if !errors.Is(err, pkghttp.ErrUnauthorized) {
 		t.Errorf("expected ErrUnauthorized to be propagated, got: %v", err)
+	}
+}
+
+// TestEngine_SyncAll_DirScanAfterRestart tests the daemon-restart edge case:
+// A first engine syncs a transcript that references agents. Then a second engine
+// (simulating a restart with a fresh tracker and no in-memory knownAgentIDs)
+// should still discover and sync those agent files via directory scan.
+func TestEngine_SyncAll_DirScanAfterRestart(t *testing.T) {
+	mock := newMockBackend(t)
+	server := httptest.NewServer(mock)
+	defer server.Close()
+
+	tmpDir, transcriptPath := setupTestEnv(t, server.URL)
+
+	// Create subagents directory
+	subagentsDir := filepath.Join(filepath.Dir(transcriptPath), "transcript", "subagents")
+	os.MkdirAll(subagentsDir, 0755)
+
+	// Create transcript that references two agents
+	transcriptContent := `{"type":"system","message":"start"}
+{"type":"user","toolUseResult":{"agentId":"a3eaf63159a07953f","result":"done"}}
+{"type":"user","toolUseResult":{"agentId":"acompact-2aaa241e456ebc94","result":"done"}}
+`
+	os.WriteFile(transcriptPath, []byte(transcriptContent), 0644)
+
+	// Create agent files
+	os.WriteFile(
+		filepath.Join(subagentsDir, "agent-a3eaf63159a07953f.jsonl"),
+		[]byte(`{"type":"agent","message":"agent 1"}`+"\n"), 0644)
+	os.WriteFile(
+		filepath.Join(subagentsDir, "agent-acompact-2aaa241e456ebc94.jsonl"),
+		[]byte(`{"type":"agent","message":"agent 2"}`+"\n"), 0644)
+
+	// --- First engine: syncs everything ---
+	engine1 := NewWithClient(
+		mustNewClient(t, server.URL, tmpDir),
+		nil,
+		EngineConfig{
+			ExternalID:     "dir-scan-restart-test",
+			TranscriptPath: transcriptPath,
+			CWD:            tmpDir,
+		},
+	)
+	if err := engine1.Init(); err != nil {
+		t.Fatalf("Init failed: %v", err)
+	}
+	chunks1, err := engine1.SyncAll()
+	if err != nil {
+		t.Fatalf("First SyncAll failed: %v", err)
+	}
+	// Should sync transcript + 2 agents = 3 chunks
+	if chunks1 != 3 {
+		t.Errorf("expected 3 chunks on first sync, got %d", chunks1)
+	}
+
+	// --- Second engine: simulates restart ---
+	// Backend reports all files as fully synced (transcript: 3 lines, agents: 1 line each)
+	mock.initResponse.Files = map[string]FileState{
+		"transcript.jsonl":                         {LastSyncedLine: 3},
+		"agent-a3eaf63159a07953f.jsonl":            {LastSyncedLine: 1},
+		"agent-acompact-2aaa241e456ebc94.jsonl":    {LastSyncedLine: 1},
+	}
+
+	engine2 := NewWithClient(
+		mustNewClient(t, server.URL, tmpDir),
+		nil,
+		EngineConfig{
+			ExternalID:     "dir-scan-restart-test",
+			TranscriptPath: transcriptPath,
+			CWD:            tmpDir,
+		},
+	)
+	if err := engine2.Init(); err != nil {
+		t.Fatalf("Second Init failed: %v", err)
+	}
+
+	// Append new content to one of the agent files AFTER the restart
+	f, _ := os.OpenFile(
+		filepath.Join(subagentsDir, "agent-a3eaf63159a07953f.jsonl"),
+		os.O_APPEND|os.O_WRONLY, 0644)
+	f.WriteString(`{"type":"agent","message":"new line after restart"}` + "\n")
+	f.Close()
+
+	// The fresh engine has no knownAgentIDs. It must discover agents via:
+	// 1. InitFromBackendState (backend told it about these files), AND/OR
+	// 2. Directory scan in DiscoverNewFiles
+	// Either way, the new agent line should be synced.
+	chunks2, err := engine2.SyncAll()
+	if err != nil {
+		t.Fatalf("Second SyncAll failed: %v", err)
+	}
+
+	if chunks2 != 1 {
+		t.Errorf("expected 1 chunk (new agent line), got %d", chunks2)
+	}
+
+	// Verify the new agent line was uploaded
+	var foundNewLine bool
+	for _, req := range mock.chunkRequests {
+		if req.FileName == "agent-a3eaf63159a07953f.jsonl" && req.FirstLine == 2 {
+			foundNewLine = true
+			break
+		}
+	}
+	if !foundNewLine {
+		t.Error("expected new agent line (line 2 of agent-a3eaf63159a07953f.jsonl) to be uploaded")
+	}
+}
+
+// TestEngine_SyncAll_DirScanDiscoversUnknownAgent tests that the directory scan
+// in DiscoverNewFiles finds agent files that were never referenced in any
+// transcript line (e.g., agent IDs from already-synced lines lost after restart).
+func TestEngine_SyncAll_DirScanDiscoversUnknownAgent(t *testing.T) {
+	mock := newMockBackend(t)
+	server := httptest.NewServer(mock)
+	defer server.Close()
+
+	tmpDir, transcriptPath := setupTestEnv(t, server.URL)
+
+	subagentsDir := filepath.Join(filepath.Dir(transcriptPath), "transcript", "subagents")
+	os.MkdirAll(subagentsDir, 0755)
+
+	// Transcript with NO agent references (simulates: agent refs were in
+	// already-synced lines that won't be re-read)
+	transcriptContent := `{"type":"system","message":"start"}
+`
+	os.WriteFile(transcriptPath, []byte(transcriptContent), 0644)
+
+	// But agent file exists in subagents dir (written by Claude Code)
+	os.WriteFile(
+		filepath.Join(subagentsDir, "agent-a3eaf63159a07953f.jsonl"),
+		[]byte(`{"type":"agent","message":"orphan agent"}`+"\n"), 0644)
+
+	// Backend says transcript is partially synced but knows nothing about the agent
+	mock.initResponse.Files = map[string]FileState{
+		"transcript.jsonl": {LastSyncedLine: 0},
+	}
+
+	engine := NewWithClient(
+		mustNewClient(t, server.URL, tmpDir),
+		nil,
+		EngineConfig{
+			ExternalID:     "dir-scan-unknown-agent-test",
+			TranscriptPath: transcriptPath,
+			CWD:            tmpDir,
+		},
+	)
+
+	if err := engine.Init(); err != nil {
+		t.Fatalf("Init failed: %v", err)
+	}
+
+	chunks, err := engine.SyncAll()
+	if err != nil {
+		t.Fatalf("SyncAll failed: %v", err)
+	}
+
+	// Should sync transcript (1 line) + agent found via dir scan (1 line)
+	if chunks != 2 {
+		t.Errorf("expected 2 chunks (transcript + dir-scanned agent), got %d", chunks)
+	}
+
+	// Verify agent was uploaded
+	var agentUploaded bool
+	for _, req := range mock.chunkRequests {
+		if req.FileName == "agent-a3eaf63159a07953f.jsonl" {
+			agentUploaded = true
+			break
+		}
+	}
+	if !agentUploaded {
+		t.Error("expected agent-a3eaf63159a07953f.jsonl to be discovered and uploaded via dir scan")
+	}
+}
+
+// TestEngine_SyncAll_MixedAgentIDFormats tests that a single transcript can
+// reference both legacy 8-char hex and new-format agent IDs, and all are
+// discovered and synced correctly.
+func TestEngine_SyncAll_MixedAgentIDFormats(t *testing.T) {
+	mock := newMockBackend(t)
+	server := httptest.NewServer(mock)
+	defer server.Close()
+
+	tmpDir, transcriptPath := setupTestEnv(t, server.URL)
+
+	subagentsDir := filepath.Join(filepath.Dir(transcriptPath), "transcript", "subagents")
+	os.MkdirAll(subagentsDir, 0755)
+
+	// Transcript references three different agent ID formats
+	transcriptContent := `{"type":"system","message":"start"}
+{"type":"user","toolUseResult":{"agentId":"abcd1234","result":"done"}}
+{"type":"user","toolUseResult":{"agentId":"a3eaf63159a07953f","result":"done"}}
+{"type":"user","toolUseResult":{"agentId":"acompact-2aaa241e456ebc94","result":"done"}}
+`
+	os.WriteFile(transcriptPath, []byte(transcriptContent), 0644)
+
+	// Create all three agent files
+	agents := map[string]string{
+		"agent-abcd1234.jsonl":                  `{"type":"agent","message":"legacy hex"}` + "\n",
+		"agent-a3eaf63159a07953f.jsonl":         `{"type":"agent","message":"long hex"}` + "\n",
+		"agent-acompact-2aaa241e456ebc94.jsonl": `{"type":"agent","message":"compact format"}` + "\n",
+	}
+	for name, content := range agents {
+		os.WriteFile(filepath.Join(subagentsDir, name), []byte(content), 0644)
+	}
+
+	engine := NewWithClient(
+		mustNewClient(t, server.URL, tmpDir),
+		nil,
+		EngineConfig{
+			ExternalID:     "mixed-formats-test",
+			TranscriptPath: transcriptPath,
+			CWD:            tmpDir,
+		},
+	)
+
+	if err := engine.Init(); err != nil {
+		t.Fatalf("Init failed: %v", err)
+	}
+
+	chunks, err := engine.SyncAll()
+	if err != nil {
+		t.Fatalf("SyncAll failed: %v", err)
+	}
+
+	// Should sync transcript + 3 agents = 4 chunks
+	if chunks != 4 {
+		t.Errorf("expected 4 chunks (transcript + 3 agents), got %d", chunks)
+	}
+
+	// Verify all agent files were uploaded
+	uploadedFiles := make(map[string]bool)
+	for _, req := range mock.chunkRequests {
+		uploadedFiles[req.FileName] = true
+	}
+	for name := range agents {
+		if !uploadedFiles[name] {
+			t.Errorf("expected %s to be uploaded", name)
+		}
 	}
 }
 

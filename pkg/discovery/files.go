@@ -1,8 +1,8 @@
 package discovery
 
 const (
-	// AgentIDLength is the expected length of agent ID hex strings
-	AgentIDLength = 8
+	// MinAgentIDLength is the minimum length of an agent ID string
+	MinAgentIDLength = 6
 	// UUIDLength is the expected length of UUID strings (with hyphens)
 	UUIDLength = 36
 )
@@ -51,17 +51,26 @@ func ExtractAgentIDsFromMessage(message map[string]interface{}) []string {
 	return agentIDs
 }
 
-// IsValidAgentID checks if a string is a valid 8-character hex agent ID
+// IsValidAgentID checks if a string is a valid agent ID.
+// Agent IDs are 6+ characters matching [a-zA-Z0-9_-]+.
+// This covers all observed formats:
+//   - Pure hex (7-17+ chars): "a0074ac", "a3eaf63159a07953f"
+//   - Compact: "acompact-2aaa241e456ebc94"
+//   - Prompt suggestion: "aprompt_suggestion-ba74af"
+//   - Legacy 8-char hex: "abcd1234"
 func IsValidAgentID(s string) bool {
-	return len(s) == AgentIDLength && isHexString(s)
-}
-
-// isHexString checks if a string contains only hexadecimal characters
-func isHexString(s string) bool {
+	if len(s) < MinAgentIDLength {
+		return false
+	}
 	for _, c := range s {
-		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+		if !isAgentIDChar(c) {
 			return false
 		}
 	}
 	return true
+}
+
+// isAgentIDChar returns true if the rune is valid in an agent ID: [a-zA-Z0-9_-]
+func isAgentIDChar(c rune) bool {
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-'
 }

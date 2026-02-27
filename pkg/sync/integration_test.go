@@ -147,7 +147,10 @@ func TestEngine_MultipleAgentFiles(t *testing.T) {
 	defer server.Close()
 
 	tmpDir, transcriptPath := setupTestEnv(t, server.URL)
-	transcriptDir := filepath.Dir(transcriptPath)
+
+	// Create subagents directory
+	subagentsDir := filepath.Join(filepath.Dir(transcriptPath), "transcript", "subagents")
+	os.MkdirAll(subagentsDir, 0755)
 
 	// Create transcript referencing multiple agents
 	transcriptContent := `{"type":"system","message":"start"}
@@ -157,9 +160,9 @@ func TestEngine_MultipleAgentFiles(t *testing.T) {
 `
 	os.WriteFile(transcriptPath, []byte(transcriptContent), 0644)
 
-	// Create all three agent files
+	// Create all three agent files in subagents directory
 	for _, id := range []string{"aaaaaaaa", "bbbbbbbb", "cccccccc"} {
-		agentPath := filepath.Join(transcriptDir, fmt.Sprintf("agent-%s.jsonl", id))
+		agentPath := filepath.Join(subagentsDir, fmt.Sprintf("agent-%s.jsonl", id))
 		os.WriteFile(agentPath, []byte(fmt.Sprintf(`{"agent":"%s","line":1}`+"\n", id)), 0644)
 	}
 
