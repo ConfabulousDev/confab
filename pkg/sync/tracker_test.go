@@ -13,8 +13,9 @@ func TestNewFileTracker(t *testing.T) {
 	if ft.transcriptPath != "/path/to/transcript.jsonl" {
 		t.Errorf("expected transcriptPath '/path/to/transcript.jsonl', got %q", ft.transcriptPath)
 	}
-	if ft.transcriptDir != "/path/to" {
-		t.Errorf("expected transcriptDir '/path/to', got %q", ft.transcriptDir)
+	expectedSubagentsDir := "/path/to/transcript/subagents"
+	if ft.subagentsDir != expectedSubagentsDir {
+		t.Errorf("expected subagentsDir %q, got %q", expectedSubagentsDir, ft.subagentsDir)
 	}
 	if ft.files == nil {
 		t.Error("expected files map to be initialized")
@@ -58,6 +59,16 @@ func TestFileTracker_InitFromBackendState(t *testing.T) {
 	}
 	if !found {
 		t.Error("transcript not found in tracked files")
+	}
+
+	// Check agent files resolve to subagents directory
+	for _, f := range files {
+		if f.Type == "agent" {
+			expectedPath := filepath.Join(ft.subagentsDir, f.Name)
+			if f.Path != expectedPath {
+				t.Errorf("expected agent path %q, got %q", expectedPath, f.Path)
+			}
+		}
 	}
 }
 
@@ -173,9 +184,10 @@ func TestFileTracker_ReadChunk_ExtractsAgentIDs(t *testing.T) {
 	tmpDir := t.TempDir()
 	transcriptPath := filepath.Join(tmpDir, "transcript.jsonl")
 
-	content := `{"type": "user", "toolUseResult": {"agentId": "abc12345"}}
+	// Use new-format agent IDs: 17-char hex and compact format
+	content := `{"type": "user", "toolUseResult": {"agentId": "a3eaf63159a07953f"}}
 {"type": "assistant", "message": "hello"}
-{"type": "user", "toolUseResult": {"agentId": "def67890"}}
+{"type": "user", "toolUseResult": {"agentId": "acompact-2aaa241e456ebc94"}}
 `
 	if err := os.WriteFile(transcriptPath, []byte(content), 0644); err != nil {
 		t.Fatalf("failed to write test file: %v", err)
@@ -201,8 +213,8 @@ func TestFileTracker_ReadChunk_ExtractsAgentIDs(t *testing.T) {
 	for _, id := range chunk.AgentIDs {
 		found[id] = true
 	}
-	if !found["abc12345"] || !found["def67890"] {
-		t.Errorf("expected agent IDs abc12345 and def67890, got %v", chunk.AgentIDs)
+	if !found["a3eaf63159a07953f"] || !found["acompact-2aaa241e456ebc94"] {
+		t.Errorf("expected agent IDs a3eaf63159a07953f and acompact-2aaa241e456ebc94, got %v", chunk.AgentIDs)
 	}
 }
 
@@ -373,13 +385,15 @@ func TestFileTracker_DiscoverNewFiles(t *testing.T) {
 		t.Fatalf("failed to write transcript: %v", err)
 	}
 
-	// Create agent file
-	agentPath := filepath.Join(tmpDir, "agent-abc12345.jsonl")
+	ft := NewFileTracker(transcriptPath)
+
+	// Create subagents directory and agent file
+	os.MkdirAll(ft.subagentsDir, 0755)
+	agentPath := filepath.Join(ft.subagentsDir, "agent-abc12345.jsonl")
 	if err := os.WriteFile(agentPath, []byte(`{"line": 1}`), 0644); err != nil {
 		t.Fatalf("failed to write agent file: %v", err)
 	}
 
-	ft := NewFileTracker(transcriptPath)
 	ft.InitFromBackendState(map[string]FileState{
 		"transcript.jsonl": {LastSyncedLine: 0},
 	})
@@ -397,6 +411,10 @@ func TestFileTracker_DiscoverNewFiles(t *testing.T) {
 		}
 		if newFiles[0].Type != "agent" {
 			t.Errorf("expected type 'agent', got %q", newFiles[0].Type)
+		}
+		expectedPath := filepath.Join(ft.subagentsDir, "agent-abc12345.jsonl")
+		if newFiles[0].Path != expectedPath {
+			t.Errorf("expected path %q, got %q", expectedPath, newFiles[0].Path)
 		}
 	}
 
@@ -416,6 +434,8 @@ func TestFileTracker_DiscoverNewFiles_MissingAgent(t *testing.T) {
 	}
 
 	ft := NewFileTracker(transcriptPath)
+	os.MkdirAll(ft.subagentsDir, 0755)
+
 	ft.InitFromBackendState(map[string]FileState{
 		"transcript.jsonl": {LastSyncedLine: 0},
 	})
@@ -427,8 +447,8 @@ func TestFileTracker_DiscoverNewFiles_MissingAgent(t *testing.T) {
 		t.Errorf("expected 0 new files for missing agent, got %d", len(newFiles))
 	}
 
-	// Now create the file
-	agentPath := filepath.Join(tmpDir, "agent-missing123.jsonl")
+	// Now create the file in subagents dir
+	agentPath := filepath.Join(ft.subagentsDir, "agent-missing123.jsonl")
 	if err := os.WriteFile(agentPath, []byte(`{"line": 1}`), 0644); err != nil {
 		t.Fatalf("failed to write agent file: %v", err)
 	}
@@ -446,7 +466,7 @@ func TestFileTracker_ReadChunk_MalformedJSON(t *testing.T) {
 
 	// Mix of valid and invalid JSON
 	content := `not valid json
-{"type": "user", "toolUseResult": {"agentId": "abcd1234"}}
+{"type": "user", "toolUseResult": {"agentId": "a3eaf63159a07953f"}}
 also not valid
 {"type": "user", "gitBranch": "develop"}
 `
@@ -471,8 +491,8 @@ also not valid
 	}
 
 	// Should extract agent IDs from valid lines
-	if len(chunk.AgentIDs) != 1 || chunk.AgentIDs[0] != "abcd1234" {
-		t.Errorf("expected agent ID abcd1234, got %v", chunk.AgentIDs)
+	if len(chunk.AgentIDs) != 1 || chunk.AgentIDs[0] != "a3eaf63159a07953f" {
+		t.Errorf("expected agent ID a3eaf63159a07953f, got %v", chunk.AgentIDs)
 	}
 
 	// Should extract git info into metadata
@@ -817,6 +837,180 @@ func TestFileTracker_ReadChunk_ByteLimitWithFileAppend(t *testing.T) {
 	// Should have all 8 lines (5 original + 3 appended)
 	if totalLines != 8 {
 		t.Errorf("expected 8 total lines, got %d", totalLines)
+	}
+}
+
+// TestFileTracker_DiscoverNewFiles_DirectoryScan tests that DiscoverNewFiles
+// finds agent files in the subagents directory even without matching agent IDs
+// from transcript parsing (e.g., after daemon restart).
+func TestFileTracker_DiscoverNewFiles_DirectoryScan(t *testing.T) {
+	tmpDir := t.TempDir()
+	transcriptPath := filepath.Join(tmpDir, "transcript.jsonl")
+
+	if err := os.WriteFile(transcriptPath, []byte(`{}`), 0644); err != nil {
+		t.Fatalf("failed to write transcript: %v", err)
+	}
+
+	ft := NewFileTracker(transcriptPath)
+	os.MkdirAll(ft.subagentsDir, 0755)
+
+	ft.InitFromBackendState(map[string]FileState{
+		"transcript.jsonl": {LastSyncedLine: 0},
+	})
+
+	// Create agent files in subagents dir without providing their IDs
+	for _, name := range []string{"agent-a3eaf63159a07953f.jsonl", "agent-acompact-2aaa241e456ebc94.jsonl"} {
+		path := filepath.Join(ft.subagentsDir, name)
+		if err := os.WriteFile(path, []byte(`{"line": 1}`+"\n"), 0644); err != nil {
+			t.Fatalf("failed to write agent file: %v", err)
+		}
+	}
+
+	// Discover with NO agent IDs — directory scan should find them
+	newFiles := ft.DiscoverNewFiles(nil)
+
+	if len(newFiles) != 2 {
+		t.Errorf("expected 2 new files from directory scan, got %d", len(newFiles))
+	}
+
+	found := make(map[string]bool)
+	for _, f := range newFiles {
+		found[f.Name] = true
+		if f.Type != "agent" {
+			t.Errorf("expected type 'agent', got %q", f.Type)
+		}
+	}
+	if !found["agent-a3eaf63159a07953f.jsonl"] {
+		t.Error("expected agent-a3eaf63159a07953f.jsonl to be discovered")
+	}
+	if !found["agent-acompact-2aaa241e456ebc94.jsonl"] {
+		t.Error("expected agent-acompact-2aaa241e456ebc94.jsonl to be discovered")
+	}
+}
+
+// TestFileTracker_NewFormatAgentID_EndToEnd is a regression test that exercises
+// a realistic 17-char hex agent ID through the full discover+read path with
+// the subagents directory.
+func TestFileTracker_NewFormatAgentID_EndToEnd(t *testing.T) {
+	tmpDir := t.TempDir()
+	transcriptPath := filepath.Join(tmpDir, "transcript.jsonl")
+
+	// Transcript references a 17-char hex agent
+	content := `{"type":"system","message":"start"}
+{"type":"user","toolUseResult":{"agentId":"a3eaf63159a07953f","result":"done"}}
+`
+	if err := os.WriteFile(transcriptPath, []byte(content), 0644); err != nil {
+		t.Fatalf("failed to write transcript: %v", err)
+	}
+
+	ft := NewFileTracker(transcriptPath)
+	os.MkdirAll(ft.subagentsDir, 0755)
+
+	// Create agent file in subagents dir
+	agentPath := filepath.Join(ft.subagentsDir, "agent-a3eaf63159a07953f.jsonl")
+	agentContent := `{"type":"agent","message":"hello from new-format agent"}
+`
+	if err := os.WriteFile(agentPath, []byte(agentContent), 0644); err != nil {
+		t.Fatalf("failed to write agent file: %v", err)
+	}
+
+	ft.InitFromBackendState(map[string]FileState{
+		"transcript.jsonl": {LastSyncedLine: 0},
+	})
+
+	// Read transcript chunk — should extract the 17-char agent ID
+	transcriptFile := ft.GetTranscriptFile()
+	chunk, err := ft.ReadChunk(transcriptFile, nil, DefaultMaxChunkBytes)
+	if err != nil {
+		t.Fatalf("failed to read transcript chunk: %v", err)
+	}
+	if len(chunk.AgentIDs) != 1 || chunk.AgentIDs[0] != "a3eaf63159a07953f" {
+		t.Fatalf("expected agent ID a3eaf63159a07953f, got %v", chunk.AgentIDs)
+	}
+
+	// Discover the agent file
+	newFiles := ft.DiscoverNewFiles(chunk.AgentIDs)
+	if len(newFiles) != 1 {
+		t.Fatalf("expected 1 new file, got %d", len(newFiles))
+	}
+	if newFiles[0].Name != "agent-a3eaf63159a07953f.jsonl" {
+		t.Errorf("expected agent-a3eaf63159a07953f.jsonl, got %q", newFiles[0].Name)
+	}
+	if newFiles[0].Path != agentPath {
+		t.Errorf("expected path %q, got %q", agentPath, newFiles[0].Path)
+	}
+
+	// Read the agent file
+	agentChunk, err := ft.ReadChunk(newFiles[0], nil, DefaultMaxChunkBytes)
+	if err != nil {
+		t.Fatalf("failed to read agent chunk: %v", err)
+	}
+	if len(agentChunk.Lines) != 1 {
+		t.Errorf("expected 1 agent line, got %d", len(agentChunk.Lines))
+	}
+}
+
+// TestFileTracker_InitFromBackendState_ReadableAgentFile tests that when
+// InitFromBackendState sets up an agent file that exists on disk in the
+// subagents directory, it can actually be read via ReadChunk with correct
+// incremental state.
+func TestFileTracker_InitFromBackendState_ReadableAgentFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	transcriptPath := filepath.Join(tmpDir, "transcript.jsonl")
+
+	if err := os.WriteFile(transcriptPath, []byte(`{"type":"system"}`+"\n"), 0644); err != nil {
+		t.Fatalf("failed to write transcript: %v", err)
+	}
+
+	ft := NewFileTracker(transcriptPath)
+
+	// Create subagents directory and agent file with 3 lines
+	os.MkdirAll(ft.subagentsDir, 0755)
+	agentContent := `{"type":"agent","line":1}
+{"type":"agent","line":2}
+{"type":"agent","line":3}
+`
+	agentPath := filepath.Join(ft.subagentsDir, "agent-a3eaf63159a07953f.jsonl")
+	if err := os.WriteFile(agentPath, []byte(agentContent), 0644); err != nil {
+		t.Fatalf("failed to write agent file: %v", err)
+	}
+
+	// Backend says it already has the first line of the agent file
+	ft.InitFromBackendState(map[string]FileState{
+		"transcript.jsonl":                      {LastSyncedLine: 1},
+		"agent-a3eaf63159a07953f.jsonl":         {LastSyncedLine: 1},
+	})
+
+	// Find the agent file in tracked files
+	var agentFile *TrackedFile
+	for _, f := range ft.GetTrackedFiles() {
+		if f.Name == "agent-a3eaf63159a07953f.jsonl" {
+			agentFile = f
+			break
+		}
+	}
+	if agentFile == nil {
+		t.Fatal("agent file not found in tracked files")
+	}
+
+	// Verify path points to subagentsDir
+	if agentFile.Path != agentPath {
+		t.Errorf("expected path %q, got %q", agentPath, agentFile.Path)
+	}
+
+	// Read chunk — should get only lines 2-3 (line 1 already synced)
+	chunk, err := ft.ReadChunk(agentFile, nil, DefaultMaxChunkBytes)
+	if err != nil {
+		t.Fatalf("failed to read agent chunk: %v", err)
+	}
+	if chunk == nil {
+		t.Fatal("expected chunk, got nil")
+	}
+	if chunk.FirstLine != 2 {
+		t.Errorf("expected FirstLine 2, got %d", chunk.FirstLine)
+	}
+	if len(chunk.Lines) != 2 {
+		t.Errorf("expected 2 lines, got %d", len(chunk.Lines))
 	}
 }
 

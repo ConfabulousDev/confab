@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/ConfabulousDev/confab/pkg/discovery"
@@ -40,16 +41,20 @@ type Chunk struct {
 // FileTracker tracks files and their sync state for a session
 type FileTracker struct {
 	transcriptPath string
-	transcriptDir  string
+	subagentsDir   string // <session-id>/subagents/ directory for agent files
 	files          map[string]*TrackedFile
 	knownAgentIDs  map[string]bool // Agent IDs we've already discovered
 }
 
 // NewFileTracker creates a new file tracker for a session
 func NewFileTracker(transcriptPath string) *FileTracker {
+	// Derive subagents directory from transcript path:
+	// transcript: <project>/<session-id>.jsonl
+	// subagents:  <project>/<session-id>/subagents/
+	base := strings.TrimSuffix(transcriptPath, filepath.Ext(transcriptPath))
 	return &FileTracker{
 		transcriptPath: transcriptPath,
-		transcriptDir:  filepath.Dir(transcriptPath),
+		subagentsDir:   filepath.Join(base, "subagents"),
 		files:          make(map[string]*TrackedFile),
 		knownAgentIDs:  make(map[string]bool),
 	}
@@ -77,7 +82,7 @@ func (t *FileTracker) InitFromBackendState(backendFiles map[string]FileState) {
 		}
 
 		t.files[fileName] = &TrackedFile{
-			Path:           filepath.Join(t.transcriptDir, fileName),
+			Path:           filepath.Join(t.subagentsDir, fileName),
 			Name:           fileName,
 			Type:           "agent",
 			LastSyncedLine: state.LastSyncedLine,
@@ -313,8 +318,9 @@ func (t *FileTracker) UpdateAfterSync(file *TrackedFile, lastLine int, newOffset
 }
 
 // DiscoverNewFiles checks for new agent files based on agent IDs
-// discovered in previous chunk reads. Returns newly discovered files.
-// Also re-checks known agent IDs in case their files now exist on disk.
+// discovered in previous chunk reads, and also scans the subagents
+// directory for any agent files not already tracked.
+// Returns newly discovered files.
 func (t *FileTracker) DiscoverNewFiles(newAgentIDs []string) []*TrackedFile {
 	var newFiles []*TrackedFile
 
@@ -326,32 +332,50 @@ func (t *FileTracker) DiscoverNewFiles(newAgentIDs []string) []*TrackedFile {
 	// Check all known agent IDs for files that now exist
 	for agentID := range t.knownAgentIDs {
 		agentFileName := fmt.Sprintf("agent-%s.jsonl", agentID)
-
-		// Skip if already tracked
 		if t.IsTracked(agentFileName) {
 			continue
 		}
-
-		agentPath := filepath.Join(t.transcriptDir, agentFileName)
-
-		// Check if file exists on disk
-		if _, err := os.Stat(agentPath); err != nil {
-			continue // Agent file doesn't exist yet
+		if tracked := t.trackAgentFile(agentFileName); tracked != nil {
+			newFiles = append(newFiles, tracked)
 		}
+	}
 
-		// Add to tracked files
-		tracked := &TrackedFile{
-			Path:           agentPath,
-			Name:           agentFileName,
-			Type:           "agent",
-			LastSyncedLine: 0,
-			ByteOffset:     0,
+	// Scan the subagents directory for any agent files not already tracked.
+	// This catches files that we missed because agent IDs from already-synced
+	// transcript lines are not in memory (e.g., after daemon restart).
+	entries, err := os.ReadDir(t.subagentsDir)
+	if err == nil {
+		for _, entry := range entries {
+			name := entry.Name()
+			if entry.IsDir() || !strings.HasPrefix(name, "agent-") || !strings.HasSuffix(name, ".jsonl") {
+				continue
+			}
+			if t.IsTracked(name) {
+				continue
+			}
+			if tracked := t.trackAgentFile(name); tracked != nil {
+				newFiles = append(newFiles, tracked)
+			}
 		}
-		t.files[agentFileName] = tracked
-		newFiles = append(newFiles, tracked)
 	}
 
 	return newFiles
+}
+
+// trackAgentFile attempts to start tracking an agent file by name.
+// Returns the TrackedFile if the file exists on disk, nil otherwise.
+func (t *FileTracker) trackAgentFile(fileName string) *TrackedFile {
+	agentPath := filepath.Join(t.subagentsDir, fileName)
+	if _, err := os.Stat(agentPath); err != nil {
+		return nil
+	}
+	tracked := &TrackedFile{
+		Path: agentPath,
+		Name: fileName,
+		Type: "agent",
+	}
+	t.files[fileName] = tracked
+	return tracked
 }
 
 // GetTranscriptFile returns the transcript file being tracked

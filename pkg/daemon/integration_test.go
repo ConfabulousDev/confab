@@ -292,7 +292,6 @@ func TestDaemonAgentDiscovery(t *testing.T) {
 	defer server.Close()
 
 	tmpDir, transcriptPath := setupTestEnv(t, server.URL)
-	transcriptDir := filepath.Dir(transcriptPath)
 
 	// Create transcript that references an agent
 	transcriptContent := `{"type":"system","message":"start"}
@@ -300,8 +299,10 @@ func TestDaemonAgentDiscovery(t *testing.T) {
 `
 	os.WriteFile(transcriptPath, []byte(transcriptContent), 0644)
 
-	// Create the agent file
-	agentPath := filepath.Join(transcriptDir, "agent-abc12345.jsonl")
+	// Create the agent file in subagents directory
+	subagentsDir := filepath.Join(filepath.Dir(transcriptPath), "transcript", "subagents")
+	os.MkdirAll(subagentsDir, 0755)
+	agentPath := filepath.Join(subagentsDir, "agent-abc12345.jsonl")
 	agentContent := `{"type":"agent","message":"agent line 1"}
 {"type":"agent","message":"agent line 2"}
 `
@@ -535,7 +536,10 @@ func TestDaemonAgentFileNotExistYet(t *testing.T) {
 	defer server.Close()
 
 	tmpDir, transcriptPath := setupTestEnv(t, server.URL)
-	transcriptDir := filepath.Dir(transcriptPath)
+
+	// Create subagents directory (but DON'T create the agent file)
+	subagentsDir := filepath.Join(filepath.Dir(transcriptPath), "transcript", "subagents")
+	os.MkdirAll(subagentsDir, 0755)
 
 	// Create transcript that references an agent, but DON'T create the agent file
 	transcriptContent := `{"type":"system","message":"start"}
@@ -578,8 +582,8 @@ func TestDaemonAgentFileNotExistYet(t *testing.T) {
 		t.Error("Should not upload agent that doesn't exist yet")
 	}
 
-	// Now create the agent file
-	agentPath := filepath.Join(transcriptDir, "agent-def67890.jsonl")
+	// Now create the agent file in subagents dir
+	agentPath := filepath.Join(subagentsDir, "agent-def67890.jsonl")
 	os.WriteFile(agentPath, []byte(`{"type":"agent","message":"now exists"}`+"\n"), 0644)
 
 	// Wait for next sync cycle
@@ -755,7 +759,10 @@ func TestDaemonMultipleAgentFiles(t *testing.T) {
 	defer server.Close()
 
 	tmpDir, transcriptPath := setupTestEnv(t, server.URL)
-	transcriptDir := filepath.Dir(transcriptPath)
+
+	// Create subagents directory
+	subagentsDir := filepath.Join(filepath.Dir(transcriptPath), "transcript", "subagents")
+	os.MkdirAll(subagentsDir, 0755)
 
 	// Create transcript referencing multiple agents
 	transcriptContent := `{"type":"system","message":"start"}
@@ -765,9 +772,9 @@ func TestDaemonMultipleAgentFiles(t *testing.T) {
 `
 	os.WriteFile(transcriptPath, []byte(transcriptContent), 0644)
 
-	// Create all three agent files
+	// Create all three agent files in subagents directory
 	for _, id := range []string{"aaaaaaaa", "bbbbbbbb", "cccccccc"} {
-		agentPath := filepath.Join(transcriptDir, fmt.Sprintf("agent-%s.jsonl", id))
+		agentPath := filepath.Join(subagentsDir, fmt.Sprintf("agent-%s.jsonl", id))
 		os.WriteFile(agentPath, []byte(fmt.Sprintf(`{"agent":"%s","line":1}`+"\n", id)), 0644)
 	}
 
@@ -823,7 +830,6 @@ func TestDaemonAgentAppearsMidSession(t *testing.T) {
 	defer server.Close()
 
 	tmpDir, transcriptPath := setupTestEnv(t, server.URL)
-	transcriptDir := filepath.Dir(transcriptPath)
 
 	// Start with transcript that has NO agent references
 	os.WriteFile(transcriptPath, []byte(`{"type":"system","message":"start"}`+"\n"), 0644)
@@ -858,12 +864,13 @@ func TestDaemonAgentAppearsMidSession(t *testing.T) {
 	}
 
 	// Now append agent reference to transcript AND create agent file
-	// Note: agent ID must be valid 8-char hex
 	f, _ := os.OpenFile(transcriptPath, os.O_APPEND|os.O_WRONLY, 0644)
 	f.WriteString(`{"type":"user","toolUseResult":{"agentId":"12345678","result":"done"}}` + "\n")
 	f.Close()
 
-	agentPath := filepath.Join(transcriptDir, "agent-12345678.jsonl")
+	subagentsDir := filepath.Join(filepath.Dir(transcriptPath), "transcript", "subagents")
+	os.MkdirAll(subagentsDir, 0755)
+	agentPath := filepath.Join(subagentsDir, "agent-12345678.jsonl")
 	os.WriteFile(agentPath, []byte(`{"type":"agent","message":"mid-session agent"}`+"\n"), 0644)
 
 	// Wait for sync to pick up the new agent
