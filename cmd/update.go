@@ -369,12 +369,24 @@ func shouldCheckForUpdate() bool {
 }
 
 func getCheckTimePath() string {
-	homeDir, _ := os.UserHomeDir()
+	// Use same directory as config in test environments
+	if testConfigPath := os.Getenv("CONFAB_CONFIG_PATH"); testConfigPath != "" {
+		return filepath.Join(filepath.Dir(testConfigPath), "last_update_check")
+	}
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		logger.Debug("Failed to get home directory for check time: %v", err)
+		return ""
+	}
 	return filepath.Join(homeDir, ".confab", "last_update_check")
 }
 
 func readLastCheckTime() time.Time {
-	data, err := os.ReadFile(getCheckTimePath())
+	path := getCheckTimePath()
+	if path == "" {
+		return time.Time{}
+	}
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return time.Time{}
 	}
@@ -389,8 +401,16 @@ func readLastCheckTime() time.Time {
 
 func writeLastCheckTime() {
 	path := getCheckTimePath()
-	os.MkdirAll(filepath.Dir(path), 0755)
-	os.WriteFile(path, []byte(time.Now().Format(time.RFC3339)), 0644)
+	if path == "" {
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		logger.Debug("Failed to create check time directory: %v", err)
+		return
+	}
+	if err := os.WriteFile(path, []byte(time.Now().Format(time.RFC3339)), 0644); err != nil {
+		logger.Debug("Failed to write check time: %v", err)
+	}
 }
 
 // NotifyIfUpdateAvailable checks for updates and prints a notice if available.
