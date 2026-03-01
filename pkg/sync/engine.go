@@ -206,8 +206,15 @@ func (e *Engine) SyncAll() (int, error) {
 					if chunk.Metadata == nil {
 						chunk.Metadata = &ChunkMetadata{}
 					}
-					chunk.Metadata.Summary = result.Summary
-					chunk.Metadata.FirstUserMessage = result.FirstUserMessage
+					// Apply redaction to metadata — extraction runs on raw lines,
+					// so secrets in summaries/first messages must be redacted before upload.
+					if e.redactor != nil {
+						chunk.Metadata.Summary = e.redactor.Redact(result.Summary)
+						chunk.Metadata.FirstUserMessage = e.redactor.Redact(result.FirstUserMessage)
+					} else {
+						chunk.Metadata.Summary = result.Summary
+						chunk.Metadata.FirstUserMessage = result.FirstUserMessage
+					}
 
 					// Trigger session linking for summaries with leafUuid
 					for _, link := range result.SummaryLinks {

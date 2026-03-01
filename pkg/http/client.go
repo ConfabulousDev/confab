@@ -129,8 +129,8 @@ func (c *Client) DoJSON(method, path string, reqBody, respBody interface{}) erro
 			return fmt.Errorf("failed to marshal request: %w", err)
 		}
 
-		// Log the JSON payload at debug level (before compression)
-		logger.Debug("HTTP %s %s payload: %s", method, path, string(payload))
+		// Log request metadata at debug level (never log payload — it contains transcript content)
+		logger.Debug("HTTP %s %s payload_bytes=%d", method, path, len(payload))
 
 		// Compress if payload is large enough
 		if len(payload) >= compressionThreshold {
