@@ -9,11 +9,13 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 
 	"github.com/ConfabulousDev/confab/pkg/config"
 	pkghttp "github.com/ConfabulousDev/confab/pkg/http"
+	"github.com/ConfabulousDev/confab/pkg/redactor"
 	"github.com/klauspost/compress/zstd"
 )
 
@@ -471,6 +473,71 @@ func TestEngine_SyncAll_WithMetadata(t *testing.T) {
 	}
 	if chunkReq.Metadata.FirstUserMessage != "Help me with this task" {
 		t.Errorf("expected first_user_message 'Help me with this task', got %q", chunkReq.Metadata.FirstUserMessage)
+	}
+}
+
+func TestEngine_SyncAll_MetadataRedaction(t *testing.T) {
+	mock := newMockBackend(t)
+	server := httptest.NewServer(mock)
+	defer server.Close()
+
+	tmpDir, transcriptPath := setupTestEnv(t, server.URL)
+
+	// Transcript where the first user message and summary contain a secret
+	content := `{"type":"user","message":{"content":"Use API key AKIAIOSFODNN7EXAMPLE to deploy"}}
+{"type":"summary","summary":"User deployed with AWS key AKIAIOSFODNN7EXAMPLE"}
+`
+	os.WriteFile(transcriptPath, []byte(content), 0644)
+
+	r, err := redactor.NewRedactor(redactor.Config{
+		Patterns: []redactor.Pattern{{
+			Name:    "AWS Access Key",
+			Pattern: `AKIA[0-9A-Z]{16}`,
+			Type:    "aws_access_key",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("Failed to create redactor: %v", err)
+	}
+
+	engine := NewWithClient(
+		mustNewClient(t, server.URL, tmpDir),
+		r,
+		EngineConfig{
+			ExternalID:     "redact-metadata-test",
+			TranscriptPath: transcriptPath,
+			CWD:            tmpDir,
+		},
+	)
+
+	if err := engine.Init(); err != nil {
+		t.Fatalf("Init failed: %v", err)
+	}
+
+	_, err = engine.SyncAll()
+	if err != nil {
+		t.Fatalf("SyncAll failed: %v", err)
+	}
+
+	chunkReq := mock.chunkRequests[0]
+	if chunkReq.Metadata == nil {
+		t.Fatal("expected metadata in chunk request")
+	}
+
+	// Secrets must be redacted in metadata
+	if strings.Contains(chunkReq.Metadata.Summary, "AKIAIOSFODNN7EXAMPLE") {
+		t.Errorf("summary contains unredacted secret: %q", chunkReq.Metadata.Summary)
+	}
+	if strings.Contains(chunkReq.Metadata.FirstUserMessage, "AKIAIOSFODNN7EXAMPLE") {
+		t.Errorf("first_user_message contains unredacted secret: %q", chunkReq.Metadata.FirstUserMessage)
+	}
+
+	// Verify redaction markers are present
+	if !strings.Contains(chunkReq.Metadata.Summary, "[REDACTED:") {
+		t.Errorf("summary should contain redaction marker, got: %q", chunkReq.Metadata.Summary)
+	}
+	if !strings.Contains(chunkReq.Metadata.FirstUserMessage, "[REDACTED:") {
+		t.Errorf("first_user_message should contain redaction marker, got: %q", chunkReq.Metadata.FirstUserMessage)
 	}
 }
 
