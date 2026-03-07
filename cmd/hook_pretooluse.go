@@ -135,7 +135,8 @@ func handlePreToolUse(r io.Reader, w io.Writer) error {
 		trailerLine := formatTrailerLine(sessionURL)
 		reason := fmt.Sprintf(
 			"✓ Confab is linking this commit to your session. "+
-				"Please include this trailer at the end of your commit message:\n\n    %s",
+				"Add this trailer to the end of your commit message (after any other trailers like Co-Authored-By):\n\n    %s\n\n"+
+				"IMPORTANT: Copy this line verbatim. The value is a URL, NOT a ticket ID like CF-123.",
 			trailerLine,
 		)
 		outputDeny(w, reason)
@@ -147,7 +148,8 @@ func handlePreToolUse(r io.Reader, w io.Writer) error {
 	prLink := formatPRLink(sessionURL)
 	reason := fmt.Sprintf(
 		"✓ Confab is linking this PR to your session. "+
-			"Please include this link in your PR body:\n\n    %s",
+			"Add this line at the bottom of the PR body (just above the \"Generated with Claude Code\" line, if present):\n\n    %s\n\n"+
+			"IMPORTANT: Copy this line verbatim. The value is a URL, NOT a ticket ID like CF-123.",
 		prLink,
 	)
 	outputDeny(w, reason)
@@ -183,7 +185,8 @@ func handleMCPPRCreate(hookInput *types.HookInput, w io.Writer) error {
 	prLink := formatPRLink(sessionURL)
 	reason := fmt.Sprintf(
 		"✓ Confab is linking this PR to your session. "+
-			"Please include this link in your PR body:\n\n    %s",
+			"Add this line at the bottom of the PR body (just above the \"Generated with Claude Code\" line, if present):\n\n    %s\n\n"+
+			"IMPORTANT: Copy this line verbatim. The value is a URL, NOT a ticket ID like CF-123.",
 		prLink,
 	)
 	outputDeny(w, reason)
