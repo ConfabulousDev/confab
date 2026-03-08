@@ -31,27 +31,6 @@ func TruncateEnd(s string, maxLen int) string {
 
 // HTTP client timeouts
 const (
-	// DefaultHTTPTimeout is used for quick API calls like validation
+	// DefaultHTTPTimeout is used for API calls (validation, sync uploads, etc.)
 	DefaultHTTPTimeout = 30 * time.Second
-
-	// UploadHTTPTimeout is used for potentially large file uploads
-	UploadHTTPTimeout = 5 * time.Minute
-)
-
-// HTTP server timeouts
-const (
-	// ServerReadTimeout is the maximum duration for reading the entire request
-	ServerReadTimeout = 30 * time.Second
-
-	// ServerWriteTimeout is the maximum duration before timing out writes of the response
-	ServerWriteTimeout = 30 * time.Second
-
-	// ServerIdleTimeout is the maximum duration to wait for the next request when keep-alives are enabled
-	ServerIdleTimeout = 60 * time.Second
-)
-
-// User interaction timeouts
-const (
-	// OAuthFlowTimeout is the maximum time to wait for user to complete OAuth authentication
-	OAuthFlowTimeout = 5 * time.Minute
 )

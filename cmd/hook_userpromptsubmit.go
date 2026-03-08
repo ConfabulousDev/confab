@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"encoding/json"
 	"io"
 	"os"
 
@@ -62,11 +61,6 @@ func handleUserPromptSubmit(r io.Reader, w io.Writer) error {
 }
 
 // writeUserPromptSubmitResponse writes a success response allowing the prompt to proceed
-func writeUserPromptSubmitResponse(w io.Writer) error {
-	response := types.HookResponse{
-		Continue:       true,
-		StopReason:     "",
-		SuppressOutput: true, // Don't add anything to context
-	}
-	return json.NewEncoder(w).Encode(response)
+func writeUserPromptSubmitResponse(w io.Writer) {
+	writeHookResponse(w, true) // SuppressOutput: don't add anything to context
 }

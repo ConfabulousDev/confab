@@ -82,7 +82,7 @@ This is a cross-cutting change spanning multiple packages:
 
 - **Hook commands must read JSON from stdin and complete quickly.** Claude Code blocks waiting for hook responses. Long-running work must be delegated (e.g., daemon spawn).
 - **Hook commands must not write to stdout except for `HookResponse` JSON.** Claude Code parses stdout as the hook response. Use stderr for status messages.
-- **All hooks use `pkg/types.HookInput`.** Parsed via `discovery.ReadHookInputFrom(os.Stdin)` or `types.ReadHookInput(os.Stdin)`.
+- **All hooks use `pkg/types.HookInput`.** Parsed via `types.ReadHookInput(os.Stdin)` (base validation) or `discovery.ReadHookInputFrom(os.Stdin)` (adds `transcript_path` validation for session hooks).
 - **Hook handlers must always output valid JSON**, even on error. An error should produce a response with `continue: true` rather than crashing with no output.
 - **Commands use `RunE` (not `Run`)** to return errors. Cobra handles error display.
 

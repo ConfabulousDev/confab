@@ -14,7 +14,7 @@ Shared type definitions used across packages to avoid circular imports.
 
 Union type for all Claude Code hook events. A single struct carries fields for every hook type — unused fields are zero-valued. This is intentional: the number of hook types is small and their fields are largely orthogonal, so splitting into separate types would add complexity without benefit.
 
-**Always-present fields:** `SessionID`, `TranscriptPath`
+**Always-present fields:** `SessionID` (validated by `ReadHookInput`). `TranscriptPath` is present for session hooks but not validated at this level — `discovery.ReadHookInputFrom` adds that validation.
 
 **Hook-specific fields:**
 - `UserPromptSubmit`: `Prompt`

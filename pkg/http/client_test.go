@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/klauspost/compress/zstd"
@@ -139,6 +140,92 @@ func TestClient_CompressionRatio(t *testing.T) {
 	// Expect at least 50% reduction for repetitive JSON
 	if ratio > 50 {
 		t.Errorf("expected at least 50%% compression, got %.1f%%", ratio)
+	}
+}
+
+func TestBuildUserAgent(t *testing.T) {
+	t.Run("with version", func(t *testing.T) {
+		ua := BuildUserAgent("1.2.3")
+		if ua == "" {
+			t.Fatal("expected non-empty user agent")
+		}
+		if !strings.Contains(ua, "confab/1.2.3") {
+			t.Errorf("expected 'confab/1.2.3' in user agent, got %q", ua)
+		}
+	})
+
+	t.Run("empty version defaults to dev", func(t *testing.T) {
+		ua := BuildUserAgent("")
+		if !strings.Contains(ua, "confab/dev") {
+			t.Errorf("expected 'confab/dev' in user agent, got %q", ua)
+		}
+	})
+}
+
+func TestClient_RetryOn429(t *testing.T) {
+	attempts := 0
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		if attempts <= 2 {
+			w.Header().Set("Retry-After", "0") // instant retry for test speed
+			w.WriteHeader(http.StatusTooManyRequests)
+			w.Write([]byte(`{"error":"rate limited"}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"ok":true}`))
+	}))
+	defer server.Close()
+
+	client, err := NewClient(&config.UploadConfig{
+		BackendURL: server.URL,
+		APIKey:     "test-key",
+	}, 0)
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	var resp struct{ Ok bool }
+	err = client.Get("/test", &resp)
+	if err != nil {
+		t.Fatalf("expected success after retries, got: %v", err)
+	}
+	if attempts != 3 {
+		t.Errorf("expected 3 attempts (2 retries + 1 success), got %d", attempts)
+	}
+}
+
+func TestClient_RetryExhausted(t *testing.T) {
+	attempts := 0
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		w.Header().Set("Retry-After", "0")
+		w.WriteHeader(http.StatusTooManyRequests)
+		w.Write([]byte(`{"error":"rate limited"}`))
+	}))
+	defer server.Close()
+
+	client, err := NewClient(&config.UploadConfig{
+		BackendURL: server.URL,
+		APIKey:     "test-key",
+	}, 0)
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	var resp struct{ Ok bool }
+	err = client.Get("/test", &resp)
+	if err == nil {
+		t.Fatal("expected error after exhausted retries")
+	}
+	if !errors.Is(err, ErrRateLimited) {
+		t.Errorf("expected ErrRateLimited, got: %v", err)
+	}
+	// maxRetries+1 attempts total (0..maxRetries inclusive)
+	if attempts != maxRetries+1 {
+		t.Errorf("expected %d attempts, got %d", maxRetries+1, attempts)
 	}
 }
 

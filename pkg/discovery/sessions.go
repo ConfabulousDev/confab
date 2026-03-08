@@ -23,17 +23,10 @@ type SessionInfo struct {
 	FirstUserMessage string // First user message content
 }
 
-// GetProjectsDir returns the path to the Claude projects directory
-// (defaults to ~/.claude/projects, can be overridden with CONFAB_CLAUDE_DIR)
-func GetProjectsDir() (string, error) {
-	// Use the centralized helper from config package
-	return config.GetProjectsDir()
-}
-
 // ScanAllSessions finds all session transcript files in ~/.claude/projects/
 // Returns sessions sorted by modification time (oldest first)
 func ScanAllSessions() ([]SessionInfo, error) {
-	projectsDir, err := GetProjectsDir()
+	projectsDir, err := config.GetProjectsDir()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get projects directory: %w", err)
 	}
@@ -81,7 +74,7 @@ func ScanAllSessions() ([]SessionInfo, error) {
 // FindSessionByID finds a session transcript by full or partial ID
 // Returns the full session ID and transcript path
 func FindSessionByID(partialID string) (fullID string, transcriptPath string, err error) {
-	projectsDir, err := GetProjectsDir()
+	projectsDir, err := config.GetProjectsDir()
 	if err != nil {
 		return "", "", err
 	}

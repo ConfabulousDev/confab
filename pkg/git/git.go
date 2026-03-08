@@ -1,11 +1,12 @@
 package git
 
 import (
-	"bufio"
 	"encoding/json"
 	"os"
 	"os/exec"
 	"strings"
+
+	"github.com/ConfabulousDev/confab/pkg/types"
 )
 
 // GitInfo contains git repository information
@@ -158,11 +159,7 @@ func ExtractGitInfoFromTranscript(transcriptPath string) (*GitInfo, error) {
 	}
 	defer file.Close()
 
-	scanner := bufio.NewScanner(file)
-	// Increase buffer size for large lines in transcripts
-	const maxCapacity = 1024 * 1024 // 1MB
-	buf := make([]byte, maxCapacity)
-	scanner.Buffer(buf, maxCapacity)
+	scanner := types.NewJSONLScanner(file)
 
 	var gitInfo *GitInfo
 	var cwd string

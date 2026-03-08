@@ -100,6 +100,6 @@ Override `shutdownTimeout` (package var) in tests for fast execution. Use `CONFA
 
 ## Dependencies
 
-**Uses:** `pkg/sync`, `pkg/config`, `pkg/discovery`, `pkg/types`, `pkg/logger`, `pkg/redactor`
+**Uses:** `pkg/sync`, `pkg/config`, `pkg/http`, `pkg/types`, `pkg/logger`
 
 **Used by:** `cmd/` (spawn, sync start/stop, status)

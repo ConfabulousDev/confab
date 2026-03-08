@@ -171,9 +171,9 @@ func (l *Logger) SetAlsoStderr(enabled bool) {
 	l.alsoStderr = enabled
 }
 
-// SetSessionContext sets a session context that will be included in all log lines.
+// setSessionContext sets a session context that will be included in all log lines.
 // Pass empty string to clear the context.
-func (l *Logger) SetSessionContext(ctx string) {
+func (l *Logger) setSessionContext(ctx string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.sessionCtx = ctx
@@ -191,7 +191,7 @@ func (l *Logger) SetSession(externalID, sessionID string) {
 	} else if sessionID != "" {
 		ctx = fmt.Sprintf("[sess=%s]", shortID(sessionID))
 	}
-	l.SetSessionContext(ctx)
+	l.setSessionContext(ctx)
 }
 
 // shortID returns first 8 chars of an ID for brevity in logs
