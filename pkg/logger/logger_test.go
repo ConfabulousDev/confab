@@ -302,6 +302,111 @@ func TestGet(t *testing.T) {
 	}
 }
 
+func TestSetSession(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "test-log-*.log")
+	if err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+	defer tmpFile.Close()
+
+	l := &Logger{
+		file:   tmpFile,
+		logger: log.New(tmpFile, "", 0),
+		level:  INFO,
+	}
+
+	tests := []struct {
+		name       string
+		externalID string
+		sessionID  string
+		wantCtx    string
+	}{
+		{"both IDs", "abcdef1234567890", "sess1234567890ab", "[ext=abcdef12 sess=sess1234]"},
+		{"external only", "abcdef1234567890", "", "[ext=abcdef12]"},
+		{"session only", "", "sess1234567890ab", "[sess=sess1234]"},
+		{"both empty", "", "", ""},
+		{"short IDs", "abc", "def", "[ext=abc sess=def]"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			l.SetSession(tt.externalID, tt.sessionID)
+
+			// Clear and write a log message
+			tmpFile.Truncate(0)
+			tmpFile.Seek(0, 0)
+			l.Info("test")
+			tmpFile.Sync()
+
+			content, err := os.ReadFile(tmpFile.Name())
+			if err != nil {
+				t.Fatalf("Failed to read log: %v", err)
+			}
+
+			logLine := string(content)
+			if tt.wantCtx != "" {
+				if !strings.Contains(logLine, tt.wantCtx) {
+					t.Errorf("Log line missing context %q. Got: %s", tt.wantCtx, logLine)
+				}
+			} else {
+				// Should not contain any session context brackets
+				if strings.Contains(logLine, "[ext=") || strings.Contains(logLine, "[sess=") {
+					t.Errorf("Log line should have no session context. Got: %s", logLine)
+				}
+			}
+		})
+	}
+}
+
+func TestErrorPrint(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "test-log-*.log")
+	if err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+	defer tmpFile.Close()
+
+	l := &Logger{
+		file:   tmpFile,
+		logger: log.New(tmpFile, "", 0),
+		level:  INFO,
+	}
+
+	// Capture stderr
+	oldStderr := os.Stderr
+	r, w, _ := os.Pipe()
+	os.Stderr = w
+
+	l.ErrorPrint("visible error: %s", "details")
+	w.Close()
+
+	stderrBuf := make([]byte, 4096)
+	n, _ := r.Read(stderrBuf)
+	r.Close()
+	os.Stderr = oldStderr
+
+	// Should appear on stderr without timestamp prefix
+	stderrOut := string(stderrBuf[:n])
+	if !strings.Contains(stderrOut, "visible error: details") {
+		t.Errorf("ErrorPrint should print to stderr. Got: %q", stderrOut)
+	}
+
+	// Should also appear in log file with full formatting
+	tmpFile.Sync()
+	content, err := os.ReadFile(tmpFile.Name())
+	if err != nil {
+		t.Fatalf("Failed to read log: %v", err)
+	}
+	logLine := string(content)
+	if !strings.Contains(logLine, "ERROR:") {
+		t.Errorf("ErrorPrint should log at ERROR level. Got: %s", logLine)
+	}
+	if !strings.Contains(logLine, "visible error: details") {
+		t.Errorf("ErrorPrint should log message. Got: %s", logLine)
+	}
+}
+
 func TestClose(t *testing.T) {
 	// Create temp file for logger
 	tmpFile, err := os.CreateTemp("", "test-log-*.log")

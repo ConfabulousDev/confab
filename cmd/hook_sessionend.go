@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -9,7 +8,6 @@ import (
 	"github.com/ConfabulousDev/confab/pkg/daemon"
 	"github.com/ConfabulousDev/confab/pkg/discovery"
 	"github.com/ConfabulousDev/confab/pkg/logger"
-	"github.com/ConfabulousDev/confab/pkg/types"
 	"github.com/spf13/cobra"
 )
 
@@ -44,14 +42,7 @@ func sessionEndFromReader(r io.Reader) error {
 	logger.Info("Stopping sync daemon (hook mode)")
 
 	// Always output valid hook response, even on error
-	defer func() {
-		response := types.HookResponse{
-			Continue:       true,
-			StopReason:     "",
-			SuppressOutput: false,
-		}
-		json.NewEncoder(os.Stdout).Encode(response)
-	}()
+	defer func() { writeHookResponse(os.Stdout, false) }()
 
 	fmt.Fprintln(os.Stderr, "=== Confab: Stopping Sync Daemon ===")
 	fmt.Fprintln(os.Stderr)

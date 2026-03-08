@@ -97,20 +97,3 @@ type InboxEvent struct {
 	HookInput *HookInput `json:"hook_input,omitempty"` // Full hook payload for session events
 }
 
-// SessionFile represents a file discovered for a session
-type SessionFile struct {
-	Path      string
-	Type      string // "transcript" | "agent"
-	SizeBytes int64
-}
-
-// Session represents a captured session in the database
-type Session struct {
-	SessionID      string
-	TranscriptPath string
-	CWD            string
-	Reason         string
-	Timestamp      time.Time
-	FileCount      int
-	TotalSizeBytes int64
-}

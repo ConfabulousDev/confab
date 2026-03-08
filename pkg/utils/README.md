@@ -6,7 +6,7 @@ Small shared utility functions and timeout constants.
 
 | File | Role |
 |------|------|
-| `strings.go` | String truncation helpers and HTTP/server timeout constants |
+| `strings.go` | String truncation helpers and HTTP timeout constants |
 
 ## Functions
 
@@ -17,12 +17,7 @@ Small shared utility functions and timeout constants.
 
 | Constant | Value | Usage |
 |----------|-------|-------|
-| `DefaultHTTPTimeout` | 30s | Quick API calls (auth validation, events) |
-| `UploadHTTPTimeout` | 5min | Large chunk uploads |
-| `OAuthFlowTimeout` | 5min | Device code login polling |
-| `ServerReadTimeout` | 30s | Server-side (not used in CLI) |
-| `ServerWriteTimeout` | 30s | Server-side |
-| `ServerIdleTimeout` | 60s | Server-side |
+| `DefaultHTTPTimeout` | 30s | API calls (auth validation, sync uploads) |
 
 ## When to Add Here vs. Elsewhere
 
@@ -32,4 +27,4 @@ Add a function here only if it's truly generic and reused by multiple packages. 
 
 **Uses:** standard library only
 
-**Used by:** `cmd/`, `pkg/http/`, `pkg/sync/`
+**Used by:** `cmd/`, `pkg/sync/`

@@ -14,6 +14,7 @@ import (
 	"github.com/ConfabulousDev/confab/pkg/git"
 	"github.com/ConfabulousDev/confab/pkg/logger"
 	"github.com/ConfabulousDev/confab/pkg/redactor"
+	"github.com/ConfabulousDev/confab/pkg/types"
 )
 
 // TrackedFile represents a file being synced
@@ -177,10 +178,12 @@ func (t *FileTracker) ReadChunk(file *TrackedFile, r *redactor.Redactor, maxByte
 		readingFromStart = true
 	}
 
-	// Set up scanner with large buffer for transcripts with big tool results
-	// Buffer must be larger than maxBytes to detect oversized lines
+	// Set up scanner with buffer larger than maxBytes so we can detect when a single
+	// line exceeds the chunk limit. This intentionally doesn't use types.NewJSONLScanner
+	// because the buffer must exceed DefaultMaxChunkBytes (14MB) + headroom = ~24MB,
+	// which is larger than the standard 10MB JSONL scanner buffer.
 	scanner := bufio.NewScanner(f)
-	maxLineSize := maxBytes + 10*1024*1024 // maxBytes + 10MB headroom
+	maxLineSize := maxBytes + types.MaxJSONLLineSize // maxBytes + 10MB headroom
 	scanner.Buffer(make([]byte, bufio.MaxScanTokenSize), maxLineSize)
 
 	lineNum := file.LastSyncedLine // Start counting from where we left off

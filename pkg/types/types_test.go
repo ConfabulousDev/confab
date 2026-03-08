@@ -115,6 +115,64 @@ func TestMaxJSONLLineSize(t *testing.T) {
 	}
 }
 
+func TestReadHookInput(t *testing.T) {
+	t.Run("valid input", func(t *testing.T) {
+		input := `{"session_id":"abc123","transcript_path":"/tmp/test.jsonl","hook_event_name":"SessionStart"}`
+		got, err := ReadHookInput(strings.NewReader(input))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got.SessionID != "abc123" {
+			t.Errorf("SessionID = %q, want %q", got.SessionID, "abc123")
+		}
+		if got.TranscriptPath != "/tmp/test.jsonl" {
+			t.Errorf("TranscriptPath = %q, want %q", got.TranscriptPath, "/tmp/test.jsonl")
+		}
+		if got.HookEventName != "SessionStart" {
+			t.Errorf("HookEventName = %q, want %q", got.HookEventName, "SessionStart")
+		}
+	})
+
+	t.Run("missing session_id", func(t *testing.T) {
+		input := `{"transcript_path":"/tmp/test.jsonl"}`
+		_, err := ReadHookInput(strings.NewReader(input))
+		if err == nil {
+			t.Fatal("expected error for missing session_id")
+		}
+	})
+
+	t.Run("invalid JSON", func(t *testing.T) {
+		_, err := ReadHookInput(strings.NewReader("not json"))
+		if err == nil {
+			t.Fatal("expected error for invalid JSON")
+		}
+	})
+
+	t.Run("empty input", func(t *testing.T) {
+		_, err := ReadHookInput(strings.NewReader(""))
+		if err == nil {
+			t.Fatal("expected error for empty input")
+		}
+	})
+
+	t.Run("optional fields are zero-valued", func(t *testing.T) {
+		input := `{"session_id":"abc123"}`
+		got, err := ReadHookInput(strings.NewReader(input))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got.Prompt != "" {
+			t.Errorf("Prompt should be empty, got %q", got.Prompt)
+		}
+		if got.ToolName != "" {
+			t.Errorf("ToolName should be empty, got %q", got.ToolName)
+		}
+		if got.ParentPID != 0 {
+			t.Errorf("ParentPID should be 0, got %d", got.ParentPID)
+		}
+	})
+}
+
 func TestNewJSONLScanner_RealWorldScenarios(t *testing.T) {
 	t.Run("handles JSONL with thinking blocks", func(t *testing.T) {
 		// Simulate a realistic transcript line with a large thinking block

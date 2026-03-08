@@ -36,6 +36,6 @@ Tests create temporary git repositories with `git init` and verify extraction. `
 
 ## Dependencies
 
-**Uses:** standard library only (os/exec for git commands)
+**Uses:** standard library (os/exec for git commands), `pkg/types` (JSONL scanner)
 
 **Used by:** `cmd/` (post-tool-use hook for commit linking), `pkg/sync/` (metadata extraction)

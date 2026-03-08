@@ -8,6 +8,7 @@ import (
 	"github.com/ConfabulousDev/confab/pkg/config"
 	"github.com/ConfabulousDev/confab/pkg/git"
 	"github.com/ConfabulousDev/confab/pkg/http"
+	"github.com/ConfabulousDev/confab/pkg/utils"
 )
 
 // Client handles communication with the sync API endpoints
@@ -17,7 +18,7 @@ type Client struct {
 
 // NewClient creates a new sync API client
 func NewClient(cfg *config.UploadConfig) (*Client, error) {
-	httpClient, err := http.NewClient(cfg, 30*time.Second)
+	httpClient, err := http.NewClient(cfg, utils.DefaultHTTPTimeout)
 	if err != nil {
 		return nil, err
 	}

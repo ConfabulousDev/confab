@@ -62,14 +62,7 @@ func sessionStartFromReader(r io.Reader) error {
 	AutoUpdateIfNeeded()
 
 	// Always output valid hook response, even on error
-	defer func() {
-		response := types.HookResponse{
-			Continue:       true,
-			StopReason:     "",
-			SuppressOutput: false,
-		}
-		json.NewEncoder(os.Stdout).Encode(response)
-	}()
+	defer func() { writeHookResponse(os.Stdout, false) }()
 
 	fmt.Fprintln(os.Stderr, "=== Confab: Starting Sync Daemon ===")
 	fmt.Fprintln(os.Stderr)

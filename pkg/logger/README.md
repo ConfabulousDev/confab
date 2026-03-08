@@ -23,7 +23,7 @@ logger.Get().SetSession(ext, sess)    // Set "[ext=... sess=...]" prefix
 
 **Singleton pattern.** All packages share one logger instance so session context (external ID, session ID) is set once and appears in all log lines. The alternative — passing a logger to every function — would be significantly more invasive for minimal benefit.
 
-**Lumberjack for rotation.** Uses `gopkg.in/natefinish/lumberjack.v2` for automatic log rotation (1MB max size, 14 day retention, 20 backups, compressed). This is battle-tested and handles edge cases (rotation during write, permission issues) that a hand-rolled solution would miss.
+**Lumberjack for rotation.** Uses `gopkg.in/natefinch/lumberjack.v2` for automatic log rotation (1MB max size, 14 day retention, 20 backups, compressed). This is battle-tested and handles edge cases (rotation during write, permission issues) that a hand-rolled solution would miss.
 
 **`ErrorPrint` exists separately.** Most errors are internal (sync failures, network issues) and only need to go to the log file. Some errors need user visibility (auth failures, setup issues). `ErrorPrint` writes to both the log file and stderr.
 
@@ -38,7 +38,7 @@ logger.Get().SetSession(ext, sess)    // Set "[ext=... sess=...]" prefix
 ## Invariants
 
 - Thread-safe: all methods are mutex-protected.
-- `Init()` must succeed even if the log directory can't be created — falls back to discard.
+- `Get()` must always return a usable logger — if `Init()` fails, `Get()` falls back to a stderr-only logger.
 - `ResetForTesting()` is for tests only — it resets the singleton so the next `Get()` re-initializes.
 
 ## Dependencies
