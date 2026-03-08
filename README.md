@@ -103,6 +103,16 @@ See [Redaction](REDACTION.md) for configuration details.
 | `CONFAB_CONFIG_PATH` | `~/.confab/config.json` | Config file location |
 | `CONFAB_LOG_DIR` | `~/.confab/logs` | Log directory |
 
+## Developer Docs
+
+Each package has a README with extension guides, invariants, and design decisions:
+
+- [`cmd/`](cmd/README.md) — CLI commands and hook handlers
+- [`pkg/`](pkg/README.md) — Package index and dependency map
+  - [`config`](pkg/config/README.md), [`daemon`](pkg/daemon/README.md), [`discovery`](pkg/discovery/README.md), [`git`](pkg/git/README.md), [`http`](pkg/http/README.md), [`logger`](pkg/logger/README.md), [`redactor`](pkg/redactor/README.md), [`sync`](pkg/sync/README.md), [`types`](pkg/types/README.md), [`utils`](pkg/utils/README.md)
+
+See also [`CLAUDE.md`](CLAUDE.md) for AI-oriented architecture notes and development practices.
+
 ## Development
 
 ```bash

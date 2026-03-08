@@ -89,3 +89,4 @@ This is software that runs on user machines. Users trust us with their local env
   deadcode -test ./...   # Find unused code (including test files)
   ```
 - **Clean migrations**: When moving or refactoring code, complete the migration fully. Do not leave duplicate code with deprecation comments "for backwards compatibility." Update all callers (including tests) to use the new location immediately. Stale duplicates cause maintenance burden and inevitably diverge.
+- **Keep documentation up to date**: When changing code, update the corresponding package README (`cmd/README.md`, `pkg/<package>/README.md`). Key things to keep current: file lists, exported API descriptions, invariants, dependency lists, and extension checklists. If a change spans multiple packages, also check `pkg/README.md` (dependency map) and `CLAUDE.md` (architecture overview). Documentation that contradicts the code is worse than no documentation.
