@@ -34,7 +34,7 @@ type tilRequest struct {
 }
 
 type tilResponse struct {
-	ID    string `json:"id"`
+	ID    int64 `json:"id"`
 	Title string `json:"title"`
 }
 
