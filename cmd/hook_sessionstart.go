@@ -61,8 +61,11 @@ func sessionStartFromReader(r io.Reader) error {
 	// Check for updates before starting daemon
 	AutoUpdateIfNeeded()
 
+	// Check for pending feature announcements (e.g., install /til skill)
+	systemMessage := RunAnnouncements()
+
 	// Always output valid hook response, even on error
-	defer func() { writeHookResponse(os.Stdout, false) }()
+	defer func() { writeHookResponseMsg(os.Stdout, false, systemMessage) }()
 
 	fmt.Fprintln(os.Stderr, "=== Confab: Starting Sync Daemon ===")
 	fmt.Fprintln(os.Stderr)

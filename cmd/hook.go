@@ -11,9 +11,16 @@ import (
 // writeHookResponse writes a standard hook response to the given writer.
 // All hooks must output valid JSON, even on error, so Claude Code can continue.
 func writeHookResponse(w io.Writer, suppressOutput bool) {
+	writeHookResponseMsg(w, suppressOutput, "")
+}
+
+// writeHookResponseMsg writes a hook response with an optional systemMessage.
+// The systemMessage is shown as a banner to the user (not added to Claude's context).
+func writeHookResponseMsg(w io.Writer, suppressOutput bool, systemMessage string) {
 	json.NewEncoder(w).Encode(types.HookResponse{
 		Continue:       true,
 		SuppressOutput: suppressOutput,
+		SystemMessage:  systemMessage,
 	})
 }
 

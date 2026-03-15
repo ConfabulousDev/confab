@@ -25,6 +25,9 @@ CLI command layer built on [Cobra](https://github.com/spf13/cobra). Each file de
 | `save.go` | Manual session upload by ID |
 | `install.go` | Copy binary to `~/.local/bin/` |
 | `update.go` | Check/install updates from GitHub Releases |
+| `til.go` | `confab til` — save a TIL to the backend (invoked by /til skill) |
+| `skills.go` | `confab skills add/remove` — install/uninstall Claude Code skills |
+| `announce.go` | General announcement system for post-update feature notifications |
 | `autoupdate.go` | Enable/disable auto-update |
 | `version.go` | Print version info |
 | `redaction.go` | Test redaction rules against a file |
@@ -45,6 +48,10 @@ confab
 ├── hooks
 │   ├── add
 │   └── remove
+├── skills
+│   ├── add
+│   └── remove
+├── til
 ├── login / logout
 ├── setup
 ├── status
@@ -77,6 +84,14 @@ This is a cross-cutting change spanning multiple packages:
 4. **`cmd/status.go`** — Add status check for the new hook
 5. **`cmd/setup.go`** — Add to the setup flow
 6. **`cmd/hook.go`** — Register the new hook command under `hookCmd`
+
+### Adding a new skill
+
+1. **`pkg/config/skill_<name>.go`** — Add template constant, `Install<Name>Skill()`, `Uninstall<Name>Skill()`, `Is<Name>SkillInstalled()`, `Ensure<Name>Skill()`
+2. **`cmd/skills.go`** — Add install/uninstall calls in `skillsAddCmd` and `skillsRemoveCmd`
+3. **`cmd/announce.go`** — Add an `Announcement` entry for auto-rollout on update
+4. **`cmd/status.go`** — Add status check for the new skill
+5. **`cmd/setup.go`** — Add to the setup flow
 
 ## Invariants
 
