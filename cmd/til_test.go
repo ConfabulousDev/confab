@@ -144,7 +144,7 @@ func TestRunTil_Integration(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusCreated)
 			json.NewEncoder(w).Encode(tilResponse{
-				ID:    "til-uuid",
+				ID:    42,
 				Title: receivedReq.Title,
 			})
 			return
@@ -215,8 +215,8 @@ func TestRunTil_Integration(t *testing.T) {
 		t.Fatalf("POST failed: %v", err)
 	}
 
-	if resp.ID != "til-uuid" {
-		t.Errorf("Response ID = %q, want %q", resp.ID, "til-uuid")
+	if resp.ID != 42 {
+		t.Errorf("Response ID = %d, want %d", resp.ID, 42)
 	}
 	if receivedReq.Title != "Test TIL" {
 		t.Errorf("Received title = %q, want %q", receivedReq.Title, "Test TIL")
