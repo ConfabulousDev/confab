@@ -119,6 +119,18 @@ func runSetup(cmd *cobra.Command, args []string) error {
 	settingsPath, _ := config.GetSettingsPath()
 	logger.Info("Hooks installed in %s", settingsPath)
 
+	// Install skills
+	fmt.Println()
+	fmt.Println("Installing skills...")
+	fmt.Println()
+
+	if err := config.InstallTilSkill(); err != nil {
+		logger.Error("Failed to install /til skill: %v", err)
+		return fmt.Errorf("failed to install /til skill: %w", err)
+	}
+	fmt.Println("  ✓ /til skill")
+
+	fmt.Println()
 	fmt.Println("✅ Setup complete. Claude Code sessions will sync to", backendURL)
 
 	return nil

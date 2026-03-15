@@ -74,6 +74,7 @@ type HookResponse struct {
 	Continue       bool   `json:"continue"`
 	StopReason     string `json:"stopReason"`
 	SuppressOutput bool   `json:"suppressOutput"`
+	SystemMessage  string `json:"systemMessage,omitempty"`
 }
 
 // PreToolUseResponse is the JSON response for PreToolUse hooks

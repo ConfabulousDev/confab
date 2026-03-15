@@ -9,6 +9,7 @@ Configuration management for two separate config systems: Confab's own config an
 | `config.go` | Claude Code settings management: read/write `~/.claude/settings.json`, hook install/uninstall |
 | `upload.go` | Confab config: read/write `~/.confab/config.json`, validation, default redaction patterns |
 | `paths.go` | Path resolution with environment variable overrides |
+| `skill_til.go` | `/til` Claude Code skill: install/uninstall/ensure SKILL.md in `~/.claude/skills/til/` |
 
 ## Two Config Systems
 
@@ -17,6 +18,9 @@ Managed by `upload.go`. Contains backend URL, API key, log level, auto-update fl
 
 ### Claude Code settings (`~/.claude/settings.json`)
 Managed by `config.go`. Contains hooks that Claude Code reads to fire events. We install/uninstall hooks here, but Claude Code owns the file and other tools may write to it concurrently.
+
+### Claude Code skills (`~/.claude/skills/`)
+Managed by `skill_til.go` (and future `skill_*.go` files). Skills are SKILL.md files that extend Claude Code with custom slash commands. Unlike hooks (which live in settings.json), skills are standalone files in the skills directory.
 
 ## Key Types
 

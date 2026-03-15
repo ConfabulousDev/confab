@@ -32,7 +32,7 @@ Confab is a CLI tool that captures Claude Code session transcripts and uploads t
 - **pkg/sync/**: Sync engine with client, tracker, and file management (handles incremental uploads)
 - **pkg/discovery/**: Session discovery - scans `~/.claude/projects/` for transcript files
 - **pkg/redactor/**: JSON-aware redaction of sensitive data before upload
-- **pkg/config/**: Configuration and Claude Code hook management (reads/writes `~/.claude/settings.json`)
+- **pkg/config/**: Configuration, Claude Code hook management (`~/.claude/settings.json`), and skill management (`~/.claude/skills/`)
 - **pkg/http/**: HTTP client with zstd compression, auth, and retry logic
 
 ## Data Flow
@@ -49,6 +49,13 @@ Confab installs hooks in `~/.claude/settings.json`:
 - `SessionEnd`: Runs `confab sync stop` to signal graceful shutdown
 
 The daemon also monitors its parent PID and shuts down if Claude Code exits unexpectedly.
+
+## Skills
+
+Confab installs Claude Code skills in `~/.claude/skills/`:
+- `/til`: Capture TILs (Today I Learned) during sessions — user types `/til "what I learned"`, Claude generates a summary from conversation context, and `confab til` posts it to the backend with the transcript position (message UUID)
+
+Skills are managed separately from hooks: `confab skills add/remove` (vs `confab hooks add/remove`).
 
 ## Releasing
 

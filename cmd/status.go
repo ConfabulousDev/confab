@@ -4,9 +4,7 @@ import (
 	"fmt"
 
 	"github.com/ConfabulousDev/confab/pkg/config"
-	confabhttp "github.com/ConfabulousDev/confab/pkg/http"
 	"github.com/ConfabulousDev/confab/pkg/logger"
-	"github.com/ConfabulousDev/confab/pkg/utils"
 	"github.com/spf13/cobra"
 )
 
@@ -82,6 +80,24 @@ var statusCmd = &cobra.Command{
 
 		fmt.Println()
 
+		// Check skills
+		fmt.Println("=== Skills ===")
+		fmt.Println()
+
+		tilInstalled := config.IsTilSkillInstalled()
+		if tilInstalled {
+			fmt.Println("/til Skill: ✓ Installed")
+		} else {
+			fmt.Println("/til Skill: ✗ Not installed")
+		}
+
+		if !tilInstalled {
+			fmt.Println()
+			fmt.Println("Run 'confab skills add' to install missing skills.")
+		}
+
+		fmt.Println()
+
 		// Check backend sync status
 		cfg, err := config.GetUploadConfig()
 		if err != nil {
@@ -94,7 +110,7 @@ var statusCmd = &cobra.Command{
 
 				// Validate API key
 				fmt.Print("  Validating API key... ")
-				if err := validateAPIKey(cfg.BackendURL, cfg.APIKey); err != nil {
+				if err := verifyAPIKey(cfg); err != nil {
 					logger.Error("API key validation failed: %v", err)
 					fmt.Println("✗ Invalid")
 					fmt.Printf("  Error: %v\n", err)
@@ -114,31 +130,6 @@ var statusCmd = &cobra.Command{
 
 		return nil
 	},
-}
-
-// validateAPIKey checks if the API key is valid by calling the backend
-func validateAPIKey(backendURL, apiKey string) error {
-	// Create a temporary config for the HTTP client
-	cfg := &config.UploadConfig{
-		BackendURL: backendURL,
-		APIKey:     apiKey,
-	}
-
-	client, err := confabhttp.NewClient(cfg, utils.DefaultHTTPTimeout)
-	if err != nil {
-		return fmt.Errorf("failed to create http client: %w", err)
-	}
-	var result map[string]interface{}
-
-	if err := client.Get("/api/v1/auth/validate", &result); err != nil {
-		return err
-	}
-
-	if valid, ok := result["valid"].(bool); !ok || !valid {
-		return fmt.Errorf("api key is not valid")
-	}
-
-	return nil
 }
 
 func init() {
