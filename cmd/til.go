@@ -90,8 +90,8 @@ func runTil(session, title, summary string, tags []string) error {
 		return fmt.Errorf("session %s has no backend session ID — daemon may still be initializing", utils.TruncateSecret(session, 8, 0))
 	}
 
-	// Extract message UUID from last line of transcript
-	messageUUID := extractLastMessageUUID(state.TranscriptPath)
+	// Extract message UUID from transcript — targets the /til invocation line
+	messageUUID := extractTilMessageUUID(state.TranscriptPath)
 	logger.Debug("Transcript position: uuid=%s path=%s", messageUUID, state.TranscriptPath)
 
 	if tags == nil {
@@ -118,41 +118,66 @@ func runTil(session, title, summary string, tags []string) error {
 	return nil
 }
 
-// extractLastMessageUUID reads the last line of a JSONL file by seeking backward
-// from the end, and extracts the "uuid" field.
-func extractLastMessageUUID(path string) string {
+// tilCommandMarker is the string that identifies a /til slash command invocation
+// in a Claude Code transcript JSONL line.
+const tilCommandMarker = "<command-name>/til</command-name>"
+
+// extractTilMessageUUID scans backward through the last lines of a transcript
+// JSONL file looking for the /til invocation line. Returns that line's UUID,
+// or falls back to the most recent line with any UUID if the /til line isn't found.
+func extractTilMessageUUID(path string) string {
+	lines, err := readTailLines(path, 100)
+	if err != nil {
+		logger.Debug("Failed to read transcript tail for UUID extraction: %v", err)
+		return ""
+	}
+
+	var fallbackUUID string
+
+	// Scan backward: prefer /til invocation, fall back to last line with any UUID
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := lines[i]
+
+		var msg struct {
+			UUID string `json:"uuid"`
+		}
+		if err := json.Unmarshal([]byte(line), &msg); err != nil || msg.UUID == "" {
+			continue
+		}
+
+		if strings.Contains(line, tilCommandMarker) {
+			return msg.UUID
+		}
+
+		if fallbackUUID == "" {
+			fallbackUUID = msg.UUID
+		}
+	}
+
+	return fallbackUUID
+}
+
+// readTailLines reads up to maxLines non-empty lines from the end of a file.
+// It reads a tail chunk sized to cover the requested number of lines without
+// loading the entire file into memory.
+func readTailLines(path string, maxLines int) ([]string, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		logger.Debug("Failed to open transcript for UUID extraction: %v", err)
-		return ""
+		return nil, err
 	}
 	defer f.Close()
 
-	lastLine := readLastLine(f)
-	if lastLine == "" {
-		return ""
-	}
-
-	var msg struct {
-		UUID string `json:"uuid"`
-	}
-	if err := json.Unmarshal([]byte(lastLine), &msg); err != nil {
-		logger.Debug("Failed to parse last transcript line: %v", err)
-		return ""
-	}
-
-	return msg.UUID
-}
-
-// readLastLine reads the last non-empty line from a file by seeking backward.
-func readLastLine(f *os.File) string {
 	stat, err := f.Stat()
-	if err != nil || stat.Size() == 0 {
-		return ""
+	if err != nil {
+		return nil, err
+	}
+	if stat.Size() == 0 {
+		return nil, nil
 	}
 
-	// Read last 4KB — a single JSONL line is almost certainly within this
-	const chunkSize = 4096
+	// ~250 bytes/line average for JSONL transcripts
+	const bytesPerLine = 250
+	chunkSize := int64(maxLines * bytesPerLine)
 	size := stat.Size()
 	offset := size - chunkSize
 	if offset < 0 {
@@ -161,14 +186,25 @@ func readLastLine(f *os.File) string {
 
 	buf := make([]byte, size-offset)
 	if _, err := f.ReadAt(buf, offset); err != nil && err != io.EOF {
-		return ""
+		return nil, err
 	}
 
-	// Find last non-empty line
 	content := strings.TrimRight(string(buf), "\n\r")
-	idx := strings.LastIndex(content, "\n")
-	if idx >= 0 {
-		return content[idx+1:]
+	if content == "" {
+		return nil, nil
 	}
-	return content
+
+	allLines := strings.Split(content, "\n")
+
+	// If we read from a mid-file offset, the first "line" may be a partial —
+	// drop it to avoid corrupt JSON parsing.
+	if offset > 0 && len(allLines) > 0 {
+		allLines = allLines[1:]
+	}
+
+	if len(allLines) > maxLines {
+		allLines = allLines[len(allLines)-maxLines:]
+	}
+
+	return allLines, nil
 }

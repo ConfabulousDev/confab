@@ -4,6 +4,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -59,14 +60,14 @@ func TestTilRequest_Fields(t *testing.T) {
 	}
 }
 
-func TestExtractLastMessageUUID(t *testing.T) {
+func TestExtractTilMessageUUID(t *testing.T) {
 	tests := []struct {
 		name     string
 		content  string
 		wantUUID string
 	}{
 		{
-			"valid uuid",
+			"fallback to last uuid",
 			`{"type":"user","message":{"content":"Hello"},"uuid":"msg-001"}
 {"type":"assistant","message":{"content":"Hi"},"uuid":"msg-002"}`,
 			"msg-002",
@@ -82,7 +83,7 @@ func TestExtractLastMessageUUID(t *testing.T) {
 			"",
 		},
 		{
-			"single line",
+			"single line with uuid",
 			`{"type":"user","uuid":"only-one"}`,
 			"only-one",
 		},
@@ -93,6 +94,49 @@ func TestExtractLastMessageUUID(t *testing.T) {
 `,
 			"msg-002",
 		},
+		{
+			"til command with last-prompt after",
+			`{"type":"user","message":{"content":"Hello"},"uuid":"msg-001"}
+{"type":"user","message":{"content":"<command-message>til</command-message>\n<command-name>/til</command-name>\n<command-args>learned something</command-args>"},"uuid":"til-uuid"}
+{"type":"user","message":{"content":"skill expansion"},"isMeta":true,"uuid":"meta-uuid"}
+{"type":"assistant","uuid":"assist-uuid"}
+{"type":"last-prompt","lastPrompt":"/til learned something"}`,
+			"til-uuid",
+		},
+		{
+			"til command found even with uuid-bearing lines after it",
+			`{"type":"user","uuid":"msg-001"}
+{"type":"user","message":{"content":"<command-message>til</command-message>\n<command-name>/til</command-name>\n<command-args>test</command-args>"},"uuid":"til-uuid"}
+{"type":"assistant","uuid":"msg-003"}
+{"type":"assistant","uuid":"msg-004"}`,
+			"til-uuid",
+		},
+		{
+			"no til command falls back to last uuid",
+			`{"type":"user","uuid":"msg-001"}
+{"type":"assistant","uuid":"msg-002"}
+{"type":"last-prompt","lastPrompt":"hello"}`,
+			"msg-002",
+		},
+		{
+			"multiple uuid-less lines at end",
+			`{"type":"user","uuid":"msg-001"}
+{"type":"last-prompt"}
+{"type":"last-prompt"}`,
+			"msg-001",
+		},
+		{
+			"no lines have uuid",
+			`{"type":"last-prompt"}`,
+			"",
+		},
+		{
+			"til command with empty uuid falls back",
+			`{"type":"user","uuid":"msg-001"}
+{"type":"user","message":{"content":"<command-message>til</command-message>\n<command-name>/til</command-name>"},"uuid":""}
+{"type":"assistant","uuid":"msg-003"}`,
+			"msg-003",
+		},
 	}
 
 	for _, tt := range tests {
@@ -101,19 +145,40 @@ func TestExtractLastMessageUUID(t *testing.T) {
 			path := filepath.Join(tmpDir, "transcript.jsonl")
 			os.WriteFile(path, []byte(tt.content), 0644)
 
-			got := extractLastMessageUUID(path)
+			got := extractTilMessageUUID(path)
 			if got != tt.wantUUID {
-				t.Errorf("extractLastMessageUUID() = %q, want %q", got, tt.wantUUID)
+				t.Errorf("extractTilMessageUUID() = %q, want %q", got, tt.wantUUID)
 			}
 		})
 	}
 }
 
-func TestExtractLastMessageUUID_LargeFile(t *testing.T) {
+func TestExtractTilMessageUUID_LargeFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	path := filepath.Join(tmpDir, "transcript.jsonl")
 
-	// Build a file with many lines, UUID only on last line
+	// Build a large file: many filler lines, then /til command, then UUID-less lines
+	var lines []string
+	for i := 0; i < 1000; i++ {
+		lines = append(lines, fmt.Sprintf(`{"type":"assistant","message":{"content":"filler line %d"},"uuid":"filler-%d"}`, i, i))
+	}
+	lines = append(lines, `{"type":"user","message":{"content":"<command-message>til</command-message>\n<command-name>/til</command-name>\n<command-args>big file test</command-args>"},"uuid":"til-in-large-file"}`)
+	lines = append(lines, `{"type":"assistant","uuid":"after-til"}`)
+	lines = append(lines, `{"type":"last-prompt","lastPrompt":"/til big file test"}`)
+
+	os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0644)
+
+	got := extractTilMessageUUID(path)
+	if got != "til-in-large-file" {
+		t.Errorf("extractTilMessageUUID() = %q, want %q", got, "til-in-large-file")
+	}
+}
+
+func TestExtractTilMessageUUID_LargeFileFallback(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "transcript.jsonl")
+
+	// Large file with no /til command — should fall back to last UUID
 	var lines []string
 	for i := 0; i < 1000; i++ {
 		lines = append(lines, `{"type":"assistant","message":{"content":"filler line"}}`)
@@ -122,16 +187,88 @@ func TestExtractLastMessageUUID_LargeFile(t *testing.T) {
 
 	os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0644)
 
-	got := extractLastMessageUUID(path)
+	got := extractTilMessageUUID(path)
 	if got != "last-uuid-in-large-file" {
-		t.Errorf("extractLastMessageUUID() = %q, want %q", got, "last-uuid-in-large-file")
+		t.Errorf("extractTilMessageUUID() = %q, want %q", got, "last-uuid-in-large-file")
 	}
 }
 
-func TestExtractLastMessageUUID_NonexistentFile(t *testing.T) {
-	got := extractLastMessageUUID("/nonexistent/path.jsonl")
+func TestExtractTilMessageUUID_NonexistentFile(t *testing.T) {
+	got := extractTilMessageUUID("/nonexistent/path.jsonl")
 	if got != "" {
-		t.Errorf("extractLastMessageUUID() = %q, want empty for nonexistent file", got)
+		t.Errorf("extractTilMessageUUID() = %q, want empty for nonexistent file", got)
+	}
+}
+
+func TestReadTailLines(t *testing.T) {
+	tests := []struct {
+		name      string
+		content   string
+		maxLines  int
+		wantCount int
+		wantLast  string
+	}{
+		{
+			"fewer lines than max",
+			"line1\nline2\nline3",
+			100,
+			3,
+			"line3",
+		},
+		{
+			"exactly max lines",
+			"line1\nline2\nline3",
+			3,
+			3,
+			"line3",
+		},
+		{
+			"more lines than max",
+			"line1\nline2\nline3\nline4\nline5",
+			3,
+			3,
+			"line5",
+		},
+		{
+			"empty file",
+			"",
+			100,
+			0,
+			"",
+		},
+		{
+			"trailing newline",
+			"line1\nline2\n",
+			100,
+			2,
+			"line2",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			path := filepath.Join(tmpDir, "test.jsonl")
+			os.WriteFile(path, []byte(tt.content), 0644)
+
+			lines, err := readTailLines(path, tt.maxLines)
+			if err != nil {
+				t.Fatalf("readTailLines() error = %v", err)
+			}
+			if len(lines) != tt.wantCount {
+				t.Errorf("readTailLines() returned %d lines, want %d", len(lines), tt.wantCount)
+			}
+			if tt.wantLast != "" && len(lines) > 0 && lines[len(lines)-1] != tt.wantLast {
+				t.Errorf("last line = %q, want %q", lines[len(lines)-1], tt.wantLast)
+			}
+		})
+	}
+}
+
+func TestReadTailLines_NonexistentFile(t *testing.T) {
+	_, err := readTailLines("/nonexistent/path.jsonl", 100)
+	if err == nil {
+		t.Error("readTailLines() should return error for nonexistent file")
 	}
 }
 
@@ -153,53 +290,31 @@ func TestRunTil_Integration(t *testing.T) {
 	}))
 	defer server.Close()
 
-	// Set up daemon state
+	// Create transcript with /til command followed by last-prompt (realistic scenario)
 	tmpDir := t.TempDir()
-	sessionID := "test-session-001"
+	transcriptPath := filepath.Join(tmpDir, "test-session-001.jsonl")
+	transcript := strings.Join([]string{
+		`{"type":"user","message":{"content":"Hello"},"uuid":"msg-001"}`,
+		`{"type":"user","message":{"content":"<command-message>til</command-message>\n<command-name>/til</command-name>\n<command-args>test</command-args>"},"uuid":"msg-999"}`,
+		`{"type":"assistant","uuid":"msg-after"}`,
+		`{"type":"last-prompt","lastPrompt":"/til test"}`,
+	}, "\n") + "\n"
+	os.WriteFile(transcriptPath, []byte(transcript), 0644)
 
-	// Create transcript file
-	transcriptPath := filepath.Join(tmpDir, sessionID+".jsonl")
-	os.WriteFile(transcriptPath, []byte(`{"type":"user","uuid":"msg-999"}`+"\n"), 0644)
+	// Verify UUID extraction finds the /til command line
+	messageUUID := extractTilMessageUUID(transcriptPath)
+	if messageUUID != "msg-999" {
+		t.Fatalf("extractTilMessageUUID() = %q, want %q", messageUUID, "msg-999")
+	}
 
-	// Create daemon state file
-	homeDir := t.TempDir()
-	t.Setenv("HOME", homeDir)
-	syncDir := filepath.Join(homeDir, ".confab", "sync")
-	os.MkdirAll(syncDir, 0755)
-
-	stateData, _ := json.Marshal(map[string]any{
-		"external_id":       sessionID,
-		"transcript_path":   transcriptPath,
-		"cwd":               tmpDir,
-		"pid":               os.Getpid(),
-		"confab_session_id": "backend-sess-123",
-		"started_at":        "2026-01-01T00:00:00Z",
-	})
-	os.WriteFile(filepath.Join(syncDir, sessionID+".json"), stateData, 0600)
-
-	// Create config
-	confabDir := filepath.Join(homeDir, ".confab")
-	configData, _ := json.Marshal(map[string]string{
-		"backend_url": server.URL,
-		"api_key":     "test-key",
-	})
-	os.WriteFile(filepath.Join(confabDir, "config.json"), configData, 0600)
-
-	// Run the command
+	// Build and POST the TIL request
 	cfg := &config.UploadConfig{
 		BackendURL: server.URL,
 		APIKey:     "test-key",
 	}
-
 	client, err := confabhttp.NewClient(cfg, utils.DefaultHTTPTimeout)
 	if err != nil {
 		t.Fatalf("Failed to create client: %v", err)
-	}
-
-	// Test the request building and posting directly
-	messageUUID := extractLastMessageUUID(transcriptPath)
-	if messageUUID != "msg-999" {
-		t.Fatalf("extractLastMessageUUID() = %q, want %q", messageUUID, "msg-999")
 	}
 
 	req := &tilRequest{
