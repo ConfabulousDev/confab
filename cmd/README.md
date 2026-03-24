@@ -26,6 +26,8 @@ CLI command layer built on [Cobra](https://github.com/spf13/cobra). Each file de
 | `install.go` | Copy binary to `~/.local/bin/` |
 | `update.go` | Check/install updates from GitHub Releases |
 | `til.go` | `confab til` — save a TIL to the backend (invoked by /til skill) |
+| `session.go` | Parent command for session subcommands (`confab session <cmd>`) |
+| `session_get.go` | `confab session get` — fetch condensed session transcript from backend |
 | `skills.go` | `confab skills add/remove` — install/uninstall Claude Code skills |
 | `announce.go` | General announcement system for post-update feature notifications |
 | `autoupdate.go` | Enable/disable auto-update |
@@ -51,6 +53,8 @@ confab
 ├── skills
 │   ├── add
 │   └── remove
+├── session
+│   └── get
 ├── til
 ├── login / logout
 ├── setup
