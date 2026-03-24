@@ -25,6 +25,9 @@ Confab is a CLI tool that captures Claude Code session transcripts and uploads t
 ### Manual Mode
 - `confab save <session-id>`: Upload a specific session by ID
 
+### Retrieval
+- `confab session get [--external-id] [--max-chars N] <id>`: Fetch a condensed session transcript from the backend API. Outputs pretty-printed JSON (metadata + transcript). Useful for piping to local AI tools for retrospection.
+
 ## Key Packages
 
 - **cmd/**: Cobra command handlers (root.go registers all subcommands)
@@ -34,6 +37,10 @@ Confab is a CLI tool that captures Claude Code session transcripts and uploads t
 - **pkg/redactor/**: JSON-aware redaction of sensitive data before upload
 - **pkg/config/**: Configuration, Claude Code hook management (`~/.claude/settings.json`), and skill management (`~/.claude/skills/`)
 - **pkg/http/**: HTTP client with zstd compression, auth, and retry logic
+
+## Backend
+
+The backend API lives in the sibling repo `../confab-web`. When implementing CLI commands that call backend endpoints, verify the actual API contract by reading handler code there — don't rely solely on ticket specs or documentation.
 
 ## Data Flow
 
