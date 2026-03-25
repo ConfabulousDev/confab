@@ -91,7 +91,14 @@ var statusCmd = &cobra.Command{
 			fmt.Println("/til Skill: ✗ Not installed")
 		}
 
-		if !tilInstalled {
+		retroInstalled := config.IsRetroSkillInstalled()
+		if retroInstalled {
+			fmt.Println("/retro Skill: ✓ Installed")
+		} else {
+			fmt.Println("/retro Skill: ✗ Not installed")
+		}
+
+		if !tilInstalled || !retroInstalled {
 			fmt.Println()
 			fmt.Println("Run 'confab skills add' to install missing skills.")
 		}

@@ -54,6 +54,7 @@ The daemon also monitors its parent PID and shuts down if Claude Code exits unex
 
 Confab installs Claude Code skills in `~/.claude/skills/`:
 - `/til`: Capture TILs (Today I Learned) during sessions — user types `/til "what I learned"`, Claude generates a summary from conversation context, and `confab til` posts it to the backend with the transcript position (message UUID)
+- `/retro`: Review and discuss session transcripts — user types `/retro <session-id> [question]`, Claude fetches the condensed transcript via `confab retro`, optionally reads local raw JSONL for richer data, and engages in discussion about the session
 
 Skills are managed separately from hooks: `confab skills add/remove` (vs `confab hooks add/remove`).
 
