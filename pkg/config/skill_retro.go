@@ -25,22 +25,29 @@ learnings, identify patterns, or critique the approach.
 Parse "$ARGUMENTS": the first whitespace-delimited token is the session ID,
 everything after it is the user's question or focus area (may be empty).
 
-1. Fetch the condensed transcript from the backend:
+1. Fetch the condensed transcript and write output files. Pick a stable
+   output directory with a timestamp so repeated retros don't overwrite
+   each other, and reuse it for retries:
 
 ` + "```bash" + `
-confab retro <session-id>
+RETRO_DIR="/tmp/retro-$(date +%s)"
+confab retro --output-dir "$RETRO_DIR" <session-id>
 ` + "```" + `
 
    If that returns a "session not found" error, retry treating the ID as an
    external (CLI) session ID:
 
 ` + "```bash" + `
-confab retro --external-id <session-id>
+confab retro --output-dir "$RETRO_DIR" --external-id <session-id>
 ` + "```" + `
 
-2. From the JSON response, note the "external_id" field in the metadata.
-   Search for a local raw transcript that may contain richer data (full tool
-   outputs, thinking blocks):
+   This writes two files (response.json and transcript.xml) to the output
+   directory. Note the file paths printed to stderr — use those for later
+   Read calls.
+
+2. From the JSON metadata, note the "external_id" field. Search for a local
+   raw transcript that may contain richer data (full tool outputs, thinking
+   blocks):
 
 ` + "```" + `
 Glob: ~/.claude/projects/**/<external_id>.jsonl
@@ -55,9 +62,9 @@ Glob: ~/.claude/projects/**/<external_id>.jsonl
 4. If the user provided a question or focus area, answer it. Otherwise, engage
    in open-ended discussion about the session.
 
-For deeper dives into specific moments, use Read on the local raw transcript
-if available. The condensed transcript is good for overview; the raw JSONL has
-the full detail.
+For deeper dives into specific moments, Read transcript.xml or the local raw
+transcript if available. The condensed transcript is good for overview; the
+raw JSONL has the full detail.
 `
 
 // retroSkillRelPath is the path to the skill file relative to the Claude state directory.

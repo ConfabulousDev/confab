@@ -1,62 +1,130 @@
-// ABOUTME: Smoke test for the confab retro command.
-// ABOUTME: Verifies the command wires flags correctly and delegates to runSessionGet.
+// ABOUTME: Tests for the confab retro command.
+// ABOUTME: Validates --output-dir file writing (JSON + transcript extraction) and directory creation.
 package cmd
 
 import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
-
-	"github.com/ConfabulousDev/confab/pkg/config"
-	confabhttp "github.com/ConfabulousDev/confab/pkg/http"
-	"github.com/ConfabulousDev/confab/pkg/utils"
 )
 
-func TestRunRetro_Success(t *testing.T) {
+func TestRunRetro_StdoutOnly(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"metadata":   map[string]interface{}{"session_id": "uuid-123"},
+			"transcript": "<transcript/>",
+		})
+	}))
+	defer server.Close()
+
+	tmpDir := t.TempDir()
+	cfgPath := filepath.Join(tmpDir, "config.json")
+	cfgContent := `{"backend_url":"` + server.URL + `","api_key":"test-key"}`
+	if err := os.WriteFile(cfgPath, []byte(cfgContent), 0600); err != nil {
+		t.Fatalf("Failed to write config: %v", err)
+	}
+	t.Setenv("CONFAB_CONFIG_PATH", cfgPath)
+
+	// Empty outputDir means stdout only — no files should be written
+	if err := runRetro("uuid-123", false, 0, ""); err != nil {
+		t.Fatalf("runRetro() error = %v", err)
+	}
+}
+
+func TestRunRetro_OutputDir(t *testing.T) {
+	transcriptXML := "<transcript>\n<user>Hello</user>\n</transcript>"
 	backendResp := map[string]interface{}{
 		"metadata": map[string]interface{}{
 			"session_id":  "uuid-123",
 			"external_id": "ext-456",
 			"title":       "Test Session",
 		},
-		"transcript": "<transcript>\n<user>Hello</user>\n</transcript>",
+		"transcript": transcriptXML,
 	}
 
-	var receivedPath string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		receivedPath = r.URL.RequestURI()
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(backendResp)
 	}))
 	defer server.Close()
 
-	cfg := &config.UploadConfig{BackendURL: server.URL, APIKey: "test-key"}
-	client, err := confabhttp.NewClient(cfg, utils.DefaultHTTPTimeout)
+	tmpDir := t.TempDir()
+	outputDir := filepath.Join(tmpDir, "retro-out")
+
+	// Write a config file so EnsureAuthenticated succeeds
+	cfgPath := filepath.Join(tmpDir, "config.json")
+	cfgContent := `{"backend_url":"` + server.URL + `","api_key":"test-key"}`
+	if err := os.WriteFile(cfgPath, []byte(cfgContent), 0600); err != nil {
+		t.Fatalf("Failed to write config: %v", err)
+	}
+	t.Setenv("CONFAB_CONFIG_PATH", cfgPath)
+
+	err := runRetro("uuid-123", false, 0, outputDir)
 	if err != nil {
-		t.Fatalf("Failed to create client: %v", err)
+		t.Fatalf("runRetro() error = %v", err)
 	}
 
-	// Verify that the same path-building logic used by retro (via runSessionGet) works
-	path := buildSessionGetPath("uuid-123", false, 0)
-
-	var raw json.RawMessage
-	if err := client.Get(path, &raw); err != nil {
-		t.Fatalf("Get() error = %v", err)
-	}
-
-	if receivedPath != "/api/v1/sessions/uuid-123/condensed-transcript" {
-		t.Errorf("received path = %q, want %q", receivedPath, "/api/v1/sessions/uuid-123/condensed-transcript")
+	// Check response.json was written
+	jsonPath := filepath.Join(outputDir, "response.json")
+	jsonContent, err := os.ReadFile(jsonPath)
+	if err != nil {
+		t.Fatalf("Failed to read response.json: %v", err)
 	}
 
 	var parsed map[string]interface{}
-	if err := json.Unmarshal(raw, &parsed); err != nil {
-		t.Fatalf("Failed to parse raw JSON: %v", err)
+	if err := json.Unmarshal(jsonContent, &parsed); err != nil {
+		t.Fatalf("response.json is not valid JSON: %v", err)
 	}
 	if _, ok := parsed["metadata"]; !ok {
-		t.Error("response missing 'metadata' field")
+		t.Error("response.json missing 'metadata' field")
 	}
-	if _, ok := parsed["transcript"]; !ok {
-		t.Error("response missing 'transcript' field")
+
+	// Check transcript.xml was written
+	xmlPath := filepath.Join(outputDir, "transcript.xml")
+	xmlContent, err := os.ReadFile(xmlPath)
+	if err != nil {
+		t.Fatalf("Failed to read transcript.xml: %v", err)
+	}
+
+	if string(xmlContent) != transcriptXML {
+		t.Errorf("transcript.xml = %q, want %q", string(xmlContent), transcriptXML)
+	}
+}
+
+func TestRunRetro_OutputDir_CreatesDirectory(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"metadata":   map[string]interface{}{"session_id": "id"},
+			"transcript": "<t/>",
+		})
+	}))
+	defer server.Close()
+
+	tmpDir := t.TempDir()
+	outputDir := filepath.Join(tmpDir, "nested", "deep", "retro-out")
+
+	cfgPath := filepath.Join(tmpDir, "config.json")
+	cfgContent := `{"backend_url":"` + server.URL + `","api_key":"test-key"}`
+	if err := os.WriteFile(cfgPath, []byte(cfgContent), 0600); err != nil {
+		t.Fatalf("Failed to write config: %v", err)
+	}
+	t.Setenv("CONFAB_CONFIG_PATH", cfgPath)
+
+	err := runRetro("id", false, 0, outputDir)
+	if err != nil {
+		t.Fatalf("runRetro() error = %v", err)
+	}
+
+	// Both files should exist in the nested directory
+	if _, err := os.Stat(filepath.Join(outputDir, "response.json")); err != nil {
+		t.Errorf("response.json not created: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(outputDir, "transcript.xml")); err != nil {
+		t.Errorf("transcript.xml not created: %v", err)
 	}
 }
