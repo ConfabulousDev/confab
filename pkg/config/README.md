@@ -40,12 +40,11 @@ Managed by `skill_til.go`, `skill_retro.go` (and future `skill_*.go` files). Ski
 ### Adding a new hook type
 This spans multiple packages. On the config side:
 
-1. Add `Install<Name>Hook()` in `config.go` — follow the pattern of existing hooks:
-   - `SessionStart`/`SessionEnd` use `"*"` matchers
-   - `PreToolUse`/`PostToolUse` use tool name matchers (e.g., `Bash`, `mcp__github`)
-   - `UserPromptSubmit` has no matcher
-2. Add `Uninstall<Name>Hook()` — must handle both old and new command patterns
-3. Add `Is<Name>HookInstalled()` — for status checking
+1. Add `Install<Name>Hook()` in `config.go` using the shared helpers:
+   - `installHook(settings, hook, event, matcher, true)` — for hooks with a matcher (e.g., `"*"`, `"Bash"`)
+   - `installHook(settings, hook, event, "", false)` — for hooks without a matcher (e.g., `UserPromptSubmit`)
+2. Add `Uninstall<Name>Hook()` using `removeHooksFromEvent(settings, event, isConfabHookEntry)` — must also handle old command patterns via custom predicates if needed
+3. Add `Is<Name>HookInstalled()` using `hasHookWithCommand()` — for status checking
 4. Then update: `cmd/hooks.go` (install/uninstall calls), `cmd/status.go` (status check), `cmd/setup.go` (setup flow), `cmd/hook.go` (dispatch)
 
 ## Invariants

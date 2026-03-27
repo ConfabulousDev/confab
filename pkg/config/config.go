@@ -291,6 +291,154 @@ func isConfabCommand(command string) bool {
 	return baseName == "confab"
 }
 
+// isConfabHookEntry checks if a hook entry is a confab command hook.
+func isConfabHookEntry(hook map[string]any) bool {
+	cmd, _ := hook["command"].(string)
+	return hook["type"] == "command" && isConfabCommand(cmd)
+}
+
+// getHooksList extracts and validates the hooks array from a matcher entry.
+// Returns nil with debug logging if missing or invalid type.
+func getHooksList(entry map[string]any, eventName string, entryIdx int) []any {
+	hooksListRaw, exists := entry["hooks"]
+	if !exists {
+		return nil
+	}
+	hooksList, ok := hooksListRaw.([]any)
+	if !ok {
+		logger.Debug("settings.json: hooks[%q][%d].hooks has unexpected type %T (expected array)", eventName, entryIdx, hooksListRaw)
+		return nil
+	}
+	return hooksList
+}
+
+// installHook installs a confab hook for a specific event.
+// When hasMatcher is true, it looks for an entry whose "matcher" key equals matcherValue.
+// When hasMatcher is false, it looks for an entry where the "matcher" key is entirely absent.
+func installHook(settings *ClaudeSettings, hook map[string]any, eventName, matcherValue string, hasMatcher bool) {
+	eventHooks := settings.getEventHooks(eventName)
+
+	for i, entryAny := range eventHooks {
+		entry, ok := entryAny.(map[string]any)
+		if !ok {
+			logger.Debug("settings.json: hooks[%q][%d] has unexpected type %T (expected object), skipping", eventName, i, entryAny)
+			continue
+		}
+
+		// Check if this entry matches our target
+		if hasMatcher {
+			if entry["matcher"] != matcherValue {
+				continue
+			}
+		} else {
+			if _, has := entry["matcher"]; has {
+				continue
+			}
+		}
+
+		// Found matching entry — look for existing confab hook to update
+		hooksList := getHooksList(entry, eventName, i)
+		for j, existingHookAny := range hooksList {
+			existingHook, ok := existingHookAny.(map[string]any)
+			if !ok {
+				logger.Debug("settings.json: hooks[%q][%d].hooks[%d] has unexpected type %T (expected object), skipping", eventName, i, j, existingHookAny)
+				continue
+			}
+			if isConfabHookEntry(existingHook) {
+				hooksList[j] = hook
+				entry["hooks"] = hooksList
+				eventHooks[i] = entry
+				settings.setEventHooks(eventName, eventHooks)
+				return
+			}
+		}
+
+		// No existing confab hook, append
+		hooksList = append(hooksList, hook)
+		entry["hooks"] = hooksList
+		eventHooks[i] = entry
+		settings.setEventHooks(eventName, eventHooks)
+		return
+	}
+
+	// No matching entry found, create new one
+	newEntry := map[string]any{
+		"hooks": []any{hook},
+	}
+	if hasMatcher {
+		newEntry["matcher"] = matcherValue
+	}
+	eventHooks = append(eventHooks, newEntry)
+	settings.setEventHooks(eventName, eventHooks)
+}
+
+// removeHooksFromEvent removes hooks matching a predicate from all matchers of an event.
+// Empty matchers (no remaining hooks) are dropped.
+func removeHooksFromEvent(settings *ClaudeSettings, eventName string, shouldRemove func(map[string]any) bool) {
+	eventHooks := settings.getEventHooks(eventName)
+	if len(eventHooks) == 0 {
+		return
+	}
+
+	var updatedMatchers []any
+	for i, matcherAny := range eventHooks {
+		matcher, ok := matcherAny.(map[string]any)
+		if !ok {
+			logger.Debug("settings.json: hooks[%q][%d] has unexpected type %T (expected object), preserving as-is", eventName, i, matcherAny)
+			updatedMatchers = append(updatedMatchers, matcherAny)
+			continue
+		}
+
+		hooksList := getHooksList(matcher, eventName, i)
+		if hooksList == nil {
+			updatedMatchers = append(updatedMatchers, matcher)
+			continue
+		}
+
+		var remainingHooks []any
+		for j, hookAny := range hooksList {
+			hook, ok := hookAny.(map[string]any)
+			if !ok {
+				logger.Debug("settings.json: hooks[%q][%d].hooks[%d] has unexpected type %T (expected object), preserving as-is", eventName, i, j, hookAny)
+				remainingHooks = append(remainingHooks, hookAny)
+				continue
+			}
+			if !shouldRemove(hook) {
+				remainingHooks = append(remainingHooks, hook)
+			}
+		}
+
+		if len(remainingHooks) > 0 {
+			matcher["hooks"] = remainingHooks
+			updatedMatchers = append(updatedMatchers, matcher)
+		}
+	}
+	settings.setEventHooks(eventName, updatedMatchers)
+}
+
+// findHookInEvent searches for a hook matching a predicate across all matchers of an event.
+func findHookInEvent(settings *ClaudeSettings, eventName string, matches func(map[string]any) bool) bool {
+	eventHooks := settings.getEventHooks(eventName)
+	for i, matcherAny := range eventHooks {
+		matcher, ok := matcherAny.(map[string]any)
+		if !ok {
+			logger.Debug("settings.json: hooks[%q][%d] has unexpected type %T (expected object), skipping", eventName, i, matcherAny)
+			continue
+		}
+		for j, hookAny := range getHooksList(matcher, eventName, i) {
+			hook, ok := hookAny.(map[string]any)
+			if !ok {
+				logger.Debug("settings.json: hooks[%q][%d].hooks[%d] has unexpected type %T (expected object), skipping", eventName, i, j, hookAny)
+				continue
+			}
+			if matches(hook) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // InstallSyncHooks installs hooks for incremental sync daemon
 // This installs both SessionStart (to start daemon) and SessionEnd (to stop daemon)
 func InstallSyncHooks() error {
@@ -310,143 +458,29 @@ func InstallSyncHooks() error {
 	}
 
 	return AtomicUpdateSettings(func(settings *ClaudeSettings) error {
-		// Install SessionStart hook
-		installHookForEvent(settings, "SessionStart", sessionStartHook)
-
-		// Install SessionEnd hook
-		installHookForEvent(settings, "SessionEnd", sessionEndHook)
-
+		installHook(settings, sessionStartHook, "SessionStart", "*", true)
+		installHook(settings, sessionEndHook, "SessionEnd", "*", true)
 		return nil
 	})
 }
 
-// installHookForEvent installs a hook for a specific event type
-func installHookForEvent(settings *ClaudeSettings, eventName string, hook map[string]any) {
-	eventHooks := settings.getEventHooks(eventName)
-
-	// Check if hook is already installed in an existing "*" matcher
-	for i, matcherAny := range eventHooks {
-		matcher, ok := matcherAny.(map[string]any)
-		if !ok {
-			logger.Debug("settings.json: hooks[%q][%d] has unexpected type %T (expected object), skipping", eventName, i, matcherAny)
-			continue
-		}
-		if matcher["matcher"] != "*" {
-			continue
-		}
-
-		// Found a "*" matcher, check if confab is already in its hooks
-		hooksListRaw, exists := matcher["hooks"]
-		var hooksList []any
-		if exists {
-			hooksList, ok = hooksListRaw.([]any)
-			if !ok {
-				logger.Debug("settings.json: hooks[%q][%d].hooks has unexpected type %T (expected array), treating as empty", eventName, i, hooksListRaw)
-				hooksList = []any{}
-			}
-		}
-
-		for j, existingHookAny := range hooksList {
-			existingHook, ok := existingHookAny.(map[string]any)
-			if !ok {
-				logger.Debug("settings.json: hooks[%q][%d].hooks[%d] has unexpected type %T (expected object), skipping", eventName, i, j, existingHookAny)
-				continue
-			}
-			cmd, _ := existingHook["command"].(string)
-			if existingHook["type"] == "command" && isConfabCommand(cmd) {
-				// Already installed, update it in place
-				hooksList[j] = hook
-				matcher["hooks"] = hooksList
-				eventHooks[i] = matcher
-				settings.setEventHooks(eventName, eventHooks)
-				return
-			}
-		}
-
-		// No existing confab hook, add to this matcher
-		hooksList = append(hooksList, hook)
-		matcher["hooks"] = hooksList
-		eventHooks[i] = matcher
-		settings.setEventHooks(eventName, eventHooks)
-		return
-	}
-
-	// No "*" matcher found, create new one
-	newMatcher := map[string]any{
-		"matcher": "*",
-		"hooks":   []any{hook},
-	}
-	eventHooks = append(eventHooks, newMatcher)
-	settings.setEventHooks(eventName, eventHooks)
-}
-
-// UninstallSyncHooks removes the sync daemon hooks
-// This handles both old ("sync start/stop") and new ("hook session-start/end") patterns
+// UninstallSyncHooks removes the sync daemon hooks.
+// This handles both old ("sync start/stop") and new ("hook session-start/end") patterns.
 func UninstallSyncHooks() error {
 	return AtomicUpdateSettings(func(settings *ClaudeSettings) error {
-		// Remove both old and new patterns for SessionStart
-		uninstallSyncHookForEvent(settings, "SessionStart", "sync start")
-		uninstallSyncHookForEvent(settings, "SessionStart", "hook session-start")
-
-		// Remove both old and new patterns for SessionEnd
-		uninstallSyncHookForEvent(settings, "SessionEnd", "sync stop")
-		uninstallSyncHookForEvent(settings, "SessionEnd", "hook session-end")
+		isSyncHook := func(hook map[string]any) bool {
+			cmd, _ := hook["command"].(string)
+			return hook["type"] == "command" &&
+				(isConfabCommand(cmd) ||
+					strings.Contains(cmd, "sync start") ||
+					strings.Contains(cmd, "sync stop") ||
+					strings.Contains(cmd, "hook session-start") ||
+					strings.Contains(cmd, "hook session-end"))
+		}
+		removeHooksFromEvent(settings, "SessionStart", isSyncHook)
+		removeHooksFromEvent(settings, "SessionEnd", isSyncHook)
 		return nil
 	})
-}
-
-// uninstallSyncHookForEvent removes sync hooks from a specific event type
-// It removes hooks that either match isConfabCommand OR contain the syncCommand string
-func uninstallSyncHookForEvent(settings *ClaudeSettings, eventName, syncCommand string) {
-	eventHooks := settings.getEventHooks(eventName)
-	if len(eventHooks) == 0 {
-		return
-	}
-
-	var updatedMatchers []any
-	for i, matcherAny := range eventHooks {
-		matcher, ok := matcherAny.(map[string]any)
-		if !ok {
-			logger.Debug("settings.json: hooks[%q][%d] has unexpected type %T (expected object), preserving as-is", eventName, i, matcherAny)
-			updatedMatchers = append(updatedMatchers, matcherAny)
-			continue
-		}
-
-		hooksListRaw, exists := matcher["hooks"]
-		if !exists {
-			updatedMatchers = append(updatedMatchers, matcher)
-			continue
-		}
-		hooksList, ok := hooksListRaw.([]any)
-		if !ok {
-			logger.Debug("settings.json: hooks[%q][%d].hooks has unexpected type %T (expected array), preserving matcher as-is", eventName, i, hooksListRaw)
-			updatedMatchers = append(updatedMatchers, matcher)
-			continue
-		}
-
-		var remainingHooks []any
-		for j, hookAny := range hooksList {
-			hook, ok := hookAny.(map[string]any)
-			if !ok {
-				logger.Debug("settings.json: hooks[%q][%d].hooks[%d] has unexpected type %T (expected object), preserving as-is", eventName, i, j, hookAny)
-				remainingHooks = append(remainingHooks, hookAny)
-				continue
-			}
-
-			cmd, _ := hook["command"].(string)
-			isSyncHook := hook["type"] == "command" &&
-				(isConfabCommand(cmd) || strings.Contains(cmd, syncCommand))
-			if !isSyncHook {
-				remainingHooks = append(remainingHooks, hook)
-			}
-		}
-
-		if len(remainingHooks) > 0 {
-			matcher["hooks"] = remainingHooks
-			updatedMatchers = append(updatedMatchers, matcher)
-		}
-	}
-	settings.setEventHooks(eventName, updatedMatchers)
 }
 
 // IsSyncHooksInstalled checks if sync daemon hooks are installed
@@ -470,35 +504,10 @@ func IsSyncHooksInstalled() (bool, error) {
 
 // hasHookWithCommand checks if a confab hook with the given command substring exists
 func hasHookWithCommand(settings *ClaudeSettings, eventName, cmdSubstring string) bool {
-	eventHooks := settings.getEventHooks(eventName)
-	for i, matcherAny := range eventHooks {
-		matcher, ok := matcherAny.(map[string]any)
-		if !ok {
-			logger.Debug("settings.json: hooks[%q][%d] has unexpected type %T (expected object), skipping", eventName, i, matcherAny)
-			continue
-		}
-		hooksListRaw, exists := matcher["hooks"]
-		if !exists {
-			continue
-		}
-		hooksList, ok := hooksListRaw.([]any)
-		if !ok {
-			logger.Debug("settings.json: hooks[%q][%d].hooks has unexpected type %T (expected array), skipping", eventName, i, hooksListRaw)
-			continue
-		}
-		for j, hookAny := range hooksList {
-			hook, ok := hookAny.(map[string]any)
-			if !ok {
-				logger.Debug("settings.json: hooks[%q][%d].hooks[%d] has unexpected type %T (expected object), skipping", eventName, i, j, hookAny)
-				continue
-			}
-			cmd, _ := hook["command"].(string)
-			if hook["type"] == "command" && isConfabCommand(cmd) && strings.Contains(cmd, cmdSubstring) {
-				return true
-			}
-		}
-	}
-	return false
+	return findHookInEvent(settings, eventName, func(hook map[string]any) bool {
+		cmd, _ := hook["command"].(string)
+		return hook["type"] == "command" && isConfabCommand(cmd) && strings.Contains(cmd, cmdSubstring)
+	})
 }
 
 // InstallPreToolUseHooks installs the PreToolUse hook for git commit validation.
@@ -515,148 +524,31 @@ func InstallPreToolUseHooks() error {
 	}
 
 	return AtomicUpdateSettings(func(settings *ClaudeSettings) error {
-		installPreToolUseHook(settings, preToolUseHook)
+		for _, matcher := range toolUseMatchers {
+			installHook(settings, preToolUseHook, "PreToolUse", matcher, true)
+		}
 		return nil
 	})
 }
 
-// Tool names for PreToolUse hook matching
+// Tool names for PreToolUse/PostToolUse hook matching
 const (
 	ToolNameBash              = "Bash"
 	ToolNameMCPGitHubCreatePR = "mcp__github__create_pull_request"
 )
 
-// preToolUseMatchers are the tool names we want to intercept for session linking.
-var preToolUseMatchers = []string{
+// toolUseMatchers are the tool names we intercept for session linking and PR tracking.
+var toolUseMatchers = []string{
 	ToolNameBash,              // git commit, gh pr create
 	ToolNameMCPGitHubCreatePR, // GitHub MCP tool
-}
-
-// installPreToolUseHook installs hooks for PreToolUse with specific matchers.
-func installPreToolUseHook(settings *ClaudeSettings, hook map[string]any) {
-	for _, matcher := range preToolUseMatchers {
-		installHookForMatcher(settings, hook, "PreToolUse", matcher)
-	}
-}
-
-// installHookForMatcher installs a hook for a specific event and tool matcher.
-func installHookForMatcher(settings *ClaudeSettings, hook map[string]any, eventName, matcherValue string) {
-	eventHooks := settings.getEventHooks(eventName)
-
-	// Check if hook is already installed in an existing matcher
-	for i, matcherAny := range eventHooks {
-		matcher, ok := matcherAny.(map[string]any)
-		if !ok {
-			logger.Debug("settings.json: hooks[%q][%d] has unexpected type %T (expected object), skipping", eventName, i, matcherAny)
-			continue
-		}
-		if matcher["matcher"] != matcherValue {
-			continue
-		}
-
-		// Found matching matcher, check if confab is already in its hooks
-		hooksListRaw, exists := matcher["hooks"]
-		var hooksList []any
-		if exists {
-			hooksList, ok = hooksListRaw.([]any)
-			if !ok {
-				logger.Debug("settings.json: hooks[%q][%d].hooks has unexpected type %T (expected array), treating as empty", eventName, i, hooksListRaw)
-				hooksList = []any{}
-			}
-		}
-
-		for j, existingHookAny := range hooksList {
-			existingHook, ok := existingHookAny.(map[string]any)
-			if !ok {
-				logger.Debug("settings.json: hooks[%q][%d].hooks[%d] has unexpected type %T (expected object), skipping", eventName, i, j, existingHookAny)
-				continue
-			}
-			cmd, _ := existingHook["command"].(string)
-			if existingHook["type"] == "command" && isConfabCommand(cmd) {
-				// Already installed, update it in place
-				hooksList[j] = hook
-				matcher["hooks"] = hooksList
-				eventHooks[i] = matcher
-				settings.setEventHooks(eventName, eventHooks)
-				return
-			}
-		}
-
-		// No existing confab hook, add to this matcher
-		hooksList = append(hooksList, hook)
-		matcher["hooks"] = hooksList
-		eventHooks[i] = matcher
-		settings.setEventHooks(eventName, eventHooks)
-		return
-	}
-
-	// No matching matcher found, create new one
-	newMatcher := map[string]any{
-		"matcher": matcherValue,
-		"hooks":   []any{hook},
-	}
-	eventHooks = append(eventHooks, newMatcher)
-	settings.setEventHooks(eventName, eventHooks)
 }
 
 // UninstallPreToolUseHooks removes the PreToolUse hook
 func UninstallPreToolUseHooks() error {
 	return AtomicUpdateSettings(func(settings *ClaudeSettings) error {
-		uninstallHook(settings, "PreToolUse")
+		removeHooksFromEvent(settings, "PreToolUse", isConfabHookEntry)
 		return nil
 	})
-}
-
-// uninstallHook removes confab hooks from the specified event
-func uninstallHook(settings *ClaudeSettings, eventName string) {
-	eventHooks := settings.getEventHooks(eventName)
-	if len(eventHooks) == 0 {
-		return
-	}
-
-	var updatedMatchers []any
-	for i, matcherAny := range eventHooks {
-		matcher, ok := matcherAny.(map[string]any)
-		if !ok {
-			logger.Debug("settings.json: hooks[%q][%d] has unexpected type %T (expected object), preserving as-is", eventName, i, matcherAny)
-			updatedMatchers = append(updatedMatchers, matcherAny)
-			continue
-		}
-
-		hooksListRaw, exists := matcher["hooks"]
-		if !exists {
-			updatedMatchers = append(updatedMatchers, matcher)
-			continue
-		}
-		hooksList, ok := hooksListRaw.([]any)
-		if !ok {
-			logger.Debug("settings.json: hooks[%q][%d].hooks has unexpected type %T (expected array), preserving matcher as-is", eventName, i, hooksListRaw)
-			updatedMatchers = append(updatedMatchers, matcher)
-			continue
-		}
-
-		var remainingHooks []any
-		for j, hookAny := range hooksList {
-			hook, ok := hookAny.(map[string]any)
-			if !ok {
-				logger.Debug("settings.json: hooks[%q][%d].hooks[%d] has unexpected type %T (expected object), preserving as-is", eventName, i, j, hookAny)
-				remainingHooks = append(remainingHooks, hookAny)
-				continue
-			}
-
-			cmd, _ := hook["command"].(string)
-			isConfabHook := hook["type"] == "command" && isConfabCommand(cmd)
-			if !isConfabHook {
-				remainingHooks = append(remainingHooks, hook)
-			}
-		}
-
-		if len(remainingHooks) > 0 {
-			matcher["hooks"] = remainingHooks
-			updatedMatchers = append(updatedMatchers, matcher)
-		}
-	}
-	settings.setEventHooks(eventName, updatedMatchers)
 }
 
 // IsPreToolUseHooksInstalled checks if the PreToolUse hook is installed
@@ -683,29 +575,17 @@ func InstallPostToolUseHooks() error {
 	}
 
 	return AtomicUpdateSettings(func(settings *ClaudeSettings) error {
-		installPostToolUseHook(settings, postToolUseHook)
+		for _, matcher := range toolUseMatchers {
+			installHook(settings, postToolUseHook, "PostToolUse", matcher, true)
+		}
 		return nil
 	})
-}
-
-// postToolUseMatchers are the tool names we want to intercept for PR link tracking.
-// Same as PreToolUse since we need to capture output from the same tools.
-var postToolUseMatchers = []string{
-	ToolNameBash,              // gh pr create
-	ToolNameMCPGitHubCreatePR, // GitHub MCP tool
-}
-
-// installPostToolUseHook installs hooks for PostToolUse with specific matchers.
-func installPostToolUseHook(settings *ClaudeSettings, hook map[string]any) {
-	for _, matcher := range postToolUseMatchers {
-		installHookForMatcher(settings, hook, "PostToolUse", matcher)
-	}
 }
 
 // UninstallPostToolUseHooks removes the PostToolUse hook
 func UninstallPostToolUseHooks() error {
 	return AtomicUpdateSettings(func(settings *ClaudeSettings) error {
-		uninstallHook(settings, "PostToolUse")
+		removeHooksFromEvent(settings, "PostToolUse", isConfabHookEntry)
 		return nil
 	})
 }
@@ -734,76 +614,15 @@ func InstallUserPromptSubmitHook() error {
 	}
 
 	return AtomicUpdateSettings(func(settings *ClaudeSettings) error {
-		installHookWithoutMatcher(settings, "UserPromptSubmit", hook)
+		installHook(settings, hook, "UserPromptSubmit", "", false)
 		return nil
 	})
-}
-
-// installHookWithoutMatcher installs a hook for events that don't use matchers
-// (e.g., UserPromptSubmit). The structure is: { "hooks": [...] } without a "matcher" key.
-func installHookWithoutMatcher(settings *ClaudeSettings, eventName string, hook map[string]any) {
-	eventHooks := settings.getEventHooks(eventName)
-
-	// Look for an existing entry without a matcher (or update existing confab hook)
-	for i, entryAny := range eventHooks {
-		entry, ok := entryAny.(map[string]any)
-		if !ok {
-			logger.Debug("settings.json: hooks[%q][%d] has unexpected type %T (expected object), skipping", eventName, i, entryAny)
-			continue
-		}
-
-		// Skip entries that have a matcher (shouldn't happen for UserPromptSubmit, but be safe)
-		if _, hasMatcher := entry["matcher"]; hasMatcher {
-			continue
-		}
-
-		hooksListRaw, exists := entry["hooks"]
-		var hooksList []any
-		if exists {
-			hooksList, ok = hooksListRaw.([]any)
-			if !ok {
-				logger.Debug("settings.json: hooks[%q][%d].hooks has unexpected type %T (expected array), treating as empty", eventName, i, hooksListRaw)
-				hooksList = []any{}
-			}
-		}
-
-		// Check if confab hook already exists
-		for j, existingHookAny := range hooksList {
-			existingHook, ok := existingHookAny.(map[string]any)
-			if !ok {
-				continue
-			}
-			cmd, _ := existingHook["command"].(string)
-			if existingHook["type"] == "command" && isConfabCommand(cmd) {
-				// Update existing hook
-				hooksList[j] = hook
-				entry["hooks"] = hooksList
-				eventHooks[i] = entry
-				settings.setEventHooks(eventName, eventHooks)
-				return
-			}
-		}
-
-		// Add to existing entry
-		hooksList = append(hooksList, hook)
-		entry["hooks"] = hooksList
-		eventHooks[i] = entry
-		settings.setEventHooks(eventName, eventHooks)
-		return
-	}
-
-	// No suitable entry found, create new one (without matcher)
-	newEntry := map[string]any{
-		"hooks": []any{hook},
-	}
-	eventHooks = append(eventHooks, newEntry)
-	settings.setEventHooks(eventName, eventHooks)
 }
 
 // UninstallUserPromptSubmitHook removes the UserPromptSubmit hook
 func UninstallUserPromptSubmitHook() error {
 	return AtomicUpdateSettings(func(settings *ClaudeSettings) error {
-		uninstallHook(settings, "UserPromptSubmit")
+		removeHooksFromEvent(settings, "UserPromptSubmit", isConfabHookEntry)
 		return nil
 	})
 }
