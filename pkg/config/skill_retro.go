@@ -34,13 +34,6 @@ RETRO_DIR="/tmp/retro-$(date +%s)"
 confab retro --output-dir "$RETRO_DIR" <session-id>
 ` + "```" + `
 
-   If that returns a "session not found" error, retry treating the ID as an
-   external (CLI) session ID:
-
-` + "```bash" + `
-confab retro --output-dir "$RETRO_DIR" --external-id <session-id>
-` + "```" + `
-
    This writes two files (response.json and transcript.xml) to the output
    directory. Note the file paths printed to stderr — use those for later
    Read calls.

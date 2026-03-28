@@ -254,6 +254,66 @@ func (c *Client) Patch(path string, reqBody, respBody interface{}) error {
 	return c.DoJSON("PATCH", path, reqBody, respBody)
 }
 
+// GetRawToWriter performs a GET request and streams the response body to w.
+// Unlike Get/DoJSON, this does not attempt JSON unmarshaling — it copies the
+// raw response bytes directly. Handles auth and error status mapping, but does
+// not retry on 429 (retrying a stream would produce corrupt output since
+// partial data from the first attempt is already written to w).
+func (c *Client) GetRawToWriter(path string, w io.Writer) error {
+	url := c.cfg.BackendURL + path
+
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Authorization", "Bearer "+c.cfg.APIKey)
+	if userAgent != "" {
+		req.Header.Set("User-Agent", userAgent)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if err := checkStreamResponseStatus(resp); err != nil {
+		return err
+	}
+
+	if _, err := io.Copy(w, io.LimitReader(resp.Body, maxResponseSize)); err != nil {
+		return fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	return nil
+}
+
+// checkStreamResponseStatus maps HTTP error status codes to sentinel errors.
+// Used by GetRawToWriter where the response body hasn't been fully read yet.
+func checkStreamResponseStatus(resp *http.Response) error {
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		return nil
+	}
+
+	// 429 returns immediately without reading body — the caller may retry elsewhere
+	if resp.StatusCode == http.StatusTooManyRequests {
+		return fmt.Errorf("%w: status %d", ErrRateLimited, resp.StatusCode)
+	}
+
+	// Read a snippet of the body for error context
+	snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 256))
+
+	switch {
+	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
+		return fmt.Errorf("%w: status %d: %s", ErrUnauthorized, resp.StatusCode, string(snippet))
+	case resp.StatusCode == http.StatusNotFound:
+		return fmt.Errorf("%w: status %d: %s", ErrSessionNotFound, resp.StatusCode, string(snippet))
+	default:
+		return fmt.Errorf("http request failed with status %d: %s", resp.StatusCode, string(snippet))
+	}
+}
+
 // truncateBody truncates a response body for safe inclusion in error messages.
 func truncateBody(body []byte, maxLen int) string {
 	if len(body) <= maxLen {

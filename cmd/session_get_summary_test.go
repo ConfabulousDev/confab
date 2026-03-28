@@ -1,4 +1,4 @@
-// ABOUTME: Tests for the confab session get command.
+// ABOUTME: Tests for the confab session get-summary command.
 // ABOUTME: Validates URL construction, JSON passthrough, and error handling.
 package cmd
 
@@ -13,46 +13,28 @@ import (
 	"github.com/ConfabulousDev/confab/pkg/utils"
 )
 
-func TestBuildSessionGetPath(t *testing.T) {
+func TestBuildSessionGetSummaryPath(t *testing.T) {
 	tests := []struct {
-		name       string
-		id         string
-		externalID bool
-		maxChars   int
-		want       string
+		name     string
+		id       string
+		maxChars int
+		want     string
 	}{
 		{
 			"uuid",
 			"abc-123",
-			false,
 			0,
 			"/api/v1/sessions/abc-123/condensed-transcript",
 		},
 		{
 			"uuid with max-chars",
 			"abc-123",
-			false,
 			5000,
 			"/api/v1/sessions/abc-123/condensed-transcript?max_chars=5000",
 		},
 		{
-			"external-id",
-			"my-session",
-			true,
-			0,
-			"/api/v1/sessions/condensed-transcript?external_id=my-session",
-		},
-		{
-			"external-id with max-chars",
-			"my-session",
-			true,
-			3000,
-			"/api/v1/sessions/condensed-transcript?external_id=my-session&max_chars=3000",
-		},
-		{
 			"uuid with special characters",
 			"id/with spaces",
-			false,
 			0,
 			"/api/v1/sessions/id%2Fwith%20spaces/condensed-transcript",
 		},
@@ -60,15 +42,15 @@ func TestBuildSessionGetPath(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := buildSessionGetPath(tt.id, tt.externalID, tt.maxChars)
+			got := buildSessionGetSummaryPath(tt.id, tt.maxChars)
 			if got != tt.want {
-				t.Errorf("buildSessionGetPath() = %q, want %q", got, tt.want)
+				t.Errorf("buildSessionGetSummaryPath() = %q, want %q", got, tt.want)
 			}
 		})
 	}
 }
 
-func TestRunSessionGet_Success(t *testing.T) {
+func TestRunSessionGetSummary_Success(t *testing.T) {
 	backendResp := map[string]interface{}{
 		"metadata": map[string]interface{}{
 			"session_id":  "uuid-123",
@@ -93,7 +75,7 @@ func TestRunSessionGet_Success(t *testing.T) {
 		t.Fatalf("Failed to create client: %v", err)
 	}
 
-	path := buildSessionGetPath("uuid-123", false, 0)
+	path := buildSessionGetSummaryPath("uuid-123", 0)
 
 	var raw json.RawMessage
 	if err := client.Get(path, &raw); err != nil {
@@ -104,7 +86,6 @@ func TestRunSessionGet_Success(t *testing.T) {
 		t.Errorf("received path = %q, want %q", receivedPath, "/api/v1/sessions/uuid-123/condensed-transcript")
 	}
 
-	// Verify raw JSON contains expected fields
 	var parsed map[string]interface{}
 	if err := json.Unmarshal(raw, &parsed); err != nil {
 		t.Fatalf("Failed to parse raw JSON: %v", err)
@@ -117,38 +98,7 @@ func TestRunSessionGet_Success(t *testing.T) {
 	}
 }
 
-func TestRunSessionGet_ExternalID(t *testing.T) {
-	var receivedPath string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		receivedPath = r.URL.RequestURI()
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"metadata":   map[string]interface{}{"session_id": "resolved-uuid"},
-			"transcript": "<transcript></transcript>",
-		})
-	}))
-	defer server.Close()
-
-	cfg := &config.UploadConfig{BackendURL: server.URL, APIKey: "test-key"}
-	client, err := confabhttp.NewClient(cfg, utils.DefaultHTTPTimeout)
-	if err != nil {
-		t.Fatalf("Failed to create client: %v", err)
-	}
-
-	path := buildSessionGetPath("my-ext-id", true, 5000)
-
-	var raw json.RawMessage
-	if err := client.Get(path, &raw); err != nil {
-		t.Fatalf("Get() error = %v", err)
-	}
-
-	want := "/api/v1/sessions/condensed-transcript?external_id=my-ext-id&max_chars=5000"
-	if receivedPath != want {
-		t.Errorf("received path = %q, want %q", receivedPath, want)
-	}
-}
-
-func TestRunSessionGet_NotFound(t *testing.T) {
+func TestRunSessionGetSummary_NotFound(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 		w.Write([]byte(`{"error":"Session not found"}`))
@@ -161,7 +111,7 @@ func TestRunSessionGet_NotFound(t *testing.T) {
 		t.Fatalf("Failed to create client: %v", err)
 	}
 
-	path := buildSessionGetPath("nonexistent", false, 0)
+	path := buildSessionGetSummaryPath("nonexistent", 0)
 
 	var raw json.RawMessage
 	err = client.Get(path, &raw)
@@ -170,7 +120,7 @@ func TestRunSessionGet_NotFound(t *testing.T) {
 	}
 }
 
-func TestRunSessionGet_Unauthorized(t *testing.T) {
+func TestRunSessionGetSummary_Unauthorized(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
 		w.Write([]byte(`{"error":"Unauthorized"}`))
@@ -183,7 +133,7 @@ func TestRunSessionGet_Unauthorized(t *testing.T) {
 		t.Fatalf("Failed to create client: %v", err)
 	}
 
-	path := buildSessionGetPath("some-id", false, 0)
+	path := buildSessionGetSummaryPath("some-id", 0)
 
 	var raw json.RawMessage
 	err = client.Get(path, &raw)

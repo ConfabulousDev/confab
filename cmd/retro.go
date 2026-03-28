@@ -3,9 +3,7 @@
 package cmd
 
 import (
-	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -17,9 +15,8 @@ import (
 )
 
 var (
-	retroExternalID bool
-	retroMaxChars   int
-	retroOutputDir  string
+	retroMaxChars  int
+	retroOutputDir string
 )
 
 var retroCmd = &cobra.Command{
@@ -36,23 +33,21 @@ With --output-dir, it also writes two files:
 
 Examples:
   confab retro abc123-uuid-here
-  confab retro --external-id my-session-id
   confab retro --output-dir /tmp/retro abc123-uuid-here`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		defer NotifyIfUpdateAvailable()
-		return runRetro(args[0], retroExternalID, retroMaxChars, retroOutputDir)
+		return runRetro(args[0], retroMaxChars, retroOutputDir)
 	},
 }
 
 func init() {
-	retroCmd.Flags().BoolVar(&retroExternalID, "external-id", false, "Treat <id> as the CLI session external_id instead of UUID")
 	retroCmd.Flags().IntVar(&retroMaxChars, "max-chars", 0, "Truncate transcript to last N characters")
 	retroCmd.Flags().StringVar(&retroOutputDir, "output-dir", "", "Write response.json and transcript.xml to this directory")
 	rootCmd.AddCommand(retroCmd)
 }
 
-func runRetro(id string, externalID bool, maxChars int, outputDir string) error {
+func runRetro(id string, maxChars int, outputDir string) error {
 	cfg, err := config.EnsureAuthenticated()
 	if err != nil {
 		return err
@@ -63,19 +58,9 @@ func runRetro(id string, externalID bool, maxChars int, outputDir string) error 
 		return fmt.Errorf("failed to create HTTP client: %w", err)
 	}
 
-	path := buildSessionGetPath(id, externalID, maxChars)
-
-	var raw json.RawMessage
-	if err := client.Get(path, &raw); err != nil {
-		if errors.Is(err, confabhttp.ErrSessionNotFound) {
-			return fmt.Errorf("session not found")
-		}
-		return fmt.Errorf("failed to fetch session: %w", err)
-	}
-
-	var pretty bytes.Buffer
-	if err := json.Indent(&pretty, raw, "", "  "); err != nil {
-		return fmt.Errorf("failed to format response: %w", err)
+	raw, pretty, err := fetchCondensedTranscript(client, id, maxChars)
+	if err != nil {
+		return err
 	}
 
 	fmt.Println(pretty.String())

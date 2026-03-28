@@ -28,7 +28,9 @@ CLI command layer built on [Cobra](https://github.com/spf13/cobra). Each file de
 | `til.go` | `confab til` — save a TIL to the backend (invoked by /til skill) |
 | `retro.go` | `confab retro` — fetch session transcript for retrospective (invoked by /retro skill) |
 | `session.go` | Parent command for session subcommands (`confab session <cmd>`) |
-| `session_get.go` | `confab session get` — fetch condensed session transcript from backend |
+| `session_get_summary.go` | `confab session get-summary` — fetch condensed session transcript from backend |
+| `session_download.go` | `confab session download` — download raw JSONL transcript files from backend |
+| `session_list_files.go` | `confab session list-files` — list transcript file metadata for a session |
 | `skills.go` | `confab skills add/remove` — install/uninstall Claude Code skills |
 | `announce.go` | General announcement system for post-update feature notifications |
 | `autoupdate.go` | Enable/disable auto-update |
@@ -55,7 +57,9 @@ confab
 │   ├── add
 │   └── remove
 ├── session
-│   └── get
+│   ├── get-summary
+│   ├── download
+│   └── list-files
 ├── til
 ├── retro
 ├── login / logout

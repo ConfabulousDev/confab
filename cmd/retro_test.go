@@ -30,7 +30,7 @@ func TestRunRetro_StdoutOnly(t *testing.T) {
 	t.Setenv("CONFAB_CONFIG_PATH", cfgPath)
 
 	// Empty outputDir means stdout only — no files should be written
-	if err := runRetro("uuid-123", false, 0, ""); err != nil {
+	if err := runRetro("uuid-123", 0, ""); err != nil {
 		t.Fatalf("runRetro() error = %v", err)
 	}
 }
@@ -63,7 +63,7 @@ func TestRunRetro_OutputDir(t *testing.T) {
 	}
 	t.Setenv("CONFAB_CONFIG_PATH", cfgPath)
 
-	err := runRetro("uuid-123", false, 0, outputDir)
+	err := runRetro("uuid-123", 0, outputDir)
 	if err != nil {
 		t.Fatalf("runRetro() error = %v", err)
 	}
@@ -115,7 +115,7 @@ func TestRunRetro_OutputDir_CreatesDirectory(t *testing.T) {
 	}
 	t.Setenv("CONFAB_CONFIG_PATH", cfgPath)
 
-	err := runRetro("id", false, 0, outputDir)
+	err := runRetro("id", 0, outputDir)
 	if err != nil {
 		t.Fatalf("runRetro() error = %v", err)
 	}

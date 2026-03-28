@@ -26,7 +26,9 @@ Confab is a CLI tool that captures Claude Code session transcripts and uploads t
 - `confab save <session-id>`: Upload a specific session by ID
 
 ### Retrieval
-- `confab session get [--external-id] [--max-chars N] <id>`: Fetch a condensed session transcript from the backend API. Outputs pretty-printed JSON (metadata + transcript). Useful for piping to local AI tools for retrospection.
+- `confab session get-summary [--max-chars N] <id>`: Fetch a condensed session transcript from the backend API. Outputs pretty-printed JSON (metadata + transcript). Useful for piping to local AI tools for retrospection.
+- `confab session download [--output-dir <dir>] <id>`: Download raw JSONL transcript files. By default streams main transcript to stdout; with `--output-dir`, downloads all files (transcript + agents) to a directory.
+- `confab session list-files <id>`: List raw transcript files for a session with metadata (name, type, lines, last updated).
 
 ## Key Packages
 

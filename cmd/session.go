@@ -1,4 +1,4 @@
-// ABOUTME: Parent command for session-related subcommands (get, etc.).
+// ABOUTME: Parent command for session-related subcommands (get-summary, download, list-files).
 // ABOUTME: Groups commands for querying and retrieving session data from the backend.
 package cmd
 

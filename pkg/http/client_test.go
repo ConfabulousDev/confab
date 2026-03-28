@@ -1,6 +1,7 @@
 package http
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"io"
@@ -227,6 +228,120 @@ func TestClient_RetryExhausted(t *testing.T) {
 	if attempts != maxRetries+1 {
 		t.Errorf("expected %d attempts, got %d", maxRetries+1, attempts)
 	}
+}
+
+func TestClient_GetRawToWriter(t *testing.T) {
+	t.Run("streams response to writer", func(t *testing.T) {
+		want := "line1\nline2\nline3\n"
+		var receivedAuth string
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			receivedAuth = r.Header.Get("Authorization")
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			w.Write([]byte(want))
+		}))
+		defer server.Close()
+
+		client, err := NewClient(&config.UploadConfig{
+			BackendURL: server.URL,
+			APIKey:     "test-key",
+		}, 0)
+		if err != nil {
+			t.Fatalf("failed to create client: %v", err)
+		}
+
+		var buf bytes.Buffer
+		if err := client.GetRawToWriter("/download", &buf); err != nil {
+			t.Fatalf("GetRawToWriter() error = %v", err)
+		}
+
+		if buf.String() != want {
+			t.Errorf("got %q, want %q", buf.String(), want)
+		}
+		if receivedAuth != "Bearer test-key" {
+			t.Errorf("auth header = %q, want %q", receivedAuth, "Bearer test-key")
+		}
+	})
+
+	t.Run("returns ErrSessionNotFound on 404", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+			w.Write([]byte(`{"error":"not found"}`))
+		}))
+		defer server.Close()
+
+		client, err := NewClient(&config.UploadConfig{
+			BackendURL: server.URL,
+			APIKey:     "test-key",
+		}, 0)
+		if err != nil {
+			t.Fatalf("failed to create client: %v", err)
+		}
+
+		var buf bytes.Buffer
+		err = client.GetRawToWriter("/download", &buf)
+		if err == nil {
+			t.Fatal("expected error for 404")
+		}
+		if !errors.Is(err, ErrSessionNotFound) {
+			t.Errorf("expected ErrSessionNotFound, got: %v", err)
+		}
+	})
+
+	t.Run("returns ErrUnauthorized on 401", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusUnauthorized)
+			w.Write([]byte(`{"error":"unauthorized"}`))
+		}))
+		defer server.Close()
+
+		client, err := NewClient(&config.UploadConfig{
+			BackendURL: server.URL,
+			APIKey:     "bad-key",
+		}, 0)
+		if err != nil {
+			t.Fatalf("failed to create client: %v", err)
+		}
+
+		var buf bytes.Buffer
+		err = client.GetRawToWriter("/download", &buf)
+		if err == nil {
+			t.Fatal("expected error for 401")
+		}
+		if !errors.Is(err, ErrUnauthorized) {
+			t.Errorf("expected ErrUnauthorized, got: %v", err)
+		}
+	})
+
+	t.Run("returns ErrRateLimited on 429 without retry", func(t *testing.T) {
+		attempts := 0
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			attempts++
+			w.WriteHeader(http.StatusTooManyRequests)
+			w.Write([]byte(`{"error":"rate limited"}`))
+		}))
+		defer server.Close()
+
+		client, err := NewClient(&config.UploadConfig{
+			BackendURL: server.URL,
+			APIKey:     "test-key",
+		}, 0)
+		if err != nil {
+			t.Fatalf("failed to create client: %v", err)
+		}
+
+		var buf bytes.Buffer
+		err = client.GetRawToWriter("/download", &buf)
+		if err == nil {
+			t.Fatal("expected error for 429")
+		}
+		if !errors.Is(err, ErrRateLimited) {
+			t.Errorf("expected ErrRateLimited, got: %v", err)
+		}
+		if attempts != 1 {
+			t.Errorf("expected exactly 1 attempt (no retry), got %d", attempts)
+		}
+	})
 }
 
 func TestClient_ErrUnauthorized(t *testing.T) {
