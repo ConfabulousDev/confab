@@ -101,6 +101,9 @@ This is a cross-cutting change spanning multiple packages:
 
 ## Invariants
 
+- **All `io.ReadAll` calls must be bounded.** `login.go` and other commands that read HTTP responses or stdin use `io.LimitReader` to prevent memory exhaustion. Never use unbounded `io.ReadAll` on external input.
+- **Environment variable duration overrides are capped.** `hook_sessionstart.go` caps env var durations (e.g., sync interval) to prevent abuse via unreasonable values.
+- **Tar extraction in `update.go` has size and path limits.** Extracted files are bounded to prevent zip-bomb attacks, and paths are validated to prevent directory traversal.
 - **Hook commands must read JSON from stdin and complete quickly.** Claude Code blocks waiting for hook responses. Long-running work must be delegated (e.g., daemon spawn).
 - **Hook commands must not write to stdout except for `HookResponse` JSON.** Claude Code parses stdout as the hook response. Use stderr for status messages.
 - **All hooks use `pkg/types.HookInput`.** Parsed via `types.ReadHookInput(os.Stdin)` (base validation) or `discovery.ReadHookInputFrom(os.Stdin)` (adds `transcript_path` validation for session hooks).

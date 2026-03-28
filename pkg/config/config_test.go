@@ -186,7 +186,9 @@ func TestInstallHook_WithMatcher(t *testing.T) {
 	t.Run("creates new entry when no matcher exists", func(t *testing.T) {
 		settings := &ClaudeSettings{raw: make(map[string]any)}
 
-		installHook(settings, confabHook, "SessionStart", "*", true)
+		if err := installHook(settings, confabHook, "SessionStart", "*", true); err != nil {
+			t.Fatalf("installHook failed: %v", err)
+		}
 
 		eventHooks := settings.getEventHooks("SessionStart")
 		if len(eventHooks) != 1 {
@@ -211,7 +213,9 @@ func TestInstallHook_WithMatcher(t *testing.T) {
 		oldHook := makeHook("command", "/old/confab save")
 		setTestHook(settings, "SessionStart", makeMatcher("*", oldHook))
 
-		installHook(settings, confabHook, "SessionStart", "*", true)
+		if err := installHook(settings, confabHook, "SessionStart", "*", true); err != nil {
+			t.Fatalf("installHook failed: %v", err)
+		}
 
 		eventHooks := settings.getEventHooks("SessionStart")
 		if len(eventHooks) != 1 {
@@ -232,7 +236,9 @@ func TestInstallHook_WithMatcher(t *testing.T) {
 		otherHook := makeHook("command", "/usr/bin/other-tool run")
 		setTestHook(settings, "SessionStart", makeMatcher("*", otherHook))
 
-		installHook(settings, confabHook, "SessionStart", "*", true)
+		if err := installHook(settings, confabHook, "SessionStart", "*", true); err != nil {
+			t.Fatalf("installHook failed: %v", err)
+		}
 
 		hooks := settings.getEventHooks("SessionStart")[0].(map[string]any)["hooks"].([]any)
 		if len(hooks) != 2 {
@@ -244,7 +250,9 @@ func TestInstallHook_WithMatcher(t *testing.T) {
 		settings := &ClaudeSettings{raw: make(map[string]any)}
 		setTestHook(settings, "PreToolUse", makeMatcher("Write"))
 
-		installHook(settings, confabHook, "PreToolUse", "Bash", true)
+		if err := installHook(settings, confabHook, "PreToolUse", "Bash", true); err != nil {
+			t.Fatalf("installHook failed: %v", err)
+		}
 
 		eventHooks := settings.getEventHooks("PreToolUse")
 		if len(eventHooks) != 2 {
@@ -255,12 +263,16 @@ func TestInstallHook_WithMatcher(t *testing.T) {
 	t.Run("skips malformed entries", func(t *testing.T) {
 		settings := &ClaudeSettings{raw: make(map[string]any)}
 		// Set up an event with a non-map entry followed by a valid matcher
-		settings.setEventHooks("SessionStart", []any{
+		if err := settings.setEventHooks("SessionStart", []any{
 			"not a map",
 			map[string]any{"matcher": "*", "hooks": []any{}},
-		})
+		}); err != nil {
+			t.Fatalf("setEventHooks failed: %v", err)
+		}
 
-		installHook(settings, confabHook, "SessionStart", "*", true)
+		if err := installHook(settings, confabHook, "SessionStart", "*", true); err != nil {
+			t.Fatalf("installHook failed: %v", err)
+		}
 
 		eventHooks := settings.getEventHooks("SessionStart")
 		// The malformed entry is skipped, the valid "*" matcher is found and used
@@ -277,11 +289,15 @@ func TestInstallHook_WithMatcher(t *testing.T) {
 	t.Run("skips entry with matcher null", func(t *testing.T) {
 		settings := &ClaudeSettings{raw: make(map[string]any)}
 		// Entry with matcher: null should not match hasMatcher=true with matcherValue="*"
-		settings.setEventHooks("SessionStart", []any{
+		if err := settings.setEventHooks("SessionStart", []any{
 			map[string]any{"matcher": nil, "hooks": []any{}},
-		})
+		}); err != nil {
+			t.Fatalf("setEventHooks failed: %v", err)
+		}
 
-		installHook(settings, confabHook, "SessionStart", "*", true)
+		if err := installHook(settings, confabHook, "SessionStart", "*", true); err != nil {
+			t.Fatalf("installHook failed: %v", err)
+		}
 
 		eventHooks := settings.getEventHooks("SessionStart")
 		if len(eventHooks) != 2 {
@@ -296,7 +312,9 @@ func TestInstallHook_WithoutMatcher(t *testing.T) {
 	t.Run("creates new entry without matcher key", func(t *testing.T) {
 		settings := &ClaudeSettings{raw: make(map[string]any)}
 
-		installHook(settings, confabHook, "UserPromptSubmit", "", false)
+		if err := installHook(settings, confabHook, "UserPromptSubmit", "", false); err != nil {
+			t.Fatalf("installHook failed: %v", err)
+		}
 
 		eventHooks := settings.getEventHooks("UserPromptSubmit")
 		if len(eventHooks) != 1 {
@@ -317,11 +335,15 @@ func TestInstallHook_WithoutMatcher(t *testing.T) {
 		oldHook := makeHook("command", "/old/confab hook user-prompt-submit")
 		// Create an entry without a matcher key
 		hooksList := []any{map[string]any(oldHook)}
-		settings.setEventHooks("UserPromptSubmit", []any{
+		if err := settings.setEventHooks("UserPromptSubmit", []any{
 			map[string]any{"hooks": hooksList},
-		})
+		}); err != nil {
+			t.Fatalf("setEventHooks failed: %v", err)
+		}
 
-		installHook(settings, confabHook, "UserPromptSubmit", "", false)
+		if err := installHook(settings, confabHook, "UserPromptSubmit", "", false); err != nil {
+			t.Fatalf("installHook failed: %v", err)
+		}
 
 		hooks := settings.getEventHooks("UserPromptSubmit")[0].(map[string]any)["hooks"].([]any)
 		if len(hooks) != 1 {
@@ -338,7 +360,9 @@ func TestInstallHook_WithoutMatcher(t *testing.T) {
 		// Only an entry with a matcher exists
 		setTestHook(settings, "UserPromptSubmit", makeMatcher("*"))
 
-		installHook(settings, confabHook, "UserPromptSubmit", "", false)
+		if err := installHook(settings, confabHook, "UserPromptSubmit", "", false); err != nil {
+			t.Fatalf("installHook failed: %v", err)
+		}
 
 		eventHooks := settings.getEventHooks("UserPromptSubmit")
 		if len(eventHooks) != 2 {
@@ -349,11 +373,15 @@ func TestInstallHook_WithoutMatcher(t *testing.T) {
 	t.Run("skips entry with matcher null (key present)", func(t *testing.T) {
 		settings := &ClaudeSettings{raw: make(map[string]any)}
 		// matcher: null means key IS present, so hasMatcher=false should skip it
-		settings.setEventHooks("UserPromptSubmit", []any{
+		if err := settings.setEventHooks("UserPromptSubmit", []any{
 			map[string]any{"matcher": nil, "hooks": []any{}},
-		})
+		}); err != nil {
+			t.Fatalf("setEventHooks failed: %v", err)
+		}
 
-		installHook(settings, confabHook, "UserPromptSubmit", "", false)
+		if err := installHook(settings, confabHook, "UserPromptSubmit", "", false); err != nil {
+			t.Fatalf("installHook failed: %v", err)
+		}
 
 		eventHooks := settings.getEventHooks("UserPromptSubmit")
 		if len(eventHooks) != 2 {
@@ -368,7 +396,9 @@ func TestRemoveHooksFromEvent(t *testing.T) {
 		confabHook := makeHook("command", "/usr/bin/confab hook session-start")
 		setTestHook(settings, "SessionStart", makeMatcher("*", confabHook))
 
-		removeHooksFromEvent(settings, "SessionStart", isConfabHookEntry)
+		if err := removeHooksFromEvent(settings, "SessionStart", isConfabHookEntry); err != nil {
+			t.Fatalf("removeHooksFromEvent failed: %v", err)
+		}
 
 		eventHooks := settings.getEventHooks("SessionStart")
 		if len(eventHooks) != 0 {
@@ -382,7 +412,9 @@ func TestRemoveHooksFromEvent(t *testing.T) {
 		otherHook := makeHook("command", "/usr/bin/other-tool run")
 		setTestHook(settings, "SessionStart", makeMatcher("*", confabHook, otherHook))
 
-		removeHooksFromEvent(settings, "SessionStart", isConfabHookEntry)
+		if err := removeHooksFromEvent(settings, "SessionStart", isConfabHookEntry); err != nil {
+			t.Fatalf("removeHooksFromEvent failed: %v", err)
+		}
 
 		eventHooks := settings.getEventHooks("SessionStart")
 		if len(eventHooks) != 1 {
@@ -405,10 +437,13 @@ func TestRemoveHooksFromEvent(t *testing.T) {
 		setTestHook(settings, "SessionStart", makeMatcher("*", hook1, hook2))
 
 		// Remove only hooks containing "sync start"
-		removeHooksFromEvent(settings, "SessionStart", func(hook map[string]any) bool {
+		err := removeHooksFromEvent(settings, "SessionStart", func(hook map[string]any) bool {
 			cmd, _ := hook["command"].(string)
 			return strings.Contains(cmd, "sync start")
 		})
+		if err != nil {
+			t.Fatalf("removeHooksFromEvent failed: %v", err)
+		}
 
 		hooks := settings.getEventHooks("SessionStart")[0].(map[string]any)["hooks"].([]any)
 		if len(hooks) != 1 {
@@ -425,12 +460,16 @@ func TestRemoveHooksFromEvent(t *testing.T) {
 		confabHook := makeHook("command", "/usr/bin/confab save")
 		otherHook := makeHook("command", "/usr/bin/other-tool run")
 		// Two matchers: first has only confab (will be dropped), second has other (will remain)
-		settings.setEventHooks("SessionStart", []any{
+		if err := settings.setEventHooks("SessionStart", []any{
 			map[string]any{"matcher": "*", "hooks": []any{map[string]any(confabHook)}},
 			map[string]any{"matcher": "Bash", "hooks": []any{map[string]any(otherHook)}},
-		})
+		}); err != nil {
+			t.Fatalf("setEventHooks failed: %v", err)
+		}
 
-		removeHooksFromEvent(settings, "SessionStart", isConfabHookEntry)
+		if err := removeHooksFromEvent(settings, "SessionStart", isConfabHookEntry); err != nil {
+			t.Fatalf("removeHooksFromEvent failed: %v", err)
+		}
 
 		eventHooks := settings.getEventHooks("SessionStart")
 		if len(eventHooks) != 1 {
@@ -443,14 +482,18 @@ func TestRemoveHooksFromEvent(t *testing.T) {
 
 	t.Run("preserves malformed entries", func(t *testing.T) {
 		settings := &ClaudeSettings{raw: make(map[string]any)}
-		settings.setEventHooks("SessionStart", []any{
+		if err := settings.setEventHooks("SessionStart", []any{
 			"not a map",
 			map[string]any{"matcher": "*", "hooks": []any{
 				map[string]any{"type": "command", "command": "/usr/bin/confab save"},
 			}},
-		})
+		}); err != nil {
+			t.Fatalf("setEventHooks failed: %v", err)
+		}
 
-		removeHooksFromEvent(settings, "SessionStart", isConfabHookEntry)
+		if err := removeHooksFromEvent(settings, "SessionStart", isConfabHookEntry); err != nil {
+			t.Fatalf("removeHooksFromEvent failed: %v", err)
+		}
 
 		eventHooks := settings.getEventHooks("SessionStart")
 		// malformed entry preserved, empty matcher dropped
@@ -461,11 +504,15 @@ func TestRemoveHooksFromEvent(t *testing.T) {
 
 	t.Run("preserves matcher with missing hooks key", func(t *testing.T) {
 		settings := &ClaudeSettings{raw: make(map[string]any)}
-		settings.setEventHooks("SessionStart", []any{
+		if err := settings.setEventHooks("SessionStart", []any{
 			map[string]any{"matcher": "*"},
-		})
+		}); err != nil {
+			t.Fatalf("setEventHooks failed: %v", err)
+		}
 
-		removeHooksFromEvent(settings, "SessionStart", isConfabHookEntry)
+		if err := removeHooksFromEvent(settings, "SessionStart", isConfabHookEntry); err != nil {
+			t.Fatalf("removeHooksFromEvent failed: %v", err)
+		}
 
 		eventHooks := settings.getEventHooks("SessionStart")
 		if len(eventHooks) != 1 {
@@ -475,14 +522,18 @@ func TestRemoveHooksFromEvent(t *testing.T) {
 
 	t.Run("preserves non-map hook entries", func(t *testing.T) {
 		settings := &ClaudeSettings{raw: make(map[string]any)}
-		settings.setEventHooks("SessionStart", []any{
+		if err := settings.setEventHooks("SessionStart", []any{
 			map[string]any{"matcher": "*", "hooks": []any{
 				"not a map",
 				map[string]any{"type": "command", "command": "/usr/bin/confab save"},
 			}},
-		})
+		}); err != nil {
+			t.Fatalf("setEventHooks failed: %v", err)
+		}
 
-		removeHooksFromEvent(settings, "SessionStart", isConfabHookEntry)
+		if err := removeHooksFromEvent(settings, "SessionStart", isConfabHookEntry); err != nil {
+			t.Fatalf("removeHooksFromEvent failed: %v", err)
+		}
 
 		eventHooks := settings.getEventHooks("SessionStart")
 		if len(eventHooks) != 1 {
@@ -497,7 +548,9 @@ func TestRemoveHooksFromEvent(t *testing.T) {
 	t.Run("no-op on empty event", func(t *testing.T) {
 		settings := &ClaudeSettings{raw: make(map[string]any)}
 
-		removeHooksFromEvent(settings, "SessionStart", isConfabHookEntry)
+		if err := removeHooksFromEvent(settings, "SessionStart", isConfabHookEntry); err != nil {
+			t.Fatalf("removeHooksFromEvent failed: %v", err)
+		}
 
 		eventHooks := settings.getEventHooks("SessionStart")
 		if eventHooks != nil {
@@ -535,13 +588,15 @@ func TestFindHookInEvent(t *testing.T) {
 
 	t.Run("skips malformed entries", func(t *testing.T) {
 		settings := &ClaudeSettings{raw: make(map[string]any)}
-		settings.setEventHooks("SessionStart", []any{
+		if err := settings.setEventHooks("SessionStart", []any{
 			"not a map",
 			map[string]any{"matcher": "*", "hooks": []any{
 				"also not a map",
 				map[string]any{"type": "command", "command": "/usr/bin/confab save"},
 			}},
-		})
+		}); err != nil {
+			t.Fatalf("setEventHooks failed: %v", err)
+		}
 
 		if !findHookInEvent(settings, "SessionStart", isConfabHookEntry) {
 			t.Error("expected to find confab hook despite malformed entries")
@@ -550,14 +605,16 @@ func TestFindHookInEvent(t *testing.T) {
 
 	t.Run("searches across multiple matchers", func(t *testing.T) {
 		settings := &ClaudeSettings{raw: make(map[string]any)}
-		settings.setEventHooks("PreToolUse", []any{
+		if err := settings.setEventHooks("PreToolUse", []any{
 			map[string]any{"matcher": "Write", "hooks": []any{
 				map[string]any{"type": "command", "command": "/usr/bin/other-tool"},
 			}},
 			map[string]any{"matcher": "Bash", "hooks": []any{
 				map[string]any{"type": "command", "command": "/usr/bin/confab hook pre-tool-use"},
 			}},
-		})
+		}); err != nil {
+			t.Fatalf("setEventHooks failed: %v", err)
+		}
 
 		if !findHookInEvent(settings, "PreToolUse", isConfabHookEntry) {
 			t.Error("expected to find confab hook in second matcher")
@@ -696,13 +753,16 @@ func makeMatcher(matcher string, hooks ...map[string]any) map[string]any {
 	}
 }
 
-// setTestHook sets a hook for an event in the settings using raw map manipulation
+// setTestHook sets a hook for an event in the settings using raw map manipulation.
+// Panics on error since this is a test helper that should never fail in normal conditions.
 func setTestHook(settings *ClaudeSettings, eventName string, matchers ...map[string]any) {
 	matchersList := make([]any, len(matchers))
 	for i, m := range matchers {
 		matchersList[i] = m
 	}
-	settings.setEventHooks(eventName, matchersList)
+	if err := settings.setEventHooks(eventName, matchersList); err != nil {
+		panic("setTestHook: " + err.Error())
+	}
 }
 
 func TestAtomicUpdateSettings_Success(t *testing.T) {
@@ -782,7 +842,7 @@ func TestAtomicUpdateSettings_ConcurrentUpdates(t *testing.T) {
 	}
 
 	// All hooks should be present
-	hooksMap := settings.getHooksMap()
+	hooksMap, _ := settings.getHooksMap()
 	if len(hooksMap) != numUpdates {
 		t.Errorf("Expected %d hooks, got %d. Hooks present: %v", numUpdates, len(hooksMap), getHookNames(hooksMap))
 	}
@@ -892,7 +952,7 @@ func TestAtomicUpdateSettings_Retry(t *testing.T) {
 		t.Fatalf("ReadSettings failed: %v", err)
 	}
 
-	hooksMap := settings.getHooksMap()
+	hooksMap, _ := settings.getHooksMap()
 	if _, ok := hooksMap["Test"]; !ok {
 		t.Error("Test hook not found after retry")
 	}
@@ -1348,7 +1408,7 @@ func TestUninstallHooks_CleansUpEmptySections(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadSettings failed: %v", err)
 	}
-	hooksMap := settings.getHooksMap()
+	hooksMap, _ := settings.getHooksMap()
 	if len(hooksMap) == 0 {
 		t.Fatal("Expected hooks to be installed")
 	}

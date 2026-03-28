@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -100,7 +101,7 @@ func (s *State) Save() error {
 
 	// Ensure directory exists
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0700); err != nil {
 		return fmt.Errorf("failed to create sync directory: %w", err)
 	}
 
@@ -186,7 +187,7 @@ func ListAllStates() ([]*State, error) {
 		}
 
 		// Extract external ID from filename
-		externalID := entry.Name()[:len(entry.Name())-5] // Remove .json
+		externalID := strings.TrimSuffix(entry.Name(), ".json")
 
 		state, err := LoadState(externalID)
 		if err != nil {

@@ -45,7 +45,7 @@ func GetProjectsDir() (string, error) {
 	return filepath.Join(claudeDir, "projects"), nil
 }
 
-// GetSettingsPath returns the path to the Claude settings file
+// GetClaudeSettingsPath returns the path to the Claude settings file
 func GetClaudeSettingsPath() (string, error) {
 	claudeDir, err := GetClaudeStateDir()
 	if err != nil {

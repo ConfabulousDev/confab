@@ -16,6 +16,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// maxSyncEnvMS is the maximum value for CONFAB_SYNC_INTERVAL_MS and CONFAB_SYNC_JITTER_MS (1 hour).
+const maxSyncEnvMS = 3600000
+
 var bgDaemonData string // Hidden flag for daemon mode
 
 var hookSessionStartCmd = &cobra.Command{
@@ -112,14 +115,14 @@ func sessionStartFromReader(r io.Reader) error {
 func parseSyncEnvConfig() (interval, jitter time.Duration) {
 	interval = daemon.DefaultSyncInterval
 	if envInterval := os.Getenv("CONFAB_SYNC_INTERVAL_MS"); envInterval != "" {
-		if ms, err := strconv.Atoi(envInterval); err == nil && ms > 0 {
+		if ms, err := strconv.Atoi(envInterval); err == nil && ms > 0 && ms <= maxSyncEnvMS {
 			interval = time.Duration(ms) * time.Millisecond
 		}
 	}
 
 	// jitter defaults to 0; caller/daemon can apply its own default if needed
 	if envJitter := os.Getenv("CONFAB_SYNC_JITTER_MS"); envJitter != "" {
-		if ms, err := strconv.Atoi(envJitter); err == nil && ms >= 0 {
+		if ms, err := strconv.Atoi(envJitter); err == nil && ms >= 0 && ms <= maxSyncEnvMS {
 			jitter = time.Duration(ms) * time.Millisecond
 		}
 	}

@@ -106,7 +106,7 @@ func Init() error {
 			logDir = filepath.Join(home, logDirName)
 		}
 
-		if mkdirErr := os.MkdirAll(logDir, 0755); mkdirErr != nil {
+		if mkdirErr := os.MkdirAll(logDir, 0700); mkdirErr != nil {
 			err = fmt.Errorf("failed to create log directory: %w", mkdirErr)
 			return
 		}

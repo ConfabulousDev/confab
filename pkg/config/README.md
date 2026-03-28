@@ -27,6 +27,7 @@ Managed by `skill_til.go`, `skill_retro.go` (and future `skill_*.go` files). Ski
 
 - **`UploadConfig`** — Confab's configuration (backend URL, API key, redaction settings)
 - **`ClaudeSettings`** — Wrapper around `map[string]any` for Claude Code settings, preserving unknown fields
+- **`ErrHooksTypeMismatch`** — Exported sentinel error returned when the `"hooks"` field in `settings.json` exists but is not a JSON object. Callers can check `errors.Is(err, ErrHooksTypeMismatch)` and surface a clear message asking users to fix the file manually.
 - **`RedactionConfig`** — Redaction enabled flag, use_default_patterns, custom pattern list
 - **`RedactionPattern`** — Individual redaction pattern (name, regex, type, capture group, field pattern)
 
@@ -52,7 +53,9 @@ This spans multiple packages. On the config side:
 - **Settings writes must use `AtomicUpdateSettings()`.** This provides read-modify-write with mtime-based optimistic locking and exponential backoff retry (max 10 attempts). Never read + write separately — concurrent Claude Code sessions will clobber each other.
 - **Hook install must be idempotent.** If the hook already exists, update it in place. Never duplicate hooks.
 - **Hook uninstall must handle old command patterns.** Users may have hooks installed by older Confab versions with different command strings. Uninstall must find and remove these too.
-- **Config file permissions:** `0600` for `~/.confab/config.json` (contains API key), `0644` for `~/.claude/settings.json` (needs to be readable by Claude Code).
+- **Config file permissions:** `0600` for `~/.confab/config.json` (contains API key), `0600` for `~/.claude/settings.json`.
+- **Directory permissions:** `0700` for `~/.confab/` and `~/.claude/` directories created by Confab. Restrictive permissions prevent other users on shared systems from reading config or API keys.
+- **Hook helpers (`installHook`, `removeHooksFromEvent`) return errors** instead of silently failing. Callers (the `Install*Hook`/`Uninstall*Hook` functions) propagate these errors up through `AtomicUpdateSettings`.
 - **`GetDefaultRedactionPatterns()` pattern order matters.** More specific patterns (e.g., `sk-ant-api03-...`) must come before general ones (e.g., field-name-based patterns) to avoid partial matches.
 
 ## Design Decisions

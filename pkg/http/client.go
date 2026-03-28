@@ -23,6 +23,14 @@ const (
 	// Below this, compression overhead isn't worth it.
 	compressionThreshold = 1024 // 1KB
 
+	// maxResponseSize is the maximum size of an HTTP response body we'll read.
+	// Prevents OOM from malicious or buggy servers sending unbounded responses.
+	maxResponseSize = 32 * 1024 * 1024 // 32MB
+
+	// maxRetryAfterSeconds is the maximum Retry-After value we'll honor.
+	// Prevents a malicious server from stalling the client indefinitely.
+	maxRetryAfterSeconds = 3600
+
 	// Retry settings for rate limiting
 	maxRetries       = 5
 	initialBackoff   = 1 * time.Second
@@ -173,8 +181,8 @@ func (c *Client) DoJSON(method, path string, reqBody, respBody interface{}) erro
 			return fmt.Errorf("failed to send request: %w", err)
 		}
 
-		// Read response body
-		body, err := io.ReadAll(resp.Body)
+		// Read response body (bounded to prevent OOM from malicious servers)
+		body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize))
 		resp.Body.Close()
 		if err != nil {
 			return fmt.Errorf("failed to read response body: %w", err)
@@ -189,7 +197,7 @@ func (c *Client) DoJSON(method, path string, reqBody, respBody interface{}) erro
 			// Use Retry-After header if provided, otherwise use exponential backoff
 			waitTime := backoff
 			if retryAfter := resp.Header.Get("Retry-After"); retryAfter != "" {
-				if seconds, err := strconv.Atoi(retryAfter); err == nil {
+				if seconds, err := strconv.Atoi(retryAfter); err == nil && seconds > 0 && seconds <= maxRetryAfterSeconds {
 					waitTime = time.Duration(seconds) * time.Second
 				}
 			}
@@ -204,19 +212,19 @@ func (c *Client) DoJSON(method, path string, reqBody, respBody interface{}) erro
 			continue
 		}
 
-		// Check other status codes
+		// Check other status codes (truncate body in errors to avoid logging sensitive data)
 		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-			return fmt.Errorf("%w: status %d: %s", ErrUnauthorized, resp.StatusCode, string(body))
+			return fmt.Errorf("%w: status %d: %s", ErrUnauthorized, resp.StatusCode, truncateBody(body, 256))
 		}
 		if resp.StatusCode == http.StatusNotFound {
-			return fmt.Errorf("%w: status %d: %s", ErrSessionNotFound, resp.StatusCode, string(body))
+			return fmt.Errorf("%w: status %d: %s", ErrSessionNotFound, resp.StatusCode, truncateBody(body, 256))
 		}
 		if resp.StatusCode == http.StatusConflict {
-			return fmt.Errorf("%w: status %d: %s", ErrConflict, resp.StatusCode, string(body))
+			return fmt.Errorf("%w: status %d: %s", ErrConflict, resp.StatusCode, truncateBody(body, 256))
 		}
 		// Accept any 2xx status code as success
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			return fmt.Errorf("http request failed with status %d: %s", resp.StatusCode, string(body))
+			return fmt.Errorf("http request failed with status %d: %s", resp.StatusCode, truncateBody(body, 256))
 		}
 
 		// Parse response if requested
@@ -244,4 +252,12 @@ func (c *Client) Post(path string, reqBody, respBody interface{}) error {
 // Patch performs a PATCH request with JSON body and response
 func (c *Client) Patch(path string, reqBody, respBody interface{}) error {
 	return c.DoJSON("PATCH", path, reqBody, respBody)
+}
+
+// truncateBody truncates a response body for safe inclusion in error messages.
+func truncateBody(body []byte, maxLen int) string {
+	if len(body) <= maxLen {
+		return string(body)
+	}
+	return string(body[:maxLen]) + "... (truncated)"
 }

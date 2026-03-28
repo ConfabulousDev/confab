@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/rand"
 	"os"
@@ -20,21 +21,25 @@ type ClaudeSettings struct {
 	raw map[string]any
 }
 
-// getHooksMap returns the hooks map, creating it if needed
-func (s *ClaudeSettings) getHooksMap() map[string]any {
+// ErrHooksTypeMismatch is returned when the "hooks" field in settings.json
+// exists but is not a JSON object. This prevents silently overwriting user config.
+var ErrHooksTypeMismatch = errors.New("settings.json: 'hooks' field exists but is not a JSON object — please fix manually")
+
+// getHooksMap returns the hooks map, creating it if it doesn't exist.
+// Returns an error if the hooks field exists but has the wrong type,
+// to prevent silently overwriting user configuration.
+func (s *ClaudeSettings) getHooksMap() (map[string]any, error) {
 	hooksRaw, exists := s.raw["hooks"]
 	if !exists {
 		hooks := make(map[string]any)
 		s.raw["hooks"] = hooks
-		return hooks
+		return hooks, nil
 	}
 	hooks, ok := hooksRaw.(map[string]any)
 	if !ok {
-		logger.Debug("settings.json: 'hooks' has unexpected type %T (expected object), creating new hooks map", hooksRaw)
-		hooks = make(map[string]any)
-		s.raw["hooks"] = hooks
+		return nil, ErrHooksTypeMismatch
 	}
-	return hooks
+	return hooks, nil
 }
 
 // getEventHooks returns the array of matchers for an event, as []any.
@@ -64,8 +69,11 @@ func (s *ClaudeSettings) getEventHooks(eventName string) []any {
 // setEventHooks sets the array of matchers for an event.
 // If matchers is nil or empty, the event key is removed.
 // If the hooks map becomes empty, it is removed from settings.
-func (s *ClaudeSettings) setEventHooks(eventName string, matchers []any) {
-	hooks := s.getHooksMap()
+func (s *ClaudeSettings) setEventHooks(eventName string, matchers []any) error {
+	hooks, err := s.getHooksMap()
+	if err != nil {
+		return err
+	}
 
 	if len(matchers) == 0 {
 		// Remove the event key entirely instead of leaving null/empty
@@ -75,10 +83,11 @@ func (s *ClaudeSettings) setEventHooks(eventName string, matchers []any) {
 		if len(hooks) == 0 {
 			delete(s.raw, "hooks")
 		}
-		return
+		return nil
 	}
 
 	hooks[eventName] = matchers
+	return nil
 }
 
 // GetSettingsPath returns the path to the Claude settings file
@@ -130,7 +139,7 @@ func writeSettingsInternal(settings *ClaudeSettings, expectedMtime time.Time) er
 
 	// Ensure directory exists
 	settingsDir := filepath.Dir(settingsPath)
-	if err := os.MkdirAll(settingsDir, 0755); err != nil {
+	if err := os.MkdirAll(settingsDir, 0700); err != nil {
 		return fmt.Errorf("failed to create settings directory: %w", err)
 	}
 
@@ -160,7 +169,7 @@ func writeSettingsInternal(settings *ClaudeSettings, expectedMtime time.Time) er
 	}
 
 	// Set proper permissions
-	if err := os.Chmod(tempPath, 0644); err != nil {
+	if err := os.Chmod(tempPath, 0600); err != nil {
 		os.Remove(tempPath)
 		return fmt.Errorf("failed to set temp file permissions: %w", err)
 	}
@@ -315,7 +324,7 @@ func getHooksList(entry map[string]any, eventName string, entryIdx int) []any {
 // installHook installs a confab hook for a specific event.
 // When hasMatcher is true, it looks for an entry whose "matcher" key equals matcherValue.
 // When hasMatcher is false, it looks for an entry where the "matcher" key is entirely absent.
-func installHook(settings *ClaudeSettings, hook map[string]any, eventName, matcherValue string, hasMatcher bool) {
+func installHook(settings *ClaudeSettings, hook map[string]any, eventName, matcherValue string, hasMatcher bool) error {
 	eventHooks := settings.getEventHooks(eventName)
 
 	for i, entryAny := range eventHooks {
@@ -348,8 +357,7 @@ func installHook(settings *ClaudeSettings, hook map[string]any, eventName, match
 				hooksList[j] = hook
 				entry["hooks"] = hooksList
 				eventHooks[i] = entry
-				settings.setEventHooks(eventName, eventHooks)
-				return
+				return settings.setEventHooks(eventName, eventHooks)
 			}
 		}
 
@@ -357,8 +365,7 @@ func installHook(settings *ClaudeSettings, hook map[string]any, eventName, match
 		hooksList = append(hooksList, hook)
 		entry["hooks"] = hooksList
 		eventHooks[i] = entry
-		settings.setEventHooks(eventName, eventHooks)
-		return
+		return settings.setEventHooks(eventName, eventHooks)
 	}
 
 	// No matching entry found, create new one
@@ -369,15 +376,15 @@ func installHook(settings *ClaudeSettings, hook map[string]any, eventName, match
 		newEntry["matcher"] = matcherValue
 	}
 	eventHooks = append(eventHooks, newEntry)
-	settings.setEventHooks(eventName, eventHooks)
+	return settings.setEventHooks(eventName, eventHooks)
 }
 
 // removeHooksFromEvent removes hooks matching a predicate from all matchers of an event.
 // Empty matchers (no remaining hooks) are dropped.
-func removeHooksFromEvent(settings *ClaudeSettings, eventName string, shouldRemove func(map[string]any) bool) {
+func removeHooksFromEvent(settings *ClaudeSettings, eventName string, shouldRemove func(map[string]any) bool) error {
 	eventHooks := settings.getEventHooks(eventName)
 	if len(eventHooks) == 0 {
-		return
+		return nil
 	}
 
 	var updatedMatchers []any
@@ -413,7 +420,7 @@ func removeHooksFromEvent(settings *ClaudeSettings, eventName string, shouldRemo
 			updatedMatchers = append(updatedMatchers, matcher)
 		}
 	}
-	settings.setEventHooks(eventName, updatedMatchers)
+	return settings.setEventHooks(eventName, updatedMatchers)
 }
 
 // findHookInEvent searches for a hook matching a predicate across all matchers of an event.
@@ -458,9 +465,10 @@ func InstallSyncHooks() error {
 	}
 
 	return AtomicUpdateSettings(func(settings *ClaudeSettings) error {
-		installHook(settings, sessionStartHook, "SessionStart", "*", true)
-		installHook(settings, sessionEndHook, "SessionEnd", "*", true)
-		return nil
+		if err := installHook(settings, sessionStartHook, "SessionStart", "*", true); err != nil {
+			return err
+		}
+		return installHook(settings, sessionEndHook, "SessionEnd", "*", true)
 	})
 }
 
@@ -477,9 +485,10 @@ func UninstallSyncHooks() error {
 					strings.Contains(cmd, "hook session-start") ||
 					strings.Contains(cmd, "hook session-end"))
 		}
-		removeHooksFromEvent(settings, "SessionStart", isSyncHook)
-		removeHooksFromEvent(settings, "SessionEnd", isSyncHook)
-		return nil
+		if err := removeHooksFromEvent(settings, "SessionStart", isSyncHook); err != nil {
+			return err
+		}
+		return removeHooksFromEvent(settings, "SessionEnd", isSyncHook)
 	})
 }
 
@@ -525,7 +534,9 @@ func InstallPreToolUseHooks() error {
 
 	return AtomicUpdateSettings(func(settings *ClaudeSettings) error {
 		for _, matcher := range toolUseMatchers {
-			installHook(settings, preToolUseHook, "PreToolUse", matcher, true)
+			if err := installHook(settings, preToolUseHook, "PreToolUse", matcher, true); err != nil {
+				return err
+			}
 		}
 		return nil
 	})
@@ -546,8 +557,7 @@ var toolUseMatchers = []string{
 // UninstallPreToolUseHooks removes the PreToolUse hook
 func UninstallPreToolUseHooks() error {
 	return AtomicUpdateSettings(func(settings *ClaudeSettings) error {
-		removeHooksFromEvent(settings, "PreToolUse", isConfabHookEntry)
-		return nil
+		return removeHooksFromEvent(settings, "PreToolUse", isConfabHookEntry)
 	})
 }
 
@@ -576,7 +586,9 @@ func InstallPostToolUseHooks() error {
 
 	return AtomicUpdateSettings(func(settings *ClaudeSettings) error {
 		for _, matcher := range toolUseMatchers {
-			installHook(settings, postToolUseHook, "PostToolUse", matcher, true)
+			if err := installHook(settings, postToolUseHook, "PostToolUse", matcher, true); err != nil {
+				return err
+			}
 		}
 		return nil
 	})
@@ -585,8 +597,7 @@ func InstallPostToolUseHooks() error {
 // UninstallPostToolUseHooks removes the PostToolUse hook
 func UninstallPostToolUseHooks() error {
 	return AtomicUpdateSettings(func(settings *ClaudeSettings) error {
-		removeHooksFromEvent(settings, "PostToolUse", isConfabHookEntry)
-		return nil
+		return removeHooksFromEvent(settings, "PostToolUse", isConfabHookEntry)
 	})
 }
 
@@ -614,16 +625,14 @@ func InstallUserPromptSubmitHook() error {
 	}
 
 	return AtomicUpdateSettings(func(settings *ClaudeSettings) error {
-		installHook(settings, hook, "UserPromptSubmit", "", false)
-		return nil
+		return installHook(settings, hook, "UserPromptSubmit", "", false)
 	})
 }
 
 // UninstallUserPromptSubmitHook removes the UserPromptSubmit hook
 func UninstallUserPromptSubmitHook() error {
 	return AtomicUpdateSettings(func(settings *ClaudeSettings) error {
-		removeHooksFromEvent(settings, "UserPromptSubmit", isConfabHookEntry)
-		return nil
+		return removeHooksFromEvent(settings, "UserPromptSubmit", isConfabHookEntry)
 	})
 }
 

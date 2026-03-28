@@ -314,6 +314,11 @@ func GetDefaultRedactionPatterns() []RedactionPattern {
 			Type:    "jwt",
 		},
 		{
+			Name:    "Bearer Token",
+			Pattern: `Bearer\s+[A-Za-z0-9_.~+/=-]{20,}`,
+			Type:    "bearer_token",
+		},
+		{
 			Name:    "RSA Private Key",
 			Pattern: `(?s)-----BEGIN RSA PRIVATE KEY-----.*?-----END RSA PRIVATE KEY-----`,
 			Type:    "private_key",

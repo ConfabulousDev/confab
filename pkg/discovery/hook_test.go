@@ -1,13 +1,24 @@
 package discovery
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
 
 func TestReadHookInputFrom(t *testing.T) {
+	// Set up a temp dir as the Claude projects directory
+	tmpDir := t.TempDir()
+	t.Setenv("CONFAB_CLAUDE_DIR", tmpDir)
+
+	validPath := filepath.Join(tmpDir, "project", "test.jsonl")
+
 	t.Run("valid input with transcript_path", func(t *testing.T) {
-		input := `{"session_id":"abc-123","transcript_path":"/tmp/test.jsonl"}`
+		// Create parent dir so EvalSymlinks works
+		os.MkdirAll(filepath.Dir(validPath), 0700)
+
+		input := `{"session_id":"abc-123","transcript_path":"` + validPath + `"}`
 		got, err := ReadHookInputFrom(strings.NewReader(input))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -15,8 +26,8 @@ func TestReadHookInputFrom(t *testing.T) {
 		if got.SessionID != "abc-123" {
 			t.Errorf("SessionID = %q, want %q", got.SessionID, "abc-123")
 		}
-		if got.TranscriptPath != "/tmp/test.jsonl" {
-			t.Errorf("TranscriptPath = %q, want %q", got.TranscriptPath, "/tmp/test.jsonl")
+		if got.TranscriptPath != validPath {
+			t.Errorf("TranscriptPath = %q, want %q", got.TranscriptPath, validPath)
 		}
 	})
 
@@ -32,7 +43,7 @@ func TestReadHookInputFrom(t *testing.T) {
 	})
 
 	t.Run("missing session_id propagates error from types.ReadHookInput", func(t *testing.T) {
-		input := `{"transcript_path":"/tmp/test.jsonl"}`
+		input := `{"transcript_path":"` + validPath + `"}`
 		_, err := ReadHookInputFrom(strings.NewReader(input))
 		if err == nil {
 			t.Fatal("expected error for missing session_id")
@@ -46,6 +57,33 @@ func TestReadHookInputFrom(t *testing.T) {
 		_, err := ReadHookInputFrom(strings.NewReader("not json"))
 		if err == nil {
 			t.Fatal("expected error for invalid JSON")
+		}
+	})
+
+	t.Run("rejects path outside Claude projects dir", func(t *testing.T) {
+		input := `{"session_id":"abc-123","transcript_path":"/tmp/evil.jsonl"}`
+		_, err := ReadHookInputFrom(strings.NewReader(input))
+		if err == nil {
+			t.Fatal("expected error for path outside Claude projects dir")
+		}
+		if !strings.Contains(err.Error(), "transcript_path") {
+			t.Errorf("error should mention transcript_path, got: %v", err)
+		}
+	})
+
+	t.Run("rejects relative path", func(t *testing.T) {
+		input := `{"session_id":"abc-123","transcript_path":"relative/path.jsonl"}`
+		_, err := ReadHookInputFrom(strings.NewReader(input))
+		if err == nil {
+			t.Fatal("expected error for relative path")
+		}
+	})
+
+	t.Run("rejects path traversal", func(t *testing.T) {
+		input := `{"session_id":"abc-123","transcript_path":"` + tmpDir + `/../../../etc/passwd"}`
+		_, err := ReadHookInputFrom(strings.NewReader(input))
+		if err == nil {
+			t.Fatal("expected error for path traversal")
 		}
 	})
 }

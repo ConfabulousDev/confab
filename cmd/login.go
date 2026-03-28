@@ -19,6 +19,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// maxLoginResponseSize is the maximum size of auth response bodies.
+const maxLoginResponseSize = 10 * 1024 * 1024 // 10MB
+
 // doDeviceLoginFunc is the function used to perform device login.
 // It can be overridden in tests to avoid actual authentication.
 var doDeviceLoginFunc = doDeviceLoginImpl
@@ -280,7 +283,7 @@ func requestDeviceCode(backendURL, keyName string) (*DeviceCodeResponse, error) 
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxLoginResponseSize))
 	if err != nil {
 		return nil, err
 	}
@@ -311,7 +314,7 @@ func pollDeviceToken(backendURL, deviceCode string) (*DeviceTokenResponse, error
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxLoginResponseSize))
 	if err != nil {
 		return nil, err
 	}
