@@ -21,13 +21,25 @@ func setupSyncTestEnv(t *testing.T) string {
 	// Override HOME for daemon state paths
 	t.Setenv("HOME", tmpDir)
 
+	// Set CONFAB_CLAUDE_DIR so transcript path validation accepts paths under tmpDir
+	claudeDir := filepath.Join(tmpDir, ".claude", "projects")
+	t.Setenv("CONFAB_CLAUDE_DIR", claudeDir)
+	if err := os.MkdirAll(claudeDir, 0700); err != nil {
+		t.Fatalf("failed to create claude dir: %v", err)
+	}
+
 	// Create sync state directory
 	syncDir := filepath.Join(tmpDir, ".confab", "sync")
-	if err := os.MkdirAll(syncDir, 0755); err != nil {
+	if err := os.MkdirAll(syncDir, 0700); err != nil {
 		t.Fatalf("failed to create sync dir: %v", err)
 	}
 
 	return tmpDir
+}
+
+// testTranscriptPath returns a valid transcript path under the Claude projects directory.
+func testTranscriptPath(tmpDir string) string {
+	return filepath.Join(tmpDir, ".claude", "projects", "test", "transcript.jsonl")
 }
 
 // createFakeDaemonState creates a state file for testing.
@@ -43,7 +55,7 @@ func createFakeDaemonState(t *testing.T, tmpDir, sessionID string, pid int) {
 
 	state := map[string]any{
 		"external_id":     sessionID,
-		"transcript_path": filepath.Join(tmpDir, "transcript.jsonl"),
+		"transcript_path": testTranscriptPath(tmpDir),
 		"cwd":             tmpDir,
 		"pid":             pid,
 		"started_at":      time.Now().Format(time.RFC3339Nano),
@@ -126,8 +138,9 @@ func TestSessionStartFromReader(t *testing.T) {
 			return nil
 		}
 
-		// Create transcript file
-		transcriptPath := filepath.Join(tmpDir, "transcript.jsonl")
+		// Create transcript file under Claude projects dir
+		transcriptPath := testTranscriptPath(tmpDir)
+		os.MkdirAll(filepath.Dir(transcriptPath), 0700)
 		os.WriteFile(transcriptPath, []byte(`{"type":"test"}`+"\n"), 0644)
 
 		hookInput := map[string]string{
@@ -167,8 +180,9 @@ func TestSessionStartFromReader(t *testing.T) {
 		// Create existing daemon state with current PID (appears running)
 		createFakeDaemonState(t, tmpDir, sessionID, os.Getpid())
 
-		// Create transcript file
-		transcriptPath := filepath.Join(tmpDir, "transcript.jsonl")
+		// Create transcript file under Claude projects dir
+		transcriptPath := testTranscriptPath(tmpDir)
+		os.MkdirAll(filepath.Dir(transcriptPath), 0700)
 		os.WriteFile(transcriptPath, []byte(`{"type":"test"}`+"\n"), 0644)
 
 		hookInput := map[string]string{
@@ -232,7 +246,7 @@ func TestSessionEndFromReader(t *testing.T) {
 
 		hookInput := map[string]string{
 			"session_id":      sessionID,
-			"transcript_path": filepath.Join(tmpDir, "transcript.jsonl"),
+			"transcript_path": testTranscriptPath(tmpDir),
 			"cwd":             tmpDir,
 		}
 		inputJSON, _ := json.Marshal(hookInput)
@@ -254,7 +268,7 @@ func TestSessionEndFromReader(t *testing.T) {
 
 		hookInput := map[string]string{
 			"session_id":      sessionID,
-			"transcript_path": filepath.Join(tmpDir, "transcript.jsonl"),
+			"transcript_path": testTranscriptPath(tmpDir),
 			"cwd":             tmpDir,
 		}
 		inputJSON, _ := json.Marshal(hookInput)

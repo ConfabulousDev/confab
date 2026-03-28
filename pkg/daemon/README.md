@@ -50,6 +50,9 @@ spawn ──> waitForTranscript (poll 2s, timeout 60s)
 
 ## Invariants
 
+- **State directory permissions are 0700.** `~/.confab/sync/` is created with restrictive permissions since state files may contain session metadata.
+- **Signal channel buffer is 2** to avoid dropping signals when both SIGINT and SIGTERM arrive in quick succession.
+- **Shutdown goroutine has panic recovery** to ensure state file cleanup even if shutdown logic panics.
 - **State file must be deleted on exit.** If a state file exists with a dead PID, it blocks future daemon spawns until cleanup. The panic recovery handler also deletes the state file.
 - **Shutdown must have a timeout** (`shutdownTimeout`, default 30s). The backend may be unresponsive, and the daemon must not hang forever.
 - **Parent PID monitoring uses `signal(0)`, not `/proc`.** `os.FindProcess` + `Signal(0)` works on both macOS and Linux. `/proc` is Linux-only.

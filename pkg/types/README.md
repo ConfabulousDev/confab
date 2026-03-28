@@ -29,6 +29,10 @@ Response types written to stdout for Claude Code to consume. `PreToolUseResponse
 
 Used for inter-process communication between the `sync stop` command and the running daemon. Serialized as JSONL in the inbox file.
 
+### `ValidateSessionID(id)`
+
+Validates that a session ID contains only safe characters (alphanumeric, hyphens, underscores) using the `sessionIDPattern` regex. Called by `ReadHookInput` to reject malformed session IDs before they reach downstream code.
+
 ### `NewJSONLScanner(reader)`
 
 Factory that creates a `bufio.Scanner` with a 10MB buffer (`MaxJSONLLineSize`). Transcript lines can be very large (thinking blocks, tool results), so the default 64KB buffer is insufficient.
@@ -41,7 +45,8 @@ Factory that creates a `bufio.Scanner` with a 10MB buffer (`MaxJSONLLineSize`). 
 
 ## Invariants
 
-- `HookInput.SessionID` is validated as non-empty in `ReadHookInput()` — all downstream code can assume it's set.
+- `HookInput.SessionID` is validated as non-empty and safe (alphanumeric, hyphens, underscores only) in `ReadHookInput()` — all downstream code can assume it's set and safe for use in file paths.
+- `ReadHookInput()` uses bounded `io.ReadAll` (limited to `MaxJSONLLineSize`) to prevent memory exhaustion from oversized input.
 - `MaxJSONLLineSize` (10MB) must accommodate the largest possible transcript line. Changing this affects every JSONL reader in the codebase.
 - `NewJSONLScanner` must be used everywhere JSONL files are read — never create a bare `bufio.Scanner` for transcript files.
 

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"regexp"
 	"time"
 )
 
@@ -49,10 +50,23 @@ type HookInput struct {
 	ToolResponse map[string]any `json:"tool_response,omitempty"` // PostToolUse only
 }
 
+// sessionIDPattern validates session IDs contain only safe characters.
+// This prevents path traversal attacks (e.g., "../../tmp/evil") when
+// session IDs are used in file paths.
+var sessionIDPattern = regexp.MustCompile(`^[a-zA-Z0-9\-_]+$`)
+
+// ValidateSessionID checks that a session ID contains only safe characters.
+func ValidateSessionID(id string) error {
+	if !sessionIDPattern.MatchString(id) {
+		return fmt.Errorf("invalid session_id: must contain only alphanumeric, hyphen, or underscore characters")
+	}
+	return nil
+}
+
 // ReadHookInput reads and parses hook input JSON from a reader.
 // Used by PreToolUse, PostToolUse, and other hook handlers.
 func ReadHookInput(r io.Reader) (*HookInput, error) {
-	data, err := io.ReadAll(r)
+	data, err := io.ReadAll(io.LimitReader(r, MaxJSONLLineSize))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read input: %w", err)
 	}
@@ -64,6 +78,10 @@ func ReadHookInput(r io.Reader) (*HookInput, error) {
 
 	if input.SessionID == "" {
 		return nil, fmt.Errorf("session_id is required")
+	}
+
+	if err := ValidateSessionID(input.SessionID); err != nil {
+		return nil, err
 	}
 
 	return &input, nil

@@ -130,6 +130,12 @@ func runSetup(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Println("  ✓ /til skill")
 
+	if err := config.InstallRetroSkill(); err != nil {
+		logger.Error("Failed to install /retro skill: %v", err)
+		return fmt.Errorf("failed to install /retro skill: %w", err)
+	}
+	fmt.Println("  ✓ /retro skill")
+
 	fmt.Println()
 	fmt.Println("✅ Setup complete. Claude Code sessions will sync to", backendURL)
 

@@ -228,6 +228,11 @@ func extractConfabBinary(r io.Reader, destPath string) error {
 			return fmt.Errorf("failed to read archive: %w", err)
 		}
 
+		// Reject tar entries with path traversal
+		if strings.Contains(hdr.Name, "..") {
+			continue
+		}
+
 		// Match the binary by base name — GoReleaser places it at the archive root
 		if filepath.Base(hdr.Name) != "confab" {
 			continue
@@ -240,7 +245,9 @@ func extractConfabBinary(r io.Reader, destPath string) error {
 			return fmt.Errorf("failed to create temp file: %w", err)
 		}
 
-		_, copyErr := io.Copy(tmpFile, tr)
+		// Limit extraction size to prevent decompression bombs
+		const maxBinarySize = 100 * 1024 * 1024 // 100MB
+		_, copyErr := io.Copy(tmpFile, io.LimitReader(tr, maxBinarySize))
 		closeErr := tmpFile.Close()
 		if copyErr != nil {
 			os.Remove(tmpPath)

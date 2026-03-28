@@ -22,7 +22,8 @@ var skillsAddCmd = &cobra.Command{
 	Long: `Installs confab skills in ~/.claude/skills/.
 
 Installs:
-- /til skill for capturing TILs (Today I Learned) during sessions`,
+- /til skill for capturing TILs (Today I Learned) during sessions
+- /retro skill for reviewing and discussing session transcripts`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger.Info("Running skills add command")
 
@@ -30,6 +31,12 @@ Installs:
 		if err := config.InstallTilSkill(); err != nil {
 			logger.Error("Failed to install /til skill: %v", err)
 			return fmt.Errorf("failed to install /til skill: %w", err)
+		}
+
+		fmt.Println("Installing /retro skill...")
+		if err := config.InstallRetroSkill(); err != nil {
+			logger.Error("Failed to install /retro skill: %v", err)
+			return fmt.Errorf("failed to install /retro skill: %w", err)
 		}
 
 		claudeDir, err := config.GetClaudeStateDir()
@@ -40,7 +47,8 @@ Installs:
 		fmt.Printf("✓ Skills installed in %s/skills/\n", claudeDir)
 		fmt.Println()
 		fmt.Println("Available skills:")
-		fmt.Println("  /til — capture TILs during your session")
+		fmt.Println("  /til   — capture TILs during your session")
+		fmt.Println("  /retro — review and discuss session transcripts")
 
 		return nil
 	},
@@ -57,6 +65,10 @@ var skillsRemoveCmd = &cobra.Command{
 		if err := config.UninstallTilSkill(); err != nil {
 			logger.Error("Failed to remove /til skill: %v", err)
 			return fmt.Errorf("failed to remove /til skill: %w", err)
+		}
+		if err := config.UninstallRetroSkill(); err != nil {
+			logger.Error("Failed to remove /retro skill: %v", err)
+			return fmt.Errorf("failed to remove /retro skill: %w", err)
 		}
 
 		fmt.Println("✓ Skills removed.")

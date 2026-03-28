@@ -10,6 +10,7 @@ Configuration management for two separate config systems: Confab's own config an
 | `upload.go` | Confab config: read/write `~/.confab/config.json`, validation, default redaction patterns |
 | `paths.go` | Path resolution with environment variable overrides |
 | `skill_til.go` | `/til` Claude Code skill: install/uninstall/ensure SKILL.md in `~/.claude/skills/til/` |
+| `skill_retro.go` | `/retro` Claude Code skill: install/uninstall/ensure SKILL.md in `~/.claude/skills/retro/` |
 
 ## Two Config Systems
 
@@ -20,12 +21,13 @@ Managed by `upload.go`. Contains backend URL, API key, log level, auto-update fl
 Managed by `config.go`. Contains hooks that Claude Code reads to fire events. We install/uninstall hooks here, but Claude Code owns the file and other tools may write to it concurrently.
 
 ### Claude Code skills (`~/.claude/skills/`)
-Managed by `skill_til.go` (and future `skill_*.go` files). Skills are SKILL.md files that extend Claude Code with custom slash commands. Unlike hooks (which live in settings.json), skills are standalone files in the skills directory.
+Managed by `skill_til.go`, `skill_retro.go` (and future `skill_*.go` files). Skills are SKILL.md files that extend Claude Code with custom slash commands. Unlike hooks (which live in settings.json), skills are standalone files in the skills directory.
 
 ## Key Types
 
 - **`UploadConfig`** — Confab's configuration (backend URL, API key, redaction settings)
 - **`ClaudeSettings`** — Wrapper around `map[string]any` for Claude Code settings, preserving unknown fields
+- **`ErrHooksTypeMismatch`** — Exported sentinel error returned when the `"hooks"` field in `settings.json` exists but is not a JSON object. Callers can check `errors.Is(err, ErrHooksTypeMismatch)` and surface a clear message asking users to fix the file manually.
 - **`RedactionConfig`** — Redaction enabled flag, use_default_patterns, custom pattern list
 - **`RedactionPattern`** — Individual redaction pattern (name, regex, type, capture group, field pattern)
 
@@ -39,12 +41,11 @@ Managed by `skill_til.go` (and future `skill_*.go` files). Skills are SKILL.md f
 ### Adding a new hook type
 This spans multiple packages. On the config side:
 
-1. Add `Install<Name>Hook()` in `config.go` — follow the pattern of existing hooks:
-   - `SessionStart`/`SessionEnd` use `"*"` matchers
-   - `PreToolUse`/`PostToolUse` use tool name matchers (e.g., `Bash`, `mcp__github`)
-   - `UserPromptSubmit` has no matcher
-2. Add `Uninstall<Name>Hook()` — must handle both old and new command patterns
-3. Add `Is<Name>HookInstalled()` — for status checking
+1. Add `Install<Name>Hook()` in `config.go` using the shared helpers:
+   - `installHook(settings, hook, event, matcher, true)` — for hooks with a matcher (e.g., `"*"`, `"Bash"`)
+   - `installHook(settings, hook, event, "", false)` — for hooks without a matcher (e.g., `UserPromptSubmit`)
+2. Add `Uninstall<Name>Hook()` using `removeHooksFromEvent(settings, event, isConfabHookEntry)` — must also handle old command patterns via custom predicates if needed
+3. Add `Is<Name>HookInstalled()` using `hasHookWithCommand()` — for status checking
 4. Then update: `cmd/hooks.go` (install/uninstall calls), `cmd/status.go` (status check), `cmd/setup.go` (setup flow), `cmd/hook.go` (dispatch)
 
 ## Invariants
@@ -52,7 +53,9 @@ This spans multiple packages. On the config side:
 - **Settings writes must use `AtomicUpdateSettings()`.** This provides read-modify-write with mtime-based optimistic locking and exponential backoff retry (max 10 attempts). Never read + write separately — concurrent Claude Code sessions will clobber each other.
 - **Hook install must be idempotent.** If the hook already exists, update it in place. Never duplicate hooks.
 - **Hook uninstall must handle old command patterns.** Users may have hooks installed by older Confab versions with different command strings. Uninstall must find and remove these too.
-- **Config file permissions:** `0600` for `~/.confab/config.json` (contains API key), `0644` for `~/.claude/settings.json` (needs to be readable by Claude Code).
+- **Config file permissions:** `0600` for `~/.confab/config.json` (contains API key), `0600` for `~/.claude/settings.json`.
+- **Directory permissions:** `0700` for `~/.confab/` and `~/.claude/` directories created by Confab. Restrictive permissions prevent other users on shared systems from reading config or API keys.
+- **Hook helpers (`installHook`, `removeHooksFromEvent`) return errors** instead of silently failing. Callers (the `Install*Hook`/`Uninstall*Hook` functions) propagate these errors up through `AtomicUpdateSettings`.
 - **`GetDefaultRedactionPatterns()` pattern order matters.** More specific patterns (e.g., `sk-ant-api03-...`) must come before general ones (e.g., field-name-based patterns) to avoid partial matches.
 
 ## Design Decisions

@@ -61,6 +61,7 @@ The daemon also monitors its parent PID and shuts down if Claude Code exits unex
 
 Confab installs Claude Code skills in `~/.claude/skills/`:
 - `/til`: Capture TILs (Today I Learned) during sessions — user types `/til "what I learned"`, Claude generates a summary from conversation context, and `confab til` posts it to the backend with the transcript position (message UUID)
+- `/retro`: Review and discuss session transcripts — user types `/retro <session-id> [question]`, Claude fetches the condensed transcript via `confab retro`, optionally reads local raw JSONL for richer data, and engages in discussion about the session
 
 Skills are managed separately from hooks: `confab skills add/remove` (vs `confab hooks add/remove`).
 
@@ -99,8 +100,8 @@ This is software that runs on user machines. Users trust us with their local env
 - **High test coverage**: Unit tests for all packages, integration tests for cross-package workflows, end-to-end tests for CLI commands.
 - **Post-change review**: After completing a batch of changes, always perform a detailed review. Run static analysis before committing:
   ```bash
-  staticcheck ./...      # Static analysis
-  deadcode -test ./...   # Find unused code (including test files)
+  ~/go/bin/staticcheck ./...      # Static analysis
+  ~/go/bin/deadcode -test ./...   # Find unused code (including test files)
   ```
 - **Clean migrations**: When moving or refactoring code, complete the migration fully. Do not leave duplicate code with deprecation comments "for backwards compatibility." Update all callers (including tests) to use the new location immediately. Stale duplicates cause maintenance burden and inevitably diverge.
 - **Keep documentation up to date**: When changing code, update the corresponding package README (`cmd/README.md`, `pkg/<package>/README.md`). Key things to keep current: file lists, exported API descriptions, invariants, dependency lists, and extension checklists. If a change spans multiple packages, also check `pkg/README.md` (dependency map) and `CLAUDE.md` (architecture overview). Documentation that contradicts the code is worse than no documentation.

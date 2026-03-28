@@ -35,7 +35,9 @@ Callers use `errors.Is(err, http.ErrUnauthorized)` to handle specific cases.
 
 **Zstd over gzip.** Better compression ratio for JSON payloads, which matters for large transcript chunks. The 1KB compression threshold (`compressionThreshold`) avoids compressing tiny payloads where overhead exceeds savings.
 
-**Retry only on 429.** Rate limiting is transient and retryable. Other errors (400, 500) are not retried — they indicate bugs or server issues that won't resolve by waiting. Retries use exponential backoff (1s initial, 2x multiplier, 60s max) and respect `Retry-After` headers.
+**Retry only on 429.** Rate limiting is transient and retryable. Other errors (400, 500) are not retried — they indicate bugs or server issues that won't resolve by waiting. Retries use exponential backoff (1s initial, 2x multiplier, 60s max) and respect `Retry-After` headers (capped at `maxRetryAfterSeconds` = 3600s).
+
+**Bounded response reading.** Response bodies are read with `io.LimitReader` capped at `maxResponseSize` (32MB) to prevent memory exhaustion from malicious or malformed responses. Error messages include response body truncated to 256 bytes via `truncateBody()` to avoid log flooding.
 
 **Localhost TLS exemption.** Non-localhost URLs enforce TLS 1.2+. Localhost is exempt for local development. This is checked by hostname, not scheme.
 
@@ -53,6 +55,8 @@ Callers use `errors.Is(err, http.ErrUnauthorized)` to handle specific cases.
 - TLS 1.2+ is enforced for all non-localhost connections — do not weaken this.
 - Payloads must never be logged (privacy).
 - Retry logic must only apply to 429 responses.
+- Response bodies must always be read with a size limit (`maxResponseSize`) — never use unbounded `io.ReadAll` on HTTP responses.
+- `Retry-After` values must be capped (`maxRetryAfterSeconds`) — a malicious server must not be able to make the client sleep indefinitely.
 
 ## Testing
 

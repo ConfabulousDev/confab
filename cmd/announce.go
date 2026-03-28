@@ -27,6 +27,11 @@ var announcements = []Announcement{
 		Setup:   config.InstallTilSkill,
 		Message: `/til is now available — capture TILs during your session. Try: /til "what you learned"`,
 	},
+	{
+		Check:   func() bool { return !config.IsRetroSkillInstalled() },
+		Setup:   config.InstallRetroSkill,
+		Message: `/retro is now available — chat about any session. Try: /retro <session-id>`,
+	},
 }
 
 // RunAnnouncements checks all pending announcements, runs setup for each,

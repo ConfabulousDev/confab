@@ -114,7 +114,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	// Setup signal handling as early as possible to catch signals during
 	// initialization (waiting for transcript, backend init).
 	// See daemon_test.go for rationale.
-	sigCh := make(chan os.Signal, 1)
+	sigCh := make(chan os.Signal, 2)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
 
 	// Wait for transcript file to exist before doing anything else.
@@ -339,6 +339,11 @@ func (d *Daemon) shutdown(reason string) error {
 		done := make(chan struct{})
 		go func() {
 			defer close(done)
+			defer func() {
+				if r := recover(); r != nil {
+					logger.Error("Panic during final sync: %v", r)
+				}
+			}()
 
 			logger.Info("Performing final sync...")
 			if chunks, err := d.engine.SyncAll(); err != nil {
