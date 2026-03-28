@@ -43,27 +43,11 @@ func NewFromConfig(cfg *config.RedactionConfig) (*Redactor, error) {
 
 	// Add default patterns if enabled (default behavior)
 	if cfg.ShouldUseDefaultPatterns() {
-		for _, p := range config.GetDefaultRedactionPatterns() {
-			patterns = append(patterns, Pattern{
-				Name:         p.Name,
-				Pattern:      p.Pattern,
-				Type:         p.Type,
-				CaptureGroup: p.CaptureGroup,
-				FieldPattern: p.FieldPattern,
-			})
-		}
+		patterns = append(patterns, convertPatterns(config.GetDefaultRedactionPatterns())...)
 	}
 
 	// Add custom patterns from config
-	for _, p := range cfg.Patterns {
-		patterns = append(patterns, Pattern{
-			Name:         p.Name,
-			Pattern:      p.Pattern,
-			Type:         p.Type,
-			CaptureGroup: p.CaptureGroup,
-			FieldPattern: p.FieldPattern,
-		})
-	}
+	patterns = append(patterns, convertPatterns(cfg.Patterns)...)
 
 	// Return nil if no patterns to apply
 	if len(patterns) == 0 {
@@ -71,6 +55,21 @@ func NewFromConfig(cfg *config.RedactionConfig) (*Redactor, error) {
 	}
 
 	return compilePatterns(patterns)
+}
+
+// convertPatterns converts config.RedactionPattern slice to redactor.Pattern slice.
+func convertPatterns(src []config.RedactionPattern) []Pattern {
+	patterns := make([]Pattern, len(src))
+	for i, p := range src {
+		patterns[i] = Pattern{
+			Name:         p.Name,
+			Pattern:      p.Pattern,
+			Type:         p.Type,
+			CaptureGroup: p.CaptureGroup,
+			FieldPattern: p.FieldPattern,
+		}
+	}
+	return patterns
 }
 
 // compilePatterns compiles a list of patterns into a Redactor
@@ -117,27 +116,29 @@ func compilePatterns(patterns []Pattern) (*Redactor, error) {
 // Redact redacts sensitive data from a string using value-based patterns only.
 // Field-based patterns are skipped since plain text has no field context.
 func (r *Redactor) Redact(input string) string {
+	return r.applyValuePatterns(input)
+}
+
+// applyValuePatterns applies all value-based patterns (no field context) to the input.
+// Field-based patterns are skipped since this operates on plain text without field context.
+func (r *Redactor) applyValuePatterns(input string) string {
 	result := input
-
 	for _, p := range r.patterns {
-		// Skip field-based patterns for plain text (no field context)
-		if p.fieldRegex != nil {
+		if p.fieldRegex != nil || p.regex == nil {
 			continue
 		}
-		// Skip patterns without a value regex
-		if p.regex == nil {
-			continue
-		}
-		if p.captureGroup > 0 {
-			// Partial redaction using capture group
-			result = r.redactCaptureGroup(result, p)
-		} else {
-			// Full match redaction
-			result = r.redactFullMatch(result, p)
-		}
+		result = r.applyRegex(result, p)
 	}
-
 	return result
+}
+
+// applyRegex applies a pattern's regex to the input, using either capture group
+// or full match replacement depending on the pattern configuration.
+func (r *Redactor) applyRegex(input string, p compiledPattern) string {
+	if p.captureGroup > 0 {
+		return r.redactCaptureGroup(input, p)
+	}
+	return r.redactFullMatch(input, p)
 }
 
 // RedactJSONL redacts sensitive data from JSONL content by parsing each line,
@@ -152,15 +153,20 @@ func (r *Redactor) RedactJSONL(input []byte) []byte {
 	scanner.Buffer(make([]byte, 64*1024), maxLineSize)
 
 	first := true
+	writeLine := func(b []byte) {
+		if !first {
+			result.WriteByte('\n')
+		}
+		result.Write(b)
+		first = false
+	}
+
 	for scanner.Scan() {
 		line := scanner.Bytes()
 
 		// Preserve empty lines as-is
 		if len(bytes.TrimSpace(line)) == 0 {
-			if !first {
-				result.WriteByte('\n')
-			}
-			first = false
+			writeLine(nil)
 			continue
 		}
 
@@ -168,34 +174,20 @@ func (r *Redactor) RedactJSONL(input []byte) []byte {
 		var data interface{}
 		if err := json.Unmarshal(line, &data); err != nil {
 			// If parsing fails, fall back to text-based redaction
-			if !first {
-				result.WriteByte('\n')
-			}
-			result.Write([]byte(r.Redact(string(line))))
-			first = false
+			writeLine([]byte(r.Redact(string(line))))
 			continue
 		}
 
-		// Recursively redact string values
+		// Recursively redact string values and re-serialize
 		redacted := r.redactValueWithFieldContext(data, "")
-
-		// Re-serialize
 		output, err := json.Marshal(redacted)
 		if err != nil {
 			// Shouldn't happen, but fall back to original if it does
-			if !first {
-				result.WriteByte('\n')
-			}
-			result.Write(line)
-			first = false
+			writeLine(line)
 			continue
 		}
 
-		if !first {
-			result.WriteByte('\n')
-		}
-		result.Write(output)
-		first = false
+		writeLine(output)
 	}
 
 	return result.Bytes()
@@ -209,7 +201,7 @@ func (r *Redactor) RedactJSONLine(line string) string {
 	var data interface{}
 	if err := json.Unmarshal([]byte(line), &data); err != nil {
 		// Not valid JSON, fall back to text-based redaction (value patterns only)
-		return r.redactTextValuePatternsOnly(line)
+		return r.Redact(line)
 	}
 
 	// Recursively redact string values
@@ -223,27 +215,6 @@ func (r *Redactor) RedactJSONLine(line string) string {
 	}
 
 	return string(output)
-}
-
-// redactTextValuePatternsOnly applies only value-based patterns (no field patterns)
-// to plain text. This is the safe fallback for non-JSON content.
-func (r *Redactor) redactTextValuePatternsOnly(input string) string {
-	result := input
-	for _, p := range r.patterns {
-		// Skip field-based patterns for text mode
-		if p.fieldRegex != nil {
-			continue
-		}
-		if p.regex == nil {
-			continue
-		}
-		if p.captureGroup > 0 {
-			result = r.redactCaptureGroup(result, p)
-		} else {
-			result = r.redactFullMatch(result, p)
-		}
-	}
-	return result
 }
 
 // redactValueWithFieldContext recursively redacts string values in a JSON structure,
@@ -276,46 +247,38 @@ func (r *Redactor) redactValueWithFieldContext(v interface{}, fieldName string) 
 func (r *Redactor) redactStringValue(value, fieldName string) string {
 	result := value
 
+	// First pass: apply field-based patterns
 	for _, p := range r.patterns {
-		if p.fieldRegex != nil {
-			// Field-based pattern: only apply if field name matches
-			if fieldName == "" || !p.fieldRegex.MatchString(fieldName) {
-				continue
-			}
-			// Field matches - redact the value
-			if p.regex != nil {
-				// Apply value regex to matching field
-				if p.captureGroup > 0 {
-					result = r.redactCaptureGroup(result, p)
-				} else {
-					result = r.redactFullMatch(result, p)
-				}
-			} else {
-				// No value regex - redact entire value
-				result = fmt.Sprintf("[REDACTED:%s]", strings.ToUpper(p.patternType))
-			}
-		} else if p.regex != nil {
-			// Value-based pattern: apply to all string values
-			if p.captureGroup > 0 {
-				result = r.redactCaptureGroup(result, p)
-			} else {
-				result = r.redactFullMatch(result, p)
-			}
+		if p.fieldRegex == nil {
+			continue
+		}
+		if fieldName == "" || !p.fieldRegex.MatchString(fieldName) {
+			continue
+		}
+		if p.regex != nil {
+			result = r.applyRegex(result, p)
+		} else {
+			result = p.redactionMarker()
 		}
 	}
 
-	return result
+	// Second pass: apply value-based patterns (no field context needed)
+	return r.applyValuePatterns(result)
+}
+
+// redactionMarker returns the redaction placeholder for this pattern, e.g. "[REDACTED:API_KEY]".
+func (p compiledPattern) redactionMarker() string {
+	return fmt.Sprintf("[REDACTED:%s]", strings.ToUpper(p.patternType))
 }
 
 // redactFullMatch replaces the entire match with a redaction marker
 func (r *Redactor) redactFullMatch(input string, p compiledPattern) string {
-	marker := fmt.Sprintf("[REDACTED:%s]", strings.ToUpper(p.patternType))
-	return p.regex.ReplaceAllString(input, marker)
+	return p.regex.ReplaceAllString(input, p.redactionMarker())
 }
 
 // redactCaptureGroup replaces only the specified capture group
 func (r *Redactor) redactCaptureGroup(input string, p compiledPattern) string {
-	marker := fmt.Sprintf("[REDACTED:%s]", strings.ToUpper(p.patternType))
+	marker := p.redactionMarker()
 
 	return p.regex.ReplaceAllStringFunc(input, func(match string) string {
 		// Use FindStringSubmatchIndex to get exact positions of capture groups.
