@@ -115,4 +115,3 @@ type InboxEvent struct {
 	Timestamp time.Time  `json:"timestamp"`            // When the event was written
 	HookInput *HookInput `json:"hook_input,omitempty"` // Full hook payload for session events
 }
-

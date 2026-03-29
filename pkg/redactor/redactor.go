@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/ConfabulousDev/confab/pkg/config"
+	"github.com/ConfabulousDev/confab/pkg/types"
 )
 
 // Redactor handles redaction of sensitive data
@@ -149,8 +150,7 @@ func (r *Redactor) RedactJSONL(input []byte) []byte {
 	scanner := bufio.NewScanner(bytes.NewReader(input))
 
 	// Handle large lines (transcripts can have big content blocks)
-	const maxLineSize = 10 * 1024 * 1024 // 10MB
-	scanner.Buffer(make([]byte, 64*1024), maxLineSize)
+	scanner.Buffer(make([]byte, 64*1024), types.MaxJSONLLineSize)
 
 	first := true
 	writeLine := func(b []byte) {
