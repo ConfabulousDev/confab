@@ -173,6 +173,36 @@ func TestReadHookInput(t *testing.T) {
 	})
 }
 
+func TestValidateSessionID(t *testing.T) {
+	tests := []struct {
+		name    string
+		id      string
+		wantErr bool
+	}{
+		{name: "alphanumeric", id: "abc123", wantErr: false},
+		{name: "with hyphens", id: "abc-123", wantErr: false},
+		{name: "with underscores", id: "abc_123", wantErr: false},
+		{name: "mixed safe chars", id: "a1-B2_c3", wantErr: false},
+		{name: "empty string", id: "", wantErr: true},
+		{name: "path traversal", id: "../../tmp/evil", wantErr: true},
+		{name: "slash", id: "abc/def", wantErr: true},
+		{name: "space", id: "abc def", wantErr: true},
+		{name: "special chars", id: "abc@123", wantErr: true},
+		{name: "dollar sign", id: "abc$123", wantErr: true},
+		{name: "newline", id: "abc\n123", wantErr: true},
+		{name: "dot", id: "abc.123", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateSessionID(tt.id)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateSessionID(%q) error = %v, wantErr %v", tt.id, err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestNewJSONLScanner_RealWorldScenarios(t *testing.T) {
 	t.Run("handles JSONL with thinking blocks", func(t *testing.T) {
 		// Simulate a realistic transcript line with a large thinking block
