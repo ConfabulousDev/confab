@@ -99,8 +99,8 @@ func GetRepoURL(cwd string) (string, error) {
 	return strings.TrimSpace(url), nil
 }
 
-// GetHeadSHA returns the full SHA of the HEAD commit
-// Returns empty string and error if not a git repo or no commits
+// GetHeadSHA returns the full SHA of the HEAD commit.
+// Returns empty string and nil if not in a git repo.
 func GetHeadSHA(cwd string) (string, error) {
 	if !isGitRepo(cwd) {
 		return "", nil

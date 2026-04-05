@@ -59,8 +59,9 @@ func BuildUserAgent(version string) string {
 // This typically means the API key is invalid or expired.
 var ErrUnauthorized = errors.New("unauthorized")
 
-// ErrRateLimited is returned when retries are exhausted on 429 responses.
-var ErrRateLimited = errors.New("rate limited")
+// errRateLimited is returned when retries are exhausted on 429 responses.
+// Internal only — no callers currently check for this sentinel.
+var errRateLimited = errors.New("rate limited")
 
 // ErrSessionNotFound is returned when the server returns 404.
 // This typically means the session was deleted from the backend.
@@ -191,7 +192,7 @@ func (c *Client) DoJSON(method, path string, reqBody, respBody interface{}) erro
 		// Handle rate limiting with retry
 		if resp.StatusCode == http.StatusTooManyRequests {
 			if attempt == maxRetries {
-				return fmt.Errorf("%w: exceeded %d retries", ErrRateLimited, maxRetries)
+				return fmt.Errorf("%w: exceeded %d retries", errRateLimited, maxRetries)
 			}
 
 			// Use Retry-After header if provided, otherwise use exponential backoff
@@ -298,7 +299,7 @@ func checkStreamResponseStatus(resp *http.Response) error {
 
 	// 429 returns immediately without reading body — the caller may retry elsewhere
 	if resp.StatusCode == http.StatusTooManyRequests {
-		return fmt.Errorf("%w: status %d", ErrRateLimited, resp.StatusCode)
+		return fmt.Errorf("%w: status %d", errRateLimited, resp.StatusCode)
 	}
 
 	// Read a snippet of the body for error context

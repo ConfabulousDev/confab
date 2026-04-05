@@ -11,7 +11,7 @@ Extracts git repository information from the working directory or from transcrip
 ## Key API
 
 - **`DetectGitInfo(cwd)`** — Returns `*GitInfo` with repo URL, branch, commit SHA, message, author, and dirty status. Returns `nil` (not error) if not in a git repo.
-- **`GetHeadSHA(cwd)`** — Returns the full 40-char HEAD commit SHA.
+- **`GetHeadSHA(cwd)`** — Returns the full 40-char HEAD commit SHA. Returns empty string and nil if not in a git repo.
 - **`GetRepoURL(cwd)`** — Returns `remote.origin.url`.
 - **`ToGitHubURL(gitURL)`** — Converts git remote URLs (SSH, HTTPS, `git@`) to `https://github.com/owner/repo`. Returns empty string for non-GitHub URLs.
 - **`ExtractGitInfoFromTranscript(path)`** — Parses a JSONL transcript to find `gitBranch` and `cwd` fields. Used when the working directory may no longer exist.

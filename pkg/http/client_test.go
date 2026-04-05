@@ -221,8 +221,8 @@ func TestClient_RetryExhausted(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error after exhausted retries")
 	}
-	if !errors.Is(err, ErrRateLimited) {
-		t.Errorf("expected ErrRateLimited, got: %v", err)
+	if !errors.Is(err, errRateLimited) {
+		t.Errorf("expected errRateLimited, got: %v", err)
 	}
 	// maxRetries+1 attempts total (0..maxRetries inclusive)
 	if attempts != maxRetries+1 {
@@ -313,7 +313,7 @@ func TestClient_GetRawToWriter(t *testing.T) {
 		}
 	})
 
-	t.Run("returns ErrRateLimited on 429 without retry", func(t *testing.T) {
+	t.Run("returns errRateLimited on 429 without retry", func(t *testing.T) {
 		attempts := 0
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			attempts++
@@ -335,8 +335,8 @@ func TestClient_GetRawToWriter(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected error for 429")
 		}
-		if !errors.Is(err, ErrRateLimited) {
-			t.Errorf("expected ErrRateLimited, got: %v", err)
+		if !errors.Is(err, errRateLimited) {
+			t.Errorf("expected errRateLimited, got: %v", err)
 		}
 		if attempts != 1 {
 			t.Errorf("expected exactly 1 attempt (no retry), got %d", attempts)

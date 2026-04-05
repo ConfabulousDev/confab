@@ -2,6 +2,7 @@ package types
 
 import (
 	"bytes"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -155,6 +156,16 @@ func TestReadHookInput(t *testing.T) {
 		}
 	})
 
+	t.Run("reader error", func(t *testing.T) {
+		_, err := ReadHookInput(&failingReader{err: errors.New("disk read error")})
+		if err == nil {
+			t.Fatal("expected error for failing reader")
+		}
+		if !strings.Contains(err.Error(), "failed to read input") {
+			t.Errorf("error should mention 'failed to read input', got: %v", err)
+		}
+	})
+
 	t.Run("optional fields are zero-valued", func(t *testing.T) {
 		input := `{"session_id":"abc123"}`
 		got, err := ReadHookInput(strings.NewReader(input))
@@ -235,4 +246,13 @@ func TestNewJSONLScanner_RealWorldScenarios(t *testing.T) {
 			t.Errorf("Unexpected error: %v", scanner.Err())
 		}
 	})
+}
+
+// failingReader is an io.Reader that always returns an error.
+type failingReader struct {
+	err error
+}
+
+func (r *failingReader) Read(p []byte) (int, error) {
+	return 0, r.err
 }

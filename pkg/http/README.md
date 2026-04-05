@@ -25,9 +25,10 @@ err := client.Post("/api/v1/sync/chunk", reqBody, &respBody)
 | Error | HTTP Status | Meaning |
 |-------|-------------|---------|
 | `ErrUnauthorized` | 401, 403 | Invalid or expired API key |
-| `ErrRateLimited` | 429 | Rate limited after max retries |
 | `ErrSessionNotFound` | 404 | Session doesn't exist on backend |
 | `ErrConflict` | 409 | Duplicate resource |
+
+Note: 429 (rate limited) errors use an internal sentinel (`errRateLimited`) since no callers currently need to distinguish rate limiting from other failures.
 
 Callers use `errors.Is(err, http.ErrUnauthorized)` to handle specific cases.
 

@@ -190,14 +190,8 @@ func (d *Daemon) Run(ctx context.Context) error {
 			if d.engine == nil || !d.engine.IsInitialized() {
 				if err := d.tryInit(); err != nil {
 					logger.Warn("Backend init failed (will retry): %v", err)
-					// If auth failed during init, reset engine to force config re-read.
-					// User may have re-authenticated with a new API key.
 					if errors.Is(err, http.ErrUnauthorized) {
-						logger.Info("Auth failed during init, will re-read config on next cycle")
-						if d.engine != nil {
-							d.engine.Reset()
-						}
-						d.engine = nil
+						d.resetEngineOnAuthFailure()
 					}
 					continue
 				}
@@ -206,12 +200,8 @@ func (d *Daemon) Run(ctx context.Context) error {
 			// Sync
 			if chunks, err := d.engine.SyncAll(); err != nil {
 				logger.Warn("Sync cycle had errors: %v", err)
-				// If auth failed, reset engine to force config re-read on next cycle.
-				// User may have re-authenticated with a new API key.
 				if errors.Is(err, http.ErrUnauthorized) {
-					logger.Info("Auth failed, will re-read config on next cycle")
-					d.engine.Reset()
-					d.engine = nil
+					d.resetEngineOnAuthFailure()
 				}
 				// Track consecutive 404 errors for session deletion detection.
 				// Stop after maxConsecutiveNotFound to avoid infinite retries.
@@ -307,6 +297,16 @@ func (d *Daemon) tryInit() error {
 	}
 
 	return nil
+}
+
+// resetEngineOnAuthFailure clears the sync engine to force a config re-read
+// on the next cycle. The user may have re-authenticated with a new API key.
+func (d *Daemon) resetEngineOnAuthFailure() {
+	logger.Info("Auth failed, will re-read config on next cycle")
+	if d.engine != nil {
+		d.engine.Reset()
+	}
+	d.engine = nil
 }
 
 // Stop signals the daemon to stop. Safe to call multiple times.

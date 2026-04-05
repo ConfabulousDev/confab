@@ -53,7 +53,6 @@ func (l Level) String() string {
 type Logger struct {
 	file       io.WriteCloser
 	logger     *log.Logger
-	logPath    string
 	level      Level
 	mu         sync.Mutex
 	alsoStderr bool   // Also write to stderr
@@ -111,11 +110,9 @@ func Init() error {
 			return
 		}
 
-		logPath := filepath.Join(logDir, logFileName)
-
 		// Use lumberjack for automatic log rotation
 		rotator := &lumberjack.Logger{
-			Filename:   logPath,
+			Filename:   filepath.Join(logDir, logFileName),
 			MaxSize:    maxSizeMB,   // megabytes
 			MaxAge:     maxAgeDays,  // days
 			MaxBackups: maxBackups,  // number of old files
@@ -126,7 +123,6 @@ func Init() error {
 		instance = &Logger{
 			file:       rotator,
 			logger:     log.New(rotator, "", 0), // We'll format manually
-			logPath:    logPath,
 			level:      INFO,
 			alsoStderr: false,
 		}

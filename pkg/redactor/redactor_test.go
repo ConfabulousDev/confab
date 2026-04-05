@@ -776,3 +776,230 @@ func TestOpenAIKeyFullRedaction(t *testing.T) {
 		})
 	}
 }
+
+// TestRedactFieldPattern tests field-based pattern matching where redaction is
+// triggered by the JSON field name rather than the value format.
+func TestRedactFieldPattern(t *testing.T) {
+	t.Run("field pattern without value pattern redacts entire value", func(t *testing.T) {
+		cfg := Config{
+			Patterns: []Pattern{
+				{
+					Name:         "Sensitive Field",
+					FieldPattern: `(?i)^(password|secret|api_key)$`,
+					Type:         "sensitive_field",
+				},
+			},
+		}
+
+		redactor, err := NewRedactor(cfg)
+		if err != nil {
+			t.Fatalf("Failed to create redactor: %v", err)
+		}
+
+		input := `{"password":"hunter2","username":"admin"}`
+		result := redactor.RedactJSONLine(input)
+
+		var parsed map[string]interface{}
+		if err := json.Unmarshal([]byte(result), &parsed); err != nil {
+			t.Fatalf("Result is not valid JSON: %v", err)
+		}
+
+		if parsed["password"] != "[REDACTED:SENSITIVE_FIELD]" {
+			t.Errorf("password should be redacted, got: %v", parsed["password"])
+		}
+		if parsed["username"] != "admin" {
+			t.Errorf("username should not be redacted, got: %v", parsed["username"])
+		}
+	})
+
+	t.Run("field pattern with value pattern redacts matching parts", func(t *testing.T) {
+		cfg := Config{
+			Patterns: []Pattern{
+				{
+					Name:         "Token in auth field",
+					FieldPattern: `(?i)^authorization$`,
+					Pattern:      `Bearer\s+(\S+)`,
+					Type:         "auth_token",
+					CaptureGroup: 1,
+				},
+			},
+		}
+
+		redactor, err := NewRedactor(cfg)
+		if err != nil {
+			t.Fatalf("Failed to create redactor: %v", err)
+		}
+
+		input := `{"authorization":"Bearer sk-abc123","other":"Bearer sk-abc123"}`
+		result := redactor.RedactJSONLine(input)
+
+		var parsed map[string]interface{}
+		if err := json.Unmarshal([]byte(result), &parsed); err != nil {
+			t.Fatalf("Result is not valid JSON: %v", err)
+		}
+
+		// Field "authorization" matches field pattern, so value pattern applies
+		auth := parsed["authorization"].(string)
+		if !strings.Contains(auth, "[REDACTED:AUTH_TOKEN]") {
+			t.Errorf("authorization field should have redacted token, got: %v", auth)
+		}
+		if !strings.Contains(auth, "Bearer") {
+			t.Errorf("authorization field should preserve 'Bearer' prefix, got: %v", auth)
+		}
+
+		// Field "other" does NOT match field pattern, so value is untouched
+		if parsed["other"] != "Bearer sk-abc123" {
+			t.Errorf("other field should not be redacted, got: %v", parsed["other"])
+		}
+	})
+
+	t.Run("field pattern case insensitive matching", func(t *testing.T) {
+		cfg := Config{
+			Patterns: []Pattern{
+				{
+					Name:         "Sensitive Field",
+					FieldPattern: `(?i)^(password|secret)$`,
+					Type:         "sensitive_field",
+				},
+			},
+		}
+
+		redactor, err := NewRedactor(cfg)
+		if err != nil {
+			t.Fatalf("Failed to create redactor: %v", err)
+		}
+
+		// JSON field names are case-sensitive, but our field pattern uses (?i)
+		input := `{"Password":"hunter2","SECRET":"top-secret","other":"safe"}`
+		result := redactor.RedactJSONLine(input)
+
+		var parsed map[string]interface{}
+		if err := json.Unmarshal([]byte(result), &parsed); err != nil {
+			t.Fatalf("Result is not valid JSON: %v", err)
+		}
+
+		if parsed["Password"] != "[REDACTED:SENSITIVE_FIELD]" {
+			t.Errorf("Password should be redacted, got: %v", parsed["Password"])
+		}
+		if parsed["SECRET"] != "[REDACTED:SENSITIVE_FIELD]" {
+			t.Errorf("SECRET should be redacted, got: %v", parsed["SECRET"])
+		}
+		if parsed["other"] != "safe" {
+			t.Errorf("other should not be redacted, got: %v", parsed["other"])
+		}
+	})
+
+	t.Run("field pattern with nested objects", func(t *testing.T) {
+		cfg := Config{
+			Patterns: []Pattern{
+				{
+					Name:         "Sensitive Field",
+					FieldPattern: `(?i)^password$`,
+					Type:         "sensitive_field",
+				},
+			},
+		}
+
+		redactor, err := NewRedactor(cfg)
+		if err != nil {
+			t.Fatalf("Failed to create redactor: %v", err)
+		}
+
+		input := `{"user":{"password":"secret","name":"alice"}}`
+		result := redactor.RedactJSONLine(input)
+
+		var parsed map[string]interface{}
+		if err := json.Unmarshal([]byte(result), &parsed); err != nil {
+			t.Fatalf("Result is not valid JSON: %v", err)
+		}
+
+		user := parsed["user"].(map[string]interface{})
+		if user["password"] != "[REDACTED:SENSITIVE_FIELD]" {
+			t.Errorf("nested password should be redacted, got: %v", user["password"])
+		}
+		if user["name"] != "alice" {
+			t.Errorf("nested name should not be redacted, got: %v", user["name"])
+		}
+	})
+
+	t.Run("field pattern with arrays inherits parent field name", func(t *testing.T) {
+		cfg := Config{
+			Patterns: []Pattern{
+				{
+					Name:         "Sensitive Field",
+					FieldPattern: `(?i)^secrets$`,
+					Type:         "sensitive_field",
+				},
+			},
+		}
+
+		redactor, err := NewRedactor(cfg)
+		if err != nil {
+			t.Fatalf("Failed to create redactor: %v", err)
+		}
+
+		input := `{"secrets":["key1","key2"],"labels":["public","info"]}`
+		result := redactor.RedactJSONLine(input)
+
+		var parsed map[string]interface{}
+		if err := json.Unmarshal([]byte(result), &parsed); err != nil {
+			t.Fatalf("Result is not valid JSON: %v", err)
+		}
+
+		secrets := parsed["secrets"].([]interface{})
+		for i, s := range secrets {
+			if s != "[REDACTED:SENSITIVE_FIELD]" {
+				t.Errorf("secrets[%d] should be redacted, got: %v", i, s)
+			}
+		}
+
+		labels := parsed["labels"].([]interface{})
+		if labels[0] != "public" || labels[1] != "info" {
+			t.Errorf("labels should not be redacted, got: %v", labels)
+		}
+	})
+
+	t.Run("field and value patterns combine correctly", func(t *testing.T) {
+		cfg := Config{
+			Patterns: []Pattern{
+				// Field-based: redact password fields entirely
+				{
+					Name:         "Password Field",
+					FieldPattern: `(?i)^password$`,
+					Type:         "password",
+				},
+				// Value-based: redact API keys anywhere
+				{
+					Name:    "API Key",
+					Pattern: `sk-[A-Za-z0-9]{10}`,
+					Type:    "api_key",
+				},
+			},
+		}
+
+		redactor, err := NewRedactor(cfg)
+		if err != nil {
+			t.Fatalf("Failed to create redactor: %v", err)
+		}
+
+		input := `{"password":"hunter2","note":"my key is sk-ABCDEFGHIJ"}`
+		result := redactor.RedactJSONLine(input)
+
+		var parsed map[string]interface{}
+		if err := json.Unmarshal([]byte(result), &parsed); err != nil {
+			t.Fatalf("Result is not valid JSON: %v", err)
+		}
+
+		if parsed["password"] != "[REDACTED:PASSWORD]" {
+			t.Errorf("password should be redacted by field pattern, got: %v", parsed["password"])
+		}
+
+		note := parsed["note"].(string)
+		if !strings.Contains(note, "[REDACTED:API_KEY]") {
+			t.Errorf("note should have API key redacted, got: %v", note)
+		}
+		if strings.Contains(note, "sk-ABCDEFGHIJ") {
+			t.Errorf("API key should not remain in note, got: %v", note)
+		}
+	})
+}
