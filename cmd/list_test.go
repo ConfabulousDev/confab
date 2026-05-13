@@ -240,4 +240,3 @@ func TestListSessions_FilterByDuration(t *testing.T) {
 		t.Errorf("Expected 1 session within last hour, got %d", len(filtered))
 	}
 }
-

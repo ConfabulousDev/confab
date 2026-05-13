@@ -5,7 +5,7 @@ import (
 	"os"
 
 	"github.com/ConfabulousDev/confab/pkg/logger"
-	"github.com/ConfabulousDev/confab/pkg/types"
+	"github.com/ConfabulousDev/confab/pkg/provider"
 	"github.com/spf13/cobra"
 )
 
@@ -37,7 +37,8 @@ func handleUserPromptSubmit(r io.Reader, w io.Writer) error {
 	defer writeUserPromptSubmitResponse(w)
 
 	// Read and validate hook input
-	hookInput, err := types.ReadHookInput(r)
+	claude := provider.ClaudeCode{}
+	hookInput, err := claude.ReadHookInput(r)
 	if err != nil {
 		logger.Warn("Failed to read hook input: %v", err)
 		return nil
@@ -47,7 +48,7 @@ func handleUserPromptSubmit(r io.Reader, w io.Writer) error {
 		hookInput.SessionID, len(hookInput.Prompt))
 
 	// Ensure daemon is running (handles teleport case where SessionStart doesn't fire)
-	spawned, err := maybeSpawnDaemon(hookInput)
+	spawned, err := maybeSpawnDaemon(claude, hookInput)
 	if err != nil {
 		logger.Warn("Failed to spawn daemon: %v", err)
 		return nil
@@ -62,5 +63,5 @@ func handleUserPromptSubmit(r io.Reader, w io.Writer) error {
 
 // writeUserPromptSubmitResponse writes a success response allowing the prompt to proceed
 func writeUserPromptSubmitResponse(w io.Writer) {
-	writeHookResponse(w, true) // SuppressOutput: don't add anything to context
+	writeClaudeHookResponse(w, true) // SuppressOutput: don't add anything to context
 }

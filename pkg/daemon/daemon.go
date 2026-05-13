@@ -36,7 +36,6 @@ const (
 	// maxConsecutiveNotFound is how many consecutive 404 errors before stopping.
 	// This handles the case where a session is deleted from the backend.
 	maxConsecutiveNotFound = 3
-
 )
 
 // shutdownTimeout is the maximum time to wait for final sync during shutdown.
@@ -74,7 +73,7 @@ type Config struct {
 	ExternalID         string
 	TranscriptPath     string
 	CWD                string
-	ParentPID          int           // Claude Code process ID to monitor (0 to disable)
+	ParentPID          int // Claude Code process ID to monitor (0 to disable)
 	SyncInterval       time.Duration
 	SyncIntervalJitter time.Duration // 0 to disable jitter (for testing)
 }
@@ -435,7 +434,7 @@ func (d *Daemon) cleanupInbox() {
 // StopDaemon sends SIGTERM to a running daemon by external ID.
 // If hookInput is provided, it writes a session_end event to the daemon's inbox
 // before signaling, so the daemon can access the full SessionEnd payload.
-func StopDaemon(externalID string, hookInput *types.HookInput) error {
+func StopDaemon(externalID string, hookInput *types.ClaudeHookInput) error {
 	state, err := LoadState(externalID)
 	if err != nil {
 		return fmt.Errorf("failed to load state: %w", err)
@@ -473,7 +472,7 @@ func StopDaemon(externalID string, hookInput *types.HookInput) error {
 }
 
 // writeInboxEvent appends an event to the inbox JSONL file
-func writeInboxEvent(inboxPath string, eventType string, hookInput *types.HookInput) error {
+func writeInboxEvent(inboxPath string, eventType string, hookInput *types.ClaudeHookInput) error {
 	event := types.InboxEvent{
 		Type:      eventType,
 		Timestamp: time.Now(),

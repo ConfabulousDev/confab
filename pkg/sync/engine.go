@@ -273,7 +273,7 @@ func (e *Engine) SyncAll() (int, error) {
 }
 
 // SendSessionEnd sends a session_end event to the backend
-func (e *Engine) SendSessionEnd(hookInput *types.HookInput, timestamp time.Time) error {
+func (e *Engine) SendSessionEnd(hookInput *types.ClaudeHookInput, timestamp time.Time) error {
 	if !e.initialized || e.sessionID == "" {
 		return nil // Nothing to send if not initialized
 	}

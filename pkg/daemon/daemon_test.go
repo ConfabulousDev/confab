@@ -263,7 +263,7 @@ func TestWriteInboxEvent(t *testing.T) {
 	tmpDir := t.TempDir()
 	inboxPath := filepath.Join(tmpDir, "test.inbox.jsonl")
 
-	hookInput := &types.HookInput{
+	hookInput := &types.ClaudeHookInput{
 		SessionID:      "test-session-123",
 		TranscriptPath: "/path/to/transcript.jsonl",
 		CWD:            "/work/dir",
@@ -293,7 +293,7 @@ func TestWriteInboxEvent(t *testing.T) {
 		t.Errorf("expected Type 'session_end', got %q", event.Type)
 	}
 	if event.HookInput == nil {
-		t.Fatal("expected HookInput to be set")
+		t.Fatal("expected ClaudeHookInput to be set")
 	}
 	if event.HookInput.SessionID != "test-session-123" {
 		t.Errorf("expected SessionID 'test-session-123', got %q", event.HookInput.SessionID)
@@ -309,7 +309,7 @@ func TestWriteInboxEvent_MultipleEvents(t *testing.T) {
 
 	// Write multiple events
 	for i := 0; i < 3; i++ {
-		hookInput := &types.HookInput{
+		hookInput := &types.ClaudeHookInput{
 			SessionID: "session-" + string(rune('A'+i)),
 			Reason:    "reason-" + string(rune('1'+i)),
 		}
@@ -349,8 +349,8 @@ func TestDaemon_ReadInboxEvents(t *testing.T) {
 	}
 
 	// Write some events to inbox
-	hookInput1 := &types.HookInput{SessionID: "session-1", Reason: "reason1"}
-	hookInput2 := &types.HookInput{SessionID: "session-2", Reason: "reason2"}
+	hookInput1 := &types.ClaudeHookInput{SessionID: "session-1", Reason: "reason1"}
+	hookInput2 := &types.ClaudeHookInput{SessionID: "session-2", Reason: "reason2"}
 	writeInboxEvent(d.state.InboxPath, "session_end", hookInput1)
 	writeInboxEvent(d.state.InboxPath, "other_event", hookInput2)
 
@@ -409,7 +409,7 @@ func TestDaemon_CleanupInbox(t *testing.T) {
 	}
 
 	// Create inbox file
-	hookInput := &types.HookInput{SessionID: "test"}
+	hookInput := &types.ClaudeHookInput{SessionID: "test"}
 	writeInboxEvent(d.state.InboxPath, "session_end", hookInput)
 
 	// Verify it exists
@@ -639,4 +639,3 @@ func TestShutdownTimeout(t *testing.T) {
 		t.Fatal("shutdown hung - timeout did not work")
 	}
 }
-

@@ -5,13 +5,11 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"regexp"
-	"strconv"
-	"strings"
 	"syscall"
 
 	"github.com/ConfabulousDev/confab/pkg/daemon"
 	"github.com/ConfabulousDev/confab/pkg/logger"
+	"github.com/ConfabulousDev/confab/pkg/provider"
 	"github.com/ConfabulousDev/confab/pkg/types"
 )
 
@@ -24,7 +22,7 @@ var spawnDaemonFunc = spawnDaemonImpl
 //
 // This is the shared entry point for spawning daemons from any hook
 // (SessionStart, UserPromptSubmit, etc.).
-func maybeSpawnDaemon(hookInput *types.HookInput) (spawned bool, err error) {
+func maybeSpawnDaemon(p provider.ClaudeCode, hookInput *types.ClaudeHookInput) (spawned bool, err error) {
 	// Validate required fields for spawning a daemon
 	if hookInput.TranscriptPath == "" {
 		return false, fmt.Errorf("transcript_path is required to spawn daemon")
@@ -41,8 +39,8 @@ func maybeSpawnDaemon(hookInput *types.HookInput) (spawned bool, err error) {
 		return false, nil
 	}
 
-	// Find Claude Code's PID by walking up the process tree
-	hookInput.ParentPID = findClaudePID()
+	// Find Claude Code's PID by walking up the process tree.
+	hookInput.ParentPID = p.FindParentPID()
 
 	// Spawn the daemon
 	if err := spawnDaemonFunc(hookInput); err != nil {
@@ -57,7 +55,7 @@ func maybeSpawnDaemon(hookInput *types.HookInput) (spawned bool, err error) {
 // The state file is written immediately after the process starts, before
 // this function returns. This ensures no race window where another hook
 // could spawn a duplicate daemon.
-func spawnDaemonImpl(hookInput *types.HookInput) error {
+func spawnDaemonImpl(hookInput *types.ClaudeHookInput) error {
 	executable, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("failed to get executable path: %w", err)
@@ -101,58 +99,4 @@ func spawnDaemonImpl(hookInput *types.HookInput) error {
 	}
 
 	return nil
-}
-
-// findClaudePID walks up the process tree to find the Claude Code process.
-// Checks parent and grandparent (up to 2 levels) to handle cases where
-// Claude spawns hooks via a shell wrapper (e.g., /bin/sh -c on Linux).
-func findClaudePID() int {
-	parentPID := os.Getppid()
-	if isClaudeProcess(parentPID) {
-		return parentPID
-	}
-
-	grandparentPID := getParentPID(parentPID)
-	if grandparentPID > 0 && isClaudeProcess(grandparentPID) {
-		return grandparentPID
-	}
-
-	// Could not find Claude - return 0 to disable parent PID monitoring
-	logger.Warn("Could not find Claude in process tree, disabling parent PID monitoring")
-	return 0
-}
-
-// claudeProcessPattern matches "claude" as a word boundary to avoid false positives
-// like "claudette" or other strings containing "claude" as a substring.
-var claudeProcessPattern = regexp.MustCompile(`(?i)\bclaude\b`)
-
-// isClaudeProcess checks if the given PID is a Claude Code process
-func isClaudeProcess(pid int) bool {
-	cmd := getProcCmdline(pid)
-	return matchesClaudeProcess(cmd)
-}
-
-// matchesClaudeProcess checks if a command string matches Claude Code.
-// Exported for testing.
-func matchesClaudeProcess(cmd string) bool {
-	return claudeProcessPattern.MatchString(cmd)
-}
-
-// getProcCmdline gets the command line of a process
-func getProcCmdline(pid int) string {
-	out, err := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "command=").Output()
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(out))
-}
-
-// getParentPID gets the parent PID of a process
-func getParentPID(pid int) int {
-	out, err := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "ppid=").Output()
-	if err != nil {
-		return 0
-	}
-	ppid, _ := strconv.Atoi(strings.TrimSpace(string(out)))
-	return ppid
 }

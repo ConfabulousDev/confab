@@ -119,7 +119,7 @@ func TestMaxJSONLLineSize(t *testing.T) {
 func TestReadHookInput(t *testing.T) {
 	t.Run("valid input", func(t *testing.T) {
 		input := `{"session_id":"abc123","transcript_path":"/tmp/test.jsonl","hook_event_name":"SessionStart"}`
-		got, err := ReadHookInput(strings.NewReader(input))
+		got, err := ReadClaudeHookInput(strings.NewReader(input))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -136,28 +136,28 @@ func TestReadHookInput(t *testing.T) {
 
 	t.Run("missing session_id", func(t *testing.T) {
 		input := `{"transcript_path":"/tmp/test.jsonl"}`
-		_, err := ReadHookInput(strings.NewReader(input))
+		_, err := ReadClaudeHookInput(strings.NewReader(input))
 		if err == nil {
 			t.Fatal("expected error for missing session_id")
 		}
 	})
 
 	t.Run("invalid JSON", func(t *testing.T) {
-		_, err := ReadHookInput(strings.NewReader("not json"))
+		_, err := ReadClaudeHookInput(strings.NewReader("not json"))
 		if err == nil {
 			t.Fatal("expected error for invalid JSON")
 		}
 	})
 
 	t.Run("empty input", func(t *testing.T) {
-		_, err := ReadHookInput(strings.NewReader(""))
+		_, err := ReadClaudeHookInput(strings.NewReader(""))
 		if err == nil {
 			t.Fatal("expected error for empty input")
 		}
 	})
 
 	t.Run("reader error", func(t *testing.T) {
-		_, err := ReadHookInput(&failingReader{err: errors.New("disk read error")})
+		_, err := ReadClaudeHookInput(&failingReader{err: errors.New("disk read error")})
 		if err == nil {
 			t.Fatal("expected error for failing reader")
 		}
@@ -168,7 +168,7 @@ func TestReadHookInput(t *testing.T) {
 
 	t.Run("optional fields are zero-valued", func(t *testing.T) {
 		input := `{"session_id":"abc123"}`
-		got, err := ReadHookInput(strings.NewReader(input))
+		got, err := ReadClaudeHookInput(strings.NewReader(input))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}

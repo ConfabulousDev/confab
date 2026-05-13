@@ -88,7 +88,7 @@ confab
 
 This is a cross-cutting change spanning multiple packages:
 
-1. **`cmd/hook_<name>.go`** — Create hook handler. Read JSON from stdin, do work, write `HookResponse` JSON to stdout
+1. **`cmd/hook_<name>.go`** — Create hook handler. Read JSON from stdin, do work, write `ClaudeHookResponse` JSON to stdout
 2. **`pkg/config/config.go`** — Add `Install<Name>Hook()`, `Uninstall<Name>Hook()`, `Is<Name>HookInstalled()`
 3. **`cmd/hooks.go`** — Add install/uninstall calls in `hooksAddCmd` and `hooksRemoveCmd`
 4. **`cmd/status.go`** — Add status check for the new hook
@@ -109,8 +109,8 @@ This is a cross-cutting change spanning multiple packages:
 - **Environment variable duration overrides are capped.** `hook_sessionstart.go` caps env var durations (e.g., sync interval) to prevent abuse via unreasonable values.
 - **Tar extraction in `update.go` has size and path limits.** Extracted files are bounded to prevent zip-bomb attacks, and paths are validated to prevent directory traversal.
 - **Hook commands must read JSON from stdin and complete quickly.** Claude Code blocks waiting for hook responses. Long-running work must be delegated (e.g., daemon spawn).
-- **Hook commands must not write to stdout except for `HookResponse` JSON.** Claude Code parses stdout as the hook response. Use stderr for status messages.
-- **All hooks use `pkg/types.HookInput`.** Parsed via `types.ReadHookInput(os.Stdin)` (base validation) or `discovery.ReadHookInputFrom(os.Stdin)` (adds `transcript_path` validation for session hooks).
+- **Hook commands must not write to stdout except for `ClaudeHookResponse` JSON.** Claude Code parses stdout as the hook response. Use stderr for status messages.
+- **All Claude hooks use `pkg/types.ClaudeHookInput`.** Parsed via the Claude provider; session hooks also validate `transcript_path`.
 - **Hook handlers must always output valid JSON**, even on error. An error should produce a response with `continue: true` rather than crashing with no output.
 - **Commands use `RunE` (not `Run`)** to return errors. Cobra handles error display.
 

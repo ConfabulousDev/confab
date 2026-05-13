@@ -42,7 +42,7 @@ func TestReadHookInputFrom(t *testing.T) {
 		}
 	})
 
-	t.Run("missing session_id propagates error from types.ReadHookInput", func(t *testing.T) {
+	t.Run("missing session_id propagates error from types.ReadClaudeHookInput", func(t *testing.T) {
 		input := `{"transcript_path":"` + validPath + `"}`
 		_, err := ReadHookInputFrom(strings.NewReader(input))
 		if err == nil {

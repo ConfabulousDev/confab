@@ -9,7 +9,7 @@ Session discovery, metadata extraction, agent ID parsing, and hook input reading
 | `sessions.go` | `ScanAllSessions`, `FindSessionByID` — find sessions in `~/.claude/projects/` |
 | `extract.go` | `ExtractSessionMetadata`, `ExtractMetadataFromLines`, `SanitizeText` — extract summaries and first user messages from transcripts |
 | `files.go` | `ExtractAgentIDsFromMessage`, `IsValidAgentID` — find agent IDs in transcript entries |
-| `hook.go` | `ReadHookInputFrom` — parse hook input JSON from stdin |
+| `hook.go` | `ReadHookInputFrom` — compatibility wrapper for Claude session hook parsing |
 
 ## Key Types
 
@@ -25,7 +25,7 @@ Returned by `ExtractMetadataFromLines`. Contains `Summary` (last local summary),
 
 **Supporting new agent ID formats:** Update `IsValidAgentID()` in `files.go`. The current validation accepts alphanumeric chars plus hyphen and underscore, with a minimum length of 6. If new formats use different characters, update `isAgentIDChar()`.
 
-**Adding new hook input fields:** The hook input type lives in `pkg/types` (`HookInput`), not here. This package just reads and validates it (including transcript path safety via `validateTranscriptPath`).
+**Adding new Claude hook input fields:** The hook input type lives in `pkg/types` (`ClaudeHookInput`), not here. Claude-specific parsing and transcript path validation live in `pkg/provider`.
 
 ## Invariants
 
@@ -33,8 +33,8 @@ Returned by `ExtractMetadataFromLines`. Contains `Summary` (last local summary),
 - **Agent files use `agent-` prefix.** The scanner skips these when listing sessions but they're picked up by `pkg/sync` for syncing alongside the main transcript.
 - **Metadata extraction reads at most 50 lines** (`MaxLinesForExtraction`). This is a performance bound — transcripts can be very large. Summary and first user message are expected to appear near the beginning.
 - **`FirstUserMessage` is truncated to 4KB** (half of `MaxMetadataFieldSize`). This is a backend-imposed limit.
-- **Transcript paths are validated by `validateTranscriptPath()`.** Paths must be absolute, must not contain `..` components, and must resolve (after symlink evaluation) to a location under the Claude projects directory. This prevents path traversal attacks via crafted hook input.
-- **`CONFAB_CLAUDE_DIR` env var overrides the Claude projects directory** in `validateTranscriptPath()`, consistent with its use elsewhere for testing.
+- **Claude transcript paths are validated by `provider.ClaudeCode`.** Paths must be absolute, must not contain `..` components, and must resolve (after symlink evaluation) to a location under an allowed Claude root. This prevents path traversal attacks via crafted hook input.
+- **`CONFAB_CLAUDE_DIR` env var overrides the Claude state directory.** The Claude provider also preserves legacy hook-validation behavior where the env var itself may be treated as an allowed transcript root for tests and older callers.
 - **Scanning continues on permission errors.** Users may have mixed-permission directories under `~/.claude/projects/`. Failed directories are reported to stderr but don't fail the operation.
 
 ## Design Decisions
@@ -55,6 +55,6 @@ Tests create temporary directory structures mimicking `~/.claude/projects/` with
 
 ## Dependencies
 
-**Uses:** `pkg/types` (HookInput), `pkg/config` (GetProjectsDir), `pkg/logger`
+**Uses:** `pkg/provider`, `pkg/types`, `pkg/config`, `pkg/logger`
 
 **Used by:** `cmd/` (list, save, hook handlers), `pkg/sync/` (agent ID extraction, metadata)

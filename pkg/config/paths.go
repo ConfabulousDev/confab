@@ -3,11 +3,12 @@ package config
 import (
 	"fmt"
 	"os"
-	"path/filepath"
+
+	"github.com/ConfabulousDev/confab/pkg/provider"
 )
 
 // ClaudeStateDirEnv is the environment variable to override the default Claude state directory
-const ClaudeStateDirEnv = "CONFAB_CLAUDE_DIR"
+const ClaudeStateDirEnv = provider.ClaudeStateDirEnv
 
 // DisableLinkFromGitHubEnv is the environment variable to disable GitHub linking.
 // When set to any non-empty value, GitHub linking (commits and PRs) is disabled.
@@ -22,34 +23,23 @@ func IsLinkFromGitHubDisabled() bool {
 // Defaults to ~/.claude but can be overridden with CONFAB_CLAUDE_DIR env var.
 // This is useful for testing and non-standard installations.
 func GetClaudeStateDir() (string, error) {
-	// Check environment variable first
-	if envDir := os.Getenv(ClaudeStateDirEnv); envDir != "" {
-		return envDir, nil
-	}
-
-	// Default to ~/.claude
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("failed to get home directory: %w", err)
-	}
-
-	return filepath.Join(home, ".claude"), nil
+	return provider.ClaudeCode{}.StateDir()
 }
 
 // GetProjectsDir returns the path to the Claude projects directory
 func GetProjectsDir() (string, error) {
-	claudeDir, err := GetClaudeStateDir()
+	projectsDir, err := provider.ClaudeCode{}.ProjectsDir()
 	if err != nil {
-		return "", fmt.Errorf("failed to get claude state directory: %w", err)
+		return "", fmt.Errorf("failed to get projects directory: %w", err)
 	}
-	return filepath.Join(claudeDir, "projects"), nil
+	return projectsDir, nil
 }
 
 // GetClaudeSettingsPath returns the path to the Claude settings file
 func GetClaudeSettingsPath() (string, error) {
-	claudeDir, err := GetClaudeStateDir()
+	settingsPath, err := provider.ClaudeCode{}.SettingsPath()
 	if err != nil {
-		return "", fmt.Errorf("failed to get claude state directory: %w", err)
+		return "", fmt.Errorf("failed to get settings path: %w", err)
 	}
-	return filepath.Join(claudeDir, "settings.json"), nil
+	return settingsPath, nil
 }

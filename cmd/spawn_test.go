@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/ConfabulousDev/confab/pkg/daemon"
+	"github.com/ConfabulousDev/confab/pkg/provider"
 	"github.com/ConfabulousDev/confab/pkg/types"
 )
 
@@ -20,20 +21,20 @@ func TestMaybeSpawnDaemon(t *testing.T) {
 		tmpDir := setupSyncTestEnv(t)
 
 		var spawnCalled bool
-		var spawnedInput *types.HookInput
-		spawnDaemonFunc = func(hookInput *types.HookInput) error {
+		var spawnedInput *types.ClaudeHookInput
+		spawnDaemonFunc = func(hookInput *types.ClaudeHookInput) error {
 			spawnCalled = true
 			spawnedInput = hookInput
 			return nil
 		}
 
-		hookInput := &types.HookInput{
+		hookInput := &types.ClaudeHookInput{
 			SessionID:      "new-session-1234-1234-1234-123456789abc",
 			TranscriptPath: filepath.Join(tmpDir, "transcript.jsonl"),
 			CWD:            tmpDir,
 		}
 
-		spawned, err := maybeSpawnDaemon(hookInput)
+		spawned, err := maybeSpawnDaemon(provider.ClaudeCode{}, hookInput)
 		if err != nil {
 			t.Fatalf("maybeSpawnDaemon failed: %v", err)
 		}
@@ -53,7 +54,7 @@ func TestMaybeSpawnDaemon(t *testing.T) {
 		tmpDir := setupSyncTestEnv(t)
 
 		var spawnCalled bool
-		spawnDaemonFunc = func(hookInput *types.HookInput) error {
+		spawnDaemonFunc = func(hookInput *types.ClaudeHookInput) error {
 			spawnCalled = true
 			return nil
 		}
@@ -63,13 +64,13 @@ func TestMaybeSpawnDaemon(t *testing.T) {
 		// Create existing daemon state with current PID (appears running)
 		createFakeDaemonState(t, tmpDir, sessionID, os.Getpid())
 
-		hookInput := &types.HookInput{
+		hookInput := &types.ClaudeHookInput{
 			SessionID:      sessionID,
 			TranscriptPath: filepath.Join(tmpDir, "transcript.jsonl"),
 			CWD:            tmpDir,
 		}
 
-		spawned, err := maybeSpawnDaemon(hookInput)
+		spawned, err := maybeSpawnDaemon(provider.ClaudeCode{}, hookInput)
 		if err != nil {
 			t.Fatalf("maybeSpawnDaemon failed: %v", err)
 		}
@@ -86,7 +87,7 @@ func TestMaybeSpawnDaemon(t *testing.T) {
 		tmpDir := setupSyncTestEnv(t)
 
 		var spawnCalled bool
-		spawnDaemonFunc = func(hookInput *types.HookInput) error {
+		spawnDaemonFunc = func(hookInput *types.ClaudeHookInput) error {
 			spawnCalled = true
 			return nil
 		}
@@ -96,13 +97,13 @@ func TestMaybeSpawnDaemon(t *testing.T) {
 		// Create stale state (non-existent PID)
 		createFakeDaemonState(t, tmpDir, sessionID, 0)
 
-		hookInput := &types.HookInput{
+		hookInput := &types.ClaudeHookInput{
 			SessionID:      sessionID,
 			TranscriptPath: filepath.Join(tmpDir, "transcript.jsonl"),
 			CWD:            tmpDir,
 		}
 
-		spawned, err := maybeSpawnDaemon(hookInput)
+		spawned, err := maybeSpawnDaemon(provider.ClaudeCode{}, hookInput)
 		if err != nil {
 			t.Fatalf("maybeSpawnDaemon failed: %v", err)
 		}
@@ -115,28 +116,28 @@ func TestMaybeSpawnDaemon(t *testing.T) {
 		}
 	})
 
-	t.Run("sets parent PID from findClaudePID", func(t *testing.T) {
+	t.Run("sets parent PID from Claude provider", func(t *testing.T) {
 		setupSyncTestEnv(t)
 
-		var capturedInput *types.HookInput
-		spawnDaemonFunc = func(hookInput *types.HookInput) error {
+		var capturedInput *types.ClaudeHookInput
+		spawnDaemonFunc = func(hookInput *types.ClaudeHookInput) error {
 			capturedInput = hookInput
 			return nil
 		}
 
-		hookInput := &types.HookInput{
+		hookInput := &types.ClaudeHookInput{
 			SessionID:      "parent-pid-test-1234-1234-123456789abc",
 			TranscriptPath: "/tmp/transcript.jsonl",
 			CWD:            "/tmp",
 			ParentPID:      0, // Initially unset
 		}
 
-		_, err := maybeSpawnDaemon(hookInput)
+		_, err := maybeSpawnDaemon(provider.ClaudeCode{}, hookInput)
 		if err != nil {
 			t.Fatalf("maybeSpawnDaemon failed: %v", err)
 		}
 
-		// ParentPID should be set by maybeSpawnDaemon (via findClaudePID)
+		// ParentPID should be set by maybeSpawnDaemon via the Claude provider.
 		// It might be 0 if Claude isn't the parent, but the field should be populated
 		if capturedInput == nil {
 			t.Fatal("expected spawnDaemonFunc to be called")
@@ -151,18 +152,18 @@ func TestMaybeSpawnDaemon(t *testing.T) {
 	t.Run("fails when transcript_path is missing", func(t *testing.T) {
 		setupSyncTestEnv(t)
 
-		spawnDaemonFunc = func(hookInput *types.HookInput) error {
+		spawnDaemonFunc = func(hookInput *types.ClaudeHookInput) error {
 			t.Error("should not call spawnDaemonFunc when transcript_path is missing")
 			return nil
 		}
 
-		hookInput := &types.HookInput{
+		hookInput := &types.ClaudeHookInput{
 			SessionID:      "missing-path-1234-1234-123456789abc",
 			TranscriptPath: "", // Missing!
 			CWD:            "/tmp",
 		}
 
-		spawned, err := maybeSpawnDaemon(hookInput)
+		spawned, err := maybeSpawnDaemon(provider.ClaudeCode{}, hookInput)
 		if err == nil {
 			t.Error("expected error when transcript_path is missing")
 		}
@@ -217,7 +218,7 @@ func TestUserPromptSubmitSpawnsDaemon(t *testing.T) {
 		tmpDir := setupSyncTestEnv(t)
 
 		var spawnCalled bool
-		spawnDaemonFunc = func(hookInput *types.HookInput) error {
+		spawnDaemonFunc = func(hookInput *types.ClaudeHookInput) error {
 			spawnCalled = true
 			return nil
 		}
@@ -246,7 +247,7 @@ func TestUserPromptSubmitSpawnsDaemon(t *testing.T) {
 		}
 
 		// Verify response was written
-		var response types.HookResponse
+		var response types.ClaudeHookResponse
 		if err := json.NewDecoder(r).Decode(&response); err != nil {
 			t.Fatalf("failed to decode response: %v", err)
 		}
@@ -259,7 +260,7 @@ func TestUserPromptSubmitSpawnsDaemon(t *testing.T) {
 		tmpDir := setupSyncTestEnv(t)
 
 		var spawnCalled bool
-		spawnDaemonFunc = func(hookInput *types.HookInput) error {
+		spawnDaemonFunc = func(hookInput *types.ClaudeHookInput) error {
 			spawnCalled = true
 			return nil
 		}
@@ -292,7 +293,7 @@ func TestUserPromptSubmitSpawnsDaemon(t *testing.T) {
 		}
 
 		// Verify response was still written
-		var response types.HookResponse
+		var response types.ClaudeHookResponse
 		if err := json.NewDecoder(r).Decode(&response); err != nil {
 			t.Fatalf("failed to decode response: %v", err)
 		}
@@ -304,7 +305,7 @@ func TestUserPromptSubmitSpawnsDaemon(t *testing.T) {
 	t.Run("handles invalid JSON gracefully", func(t *testing.T) {
 		setupSyncTestEnv(t)
 
-		spawnDaemonFunc = func(hookInput *types.HookInput) error {
+		spawnDaemonFunc = func(hookInput *types.ClaudeHookInput) error {
 			t.Error("should not spawn daemon on invalid input")
 			return nil
 		}
@@ -322,7 +323,7 @@ func TestUserPromptSubmitSpawnsDaemon(t *testing.T) {
 		}
 
 		// Should still write valid response
-		var response types.HookResponse
+		var response types.ClaudeHookResponse
 		if err := json.NewDecoder(r).Decode(&response); err != nil {
 			t.Fatalf("failed to decode response: %v", err)
 		}
@@ -361,11 +362,10 @@ func TestMatchesClaudeProcess(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := matchesClaudeProcess(tt.cmd)
+			got := provider.ClaudeCode{}.MatchesProcess(tt.cmd)
 			if got != tt.matches {
-				t.Errorf("matchesClaudeProcess(%q) = %v, want %v", tt.cmd, got, tt.matches)
+				t.Errorf("ClaudeCode.MatchesProcess(%q) = %v, want %v", tt.cmd, got, tt.matches)
 			}
 		})
 	}
 }
-

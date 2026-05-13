@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/ConfabulousDev/confab/pkg/daemon"
-	"github.com/ConfabulousDev/confab/pkg/discovery"
 	"github.com/ConfabulousDev/confab/pkg/logger"
+	"github.com/ConfabulousDev/confab/pkg/provider"
 	"github.com/ConfabulousDev/confab/pkg/types"
 	"github.com/spf13/cobra"
 )
@@ -68,13 +68,14 @@ func sessionStartFromReader(r io.Reader) error {
 	systemMessage := RunAnnouncements()
 
 	// Always output valid hook response, even on error
-	defer func() { writeHookResponseMsg(os.Stdout, false, systemMessage) }()
+	defer func() { writeClaudeHookResponseMsg(os.Stdout, false, systemMessage) }()
 
 	fmt.Fprintln(os.Stderr, "=== Confab: Starting Sync Daemon ===")
 	fmt.Fprintln(os.Stderr)
 
 	// Read hook input from reader
-	hookInput, err := discovery.ReadHookInputFrom(r)
+	claude := provider.ClaudeCode{}
+	hookInput, err := claude.ReadSessionHookInput(r)
 	if err != nil {
 		logger.ErrorPrint("Error reading hook input: %v", err)
 		return nil
@@ -90,7 +91,7 @@ func sessionStartFromReader(r io.Reader) error {
 	fmt.Fprintln(os.Stderr)
 
 	// Try to spawn daemon (shared logic handles existence check)
-	spawned, err := maybeSpawnDaemon(hookInput)
+	spawned, err := maybeSpawnDaemon(claude, hookInput)
 	if err != nil {
 		logger.ErrorPrint("Error spawning daemon: %v", err)
 		return nil
@@ -133,7 +134,7 @@ func parseSyncEnvConfig() (interval, jitter time.Duration) {
 func runDaemon(hookInputJSON string) error {
 	logger.Info("Daemon process starting")
 
-	var hookInput types.HookInput
+	var hookInput types.ClaudeHookInput
 	if err := json.Unmarshal([]byte(hookInputJSON), &hookInput); err != nil {
 		return fmt.Errorf("failed to parse hook input: %w", err)
 	}

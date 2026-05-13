@@ -8,16 +8,16 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// writeHookResponse writes a standard hook response to the given writer.
+// writeClaudeHookResponse writes a standard Claude hook response to the given writer.
 // All hooks must output valid JSON, even on error, so Claude Code can continue.
-func writeHookResponse(w io.Writer, suppressOutput bool) {
-	writeHookResponseMsg(w, suppressOutput, "")
+func writeClaudeHookResponse(w io.Writer, suppressOutput bool) {
+	writeClaudeHookResponseMsg(w, suppressOutput, "")
 }
 
-// writeHookResponseMsg writes a hook response with an optional systemMessage.
+// writeClaudeHookResponseMsg writes a hook response with an optional systemMessage.
 // The systemMessage is shown as a banner to the user (not added to Claude's context).
-func writeHookResponseMsg(w io.Writer, suppressOutput bool, systemMessage string) {
-	json.NewEncoder(w).Encode(types.HookResponse{
+func writeClaudeHookResponseMsg(w io.Writer, suppressOutput bool, systemMessage string) {
+	json.NewEncoder(w).Encode(types.ClaudeHookResponse{
 		Continue:       true,
 		SuppressOutput: suppressOutput,
 		SystemMessage:  systemMessage,

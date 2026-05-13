@@ -174,7 +174,7 @@ func TestIsSuccessfulBashResponse(t *testing.T) {
 
 func TestHandlePostToolUse_GitCommit(t *testing.T) {
 	// When there's no daemon state, should exit silently
-	input := types.HookInput{
+	input := types.ClaudeHookInput{
 		SessionID:     "unknown-session",
 		HookEventName: "PostToolUse",
 		ToolName:      config.ToolNameBash,
@@ -200,7 +200,7 @@ func TestHandlePostToolUse_GitCommit(t *testing.T) {
 
 func TestHandlePostToolUse_GitPush(t *testing.T) {
 	// When there's no daemon state, should exit silently
-	input := types.HookInput{
+	input := types.ClaudeHookInput{
 		SessionID:     "unknown-session",
 		HookEventName: "PostToolUse",
 		ToolName:      config.ToolNameBash,
@@ -226,7 +226,7 @@ func TestHandlePostToolUse_GitPush(t *testing.T) {
 
 func TestHandlePostToolUse_GitPushFailed(t *testing.T) {
 	// When git push fails, should not attempt to link
-	input := types.HookInput{
+	input := types.ClaudeHookInput{
 		SessionID:     "test-session",
 		HookEventName: "PostToolUse",
 		ToolName:      config.ToolNameBash,
@@ -251,7 +251,7 @@ func TestHandlePostToolUse_GitPushFailed(t *testing.T) {
 }
 
 func TestHandlePostToolUse_NonBashTool(t *testing.T) {
-	input := types.HookInput{
+	input := types.ClaudeHookInput{
 		SessionID:     "test-session",
 		HookEventName: "PostToolUse",
 		ToolName:      "Read",
@@ -275,7 +275,7 @@ func TestHandlePostToolUse_NonBashTool(t *testing.T) {
 }
 
 func TestHandlePostToolUse_NonPRCommand(t *testing.T) {
-	input := types.HookInput{
+	input := types.ClaudeHookInput{
 		SessionID:     "test-session",
 		HookEventName: "PostToolUse",
 		ToolName:      config.ToolNameBash,
@@ -299,7 +299,7 @@ func TestHandlePostToolUse_NonPRCommand(t *testing.T) {
 }
 
 func TestHandlePostToolUse_PRCreateNoPRURLInOutput(t *testing.T) {
-	input := types.HookInput{
+	input := types.ClaudeHookInput{
 		SessionID:     "test-session",
 		HookEventName: "PostToolUse",
 		ToolName:      config.ToolNameBash,
@@ -338,7 +338,7 @@ func TestHandlePostToolUse_InvalidJSON(t *testing.T) {
 }
 
 func TestHandlePostToolUse_MissingSessionID(t *testing.T) {
-	input := types.HookInput{
+	input := types.ClaudeHookInput{
 		SessionID:     "", // Missing
 		HookEventName: "PostToolUse",
 		ToolName:      config.ToolNameBash,
@@ -363,7 +363,7 @@ func TestHandlePostToolUse_MissingSessionID(t *testing.T) {
 
 func TestHandlePostToolUse_PRCreateNoState(t *testing.T) {
 	// When there's no daemon state (sync not set up), should exit silently
-	input := types.HookInput{
+	input := types.ClaudeHookInput{
 		SessionID:     "unknown-session",
 		HookEventName: "PostToolUse",
 		ToolName:      config.ToolNameBash,
@@ -388,7 +388,7 @@ func TestHandlePostToolUse_PRCreateNoState(t *testing.T) {
 
 func TestHandlePostToolUse_MCPGitHubPR(t *testing.T) {
 	// When there's no daemon state, should exit silently
-	input := types.HookInput{
+	input := types.ClaudeHookInput{
 		SessionID:     "unknown-session",
 		HookEventName: "PostToolUse",
 		ToolName:      config.ToolNameMCPGitHubCreatePR,
@@ -416,7 +416,7 @@ func TestHandlePostToolUse_MCPGitHubPR(t *testing.T) {
 }
 
 func TestHandlePostToolUse_EmptyCommand(t *testing.T) {
-	input := types.HookInput{
+	input := types.ClaudeHookInput{
 		SessionID:     "test-session",
 		HookEventName: "PostToolUse",
 		ToolName:      config.ToolNameBash,
@@ -469,7 +469,7 @@ func TestReadPostToolUseInput(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			r := strings.NewReader(tt.input)
-			got, err := types.ReadHookInput(r)
+			got, err := types.ReadClaudeHookInput(r)
 
 			if tt.wantError {
 				if err == nil && (got == nil || got.SessionID == "") {
@@ -479,16 +479,16 @@ func TestReadPostToolUseInput(t *testing.T) {
 				if err != nil {
 					return
 				}
-				t.Errorf("types.ReadHookInput() expected error or empty session, got session_id=%q", got.SessionID)
+				t.Errorf("types.ReadClaudeHookInput() expected error or empty session, got session_id=%q", got.SessionID)
 				return
 			}
 
 			if err != nil {
-				t.Errorf("types.ReadHookInput() error = %v, want nil", err)
+				t.Errorf("types.ReadClaudeHookInput() error = %v, want nil", err)
 				return
 			}
 			if got.SessionID != tt.wantID {
-				t.Errorf("types.ReadHookInput() session_id = %q, want %q", got.SessionID, tt.wantID)
+				t.Errorf("types.ReadClaudeHookInput() session_id = %q, want %q", got.SessionID, tt.wantID)
 			}
 		})
 	}

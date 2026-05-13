@@ -120,6 +120,110 @@ func TestIsConfabHookEntry(t *testing.T) {
 	}
 }
 
+func TestClaudeHookSettingsJSONShape(t *testing.T) {
+	settings := &ClaudeSettings{raw: make(map[string]any)}
+
+	mustInstall := func(hook map[string]any, event, matcher string, hasMatcher bool) {
+		t.Helper()
+		if err := installHook(settings, hook, event, matcher, hasMatcher); err != nil {
+			t.Fatalf("installHook(%s) error = %v", event, err)
+		}
+	}
+
+	mustInstall(map[string]any{"type": "command", "command": "/usr/bin/confab hook session-start"}, "SessionStart", "*", true)
+	mustInstall(map[string]any{"type": "command", "command": "/usr/bin/confab hook session-end"}, "SessionEnd", "*", true)
+	for _, matcher := range toolUseMatchers {
+		mustInstall(map[string]any{"type": "command", "command": "/usr/bin/confab hook pre-tool-use"}, "PreToolUse", matcher, true)
+		mustInstall(map[string]any{"type": "command", "command": "/usr/bin/confab hook post-tool-use"}, "PostToolUse", matcher, true)
+	}
+	mustInstall(map[string]any{"type": "command", "command": "/usr/bin/confab hook user-prompt-submit"}, "UserPromptSubmit", "", false)
+
+	data, err := json.MarshalIndent(settings.raw, "", "  ")
+	if err != nil {
+		t.Fatalf("failed to marshal settings: %v", err)
+	}
+
+	want := `{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "command": "/usr/bin/confab hook post-tool-use",
+            "type": "command"
+          }
+        ],
+        "matcher": "Bash"
+      },
+      {
+        "hooks": [
+          {
+            "command": "/usr/bin/confab hook post-tool-use",
+            "type": "command"
+          }
+        ],
+        "matcher": "mcp__github__create_pull_request"
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "command": "/usr/bin/confab hook pre-tool-use",
+            "type": "command"
+          }
+        ],
+        "matcher": "Bash"
+      },
+      {
+        "hooks": [
+          {
+            "command": "/usr/bin/confab hook pre-tool-use",
+            "type": "command"
+          }
+        ],
+        "matcher": "mcp__github__create_pull_request"
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "command": "/usr/bin/confab hook session-end",
+            "type": "command"
+          }
+        ],
+        "matcher": "*"
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "command": "/usr/bin/confab hook session-start",
+            "type": "command"
+          }
+        ],
+        "matcher": "*"
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "command": "/usr/bin/confab hook user-prompt-submit",
+            "type": "command"
+          }
+        ]
+      }
+    ]
+  }
+}`
+	if string(data) != want {
+		t.Fatalf("settings JSON changed:\n%s", string(data))
+	}
+}
+
 func TestGetHooksList(t *testing.T) {
 	tests := []struct {
 		name      string

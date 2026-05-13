@@ -234,7 +234,7 @@ func TestFormatTrailerLine(t *testing.T) {
 }
 
 func TestHandlePreToolUse_NonBashTool(t *testing.T) {
-	input := types.HookInput{
+	input := types.ClaudeHookInput{
 		SessionID:     "test-session",
 		HookEventName: "PreToolUse",
 		ToolName:      "Read",
@@ -257,7 +257,7 @@ func TestHandlePreToolUse_NonBashTool(t *testing.T) {
 }
 
 func TestHandlePreToolUse_NonGitCommand(t *testing.T) {
-	input := types.HookInput{
+	input := types.ClaudeHookInput{
 		SessionID:     "test-session",
 		HookEventName: "PreToolUse",
 		ToolName:      config.ToolNameBash,
@@ -287,7 +287,7 @@ func TestHandlePreToolUse_GitCommitWithoutTrailer(t *testing.T) {
 	cleanup := setupTestState(t, claudeSessionID, confabSessionID)
 	defer cleanup()
 
-	input := types.HookInput{
+	input := types.ClaudeHookInput{
 		SessionID:     claudeSessionID,
 		HookEventName: "PreToolUse",
 		ToolName:      config.ToolNameBash,
@@ -304,7 +304,7 @@ func TestHandlePreToolUse_GitCommitWithoutTrailer(t *testing.T) {
 	}
 
 	// Should output deny response
-	var response types.PreToolUseResponse
+	var response types.ClaudePreToolUseResponse
 	if err := json.Unmarshal(w.Bytes(), &response); err != nil {
 		t.Fatalf("Failed to parse response: %v", err)
 	}
@@ -337,7 +337,7 @@ func TestHandlePreToolUse_GitCommitWithTrailer(t *testing.T) {
 		t.Fatalf("formatSessionURL() error = %v", err)
 	}
 
-	input := types.HookInput{
+	input := types.ClaudeHookInput{
 		SessionID:     claudeSessionID,
 		HookEventName: "PreToolUse",
 		ToolName:      config.ToolNameBash,
@@ -356,7 +356,7 @@ func TestHandlePreToolUse_GitCommitWithTrailer(t *testing.T) {
 	}
 
 	// Should output allow response
-	var response types.PreToolUseResponse
+	var response types.ClaudePreToolUseResponse
 	if err := json.Unmarshal(w.Bytes(), &response); err != nil {
 		t.Fatalf("Failed to parse response: %v", err)
 	}
@@ -371,7 +371,7 @@ func TestHandlePreToolUse_GitCommitWithTrailer(t *testing.T) {
 
 func TestHandlePreToolUse_GitCommitNoState(t *testing.T) {
 	// When there's no daemon state (sync not set up), commits should be allowed silently
-	input := types.HookInput{
+	input := types.ClaudeHookInput{
 		SessionID:     "unknown-session",
 		HookEventName: "PreToolUse",
 		ToolName:      config.ToolNameBash,
@@ -409,7 +409,7 @@ func TestHandlePreToolUse_InvalidJSON(t *testing.T) {
 }
 
 func TestHandlePreToolUse_MissingSessionID(t *testing.T) {
-	input := types.HookInput{
+	input := types.ClaudeHookInput{
 		SessionID:     "", // Missing
 		HookEventName: "PreToolUse",
 		ToolName:      config.ToolNameBash,
@@ -548,7 +548,7 @@ func TestHandlePreToolUse_PRCreateWithoutLink(t *testing.T) {
 	cleanup := setupTestState(t, claudeSessionID, confabSessionID)
 	defer cleanup()
 
-	input := types.HookInput{
+	input := types.ClaudeHookInput{
 		SessionID:     claudeSessionID,
 		HookEventName: "PreToolUse",
 		ToolName:      config.ToolNameBash,
@@ -565,7 +565,7 @@ func TestHandlePreToolUse_PRCreateWithoutLink(t *testing.T) {
 	}
 
 	// Should output deny response
-	var response types.PreToolUseResponse
+	var response types.ClaudePreToolUseResponse
 	if err := json.Unmarshal(w.Bytes(), &response); err != nil {
 		t.Fatalf("Failed to parse response: %v", err)
 	}
@@ -598,7 +598,7 @@ func TestHandlePreToolUse_PRCreateWithLink(t *testing.T) {
 		t.Fatalf("formatSessionURL() error = %v", err)
 	}
 
-	input := types.HookInput{
+	input := types.ClaudeHookInput{
 		SessionID:     claudeSessionID,
 		HookEventName: "PreToolUse",
 		ToolName:      config.ToolNameBash,
@@ -617,7 +617,7 @@ func TestHandlePreToolUse_PRCreateWithLink(t *testing.T) {
 	}
 
 	// Should output allow response
-	var response types.PreToolUseResponse
+	var response types.ClaudePreToolUseResponse
 	if err := json.Unmarshal(w.Bytes(), &response); err != nil {
 		t.Fatalf("Failed to parse response: %v", err)
 	}
@@ -632,7 +632,7 @@ func TestHandlePreToolUse_PRCreateWithLink(t *testing.T) {
 
 func TestHandlePreToolUse_PRCreateNoState(t *testing.T) {
 	// When there's no daemon state (sync not set up), PR creation should be allowed silently
-	input := types.HookInput{
+	input := types.ClaudeHookInput{
 		SessionID:     "unknown-session",
 		HookEventName: "PreToolUse",
 		ToolName:      config.ToolNameBash,
@@ -664,7 +664,7 @@ func TestHandlePreToolUse_MCPGitHubPRWithoutLink(t *testing.T) {
 	cleanup := setupTestState(t, claudeSessionID, confabSessionID)
 	defer cleanup()
 
-	input := types.HookInput{
+	input := types.ClaudeHookInput{
 		SessionID:     claudeSessionID,
 		HookEventName: "PreToolUse",
 		ToolName:      config.ToolNameMCPGitHubCreatePR,
@@ -688,7 +688,7 @@ func TestHandlePreToolUse_MCPGitHubPRWithoutLink(t *testing.T) {
 	}
 
 	// Should output deny response
-	var response types.PreToolUseResponse
+	var response types.ClaudePreToolUseResponse
 	if err := json.Unmarshal(w.Bytes(), &response); err != nil {
 		t.Fatalf("Failed to parse response: %v", err)
 	}
@@ -720,7 +720,7 @@ func TestHandlePreToolUse_MCPGitHubPRWithLink(t *testing.T) {
 		t.Fatalf("formatSessionURL() error = %v", err)
 	}
 
-	input := types.HookInput{
+	input := types.ClaudeHookInput{
 		SessionID:     claudeSessionID,
 		HookEventName: "PreToolUse",
 		ToolName:      config.ToolNameMCPGitHubCreatePR,
@@ -744,7 +744,7 @@ func TestHandlePreToolUse_MCPGitHubPRWithLink(t *testing.T) {
 	}
 
 	// Should output allow response
-	var response types.PreToolUseResponse
+	var response types.ClaudePreToolUseResponse
 	if err := json.Unmarshal(w.Bytes(), &response); err != nil {
 		t.Fatalf("Failed to parse response: %v", err)
 	}
@@ -759,7 +759,7 @@ func TestHandlePreToolUse_MCPGitHubPRWithLink(t *testing.T) {
 
 func TestHandlePreToolUse_MCPGitHubPRNoState(t *testing.T) {
 	// When there's no daemon state, MCP PR creation should be allowed silently
-	input := types.HookInput{
+	input := types.ClaudeHookInput{
 		SessionID:     "unknown-session",
 		HookEventName: "PreToolUse",
 		ToolName:      config.ToolNameMCPGitHubCreatePR,
@@ -795,7 +795,7 @@ func TestHandlePreToolUse_MCPGitHubPRNoBody(t *testing.T) {
 	defer cleanup()
 
 	// MCP tool call without body field - should still request link
-	input := types.HookInput{
+	input := types.ClaudeHookInput{
 		SessionID:     claudeSessionID,
 		HookEventName: "PreToolUse",
 		ToolName:      config.ToolNameMCPGitHubCreatePR,
@@ -818,7 +818,7 @@ func TestHandlePreToolUse_MCPGitHubPRNoBody(t *testing.T) {
 	}
 
 	// Should output deny response requesting the link be added
-	var response types.PreToolUseResponse
+	var response types.ClaudePreToolUseResponse
 	if err := json.Unmarshal(w.Bytes(), &response); err != nil {
 		t.Fatalf("Failed to parse response: %v", err)
 	}

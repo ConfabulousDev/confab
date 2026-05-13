@@ -11,6 +11,7 @@ import (
 	"github.com/ConfabulousDev/confab/pkg/git"
 	"github.com/ConfabulousDev/confab/pkg/http"
 	"github.com/ConfabulousDev/confab/pkg/logger"
+	"github.com/ConfabulousDev/confab/pkg/provider"
 	pkgsync "github.com/ConfabulousDev/confab/pkg/sync"
 	"github.com/ConfabulousDev/confab/pkg/types"
 	"github.com/spf13/cobra"
@@ -53,7 +54,7 @@ func handlePostToolUse(r io.Reader, _ io.Writer) error {
 		return nil
 	}
 
-	hookInput, err := types.ReadHookInput(r)
+	hookInput, err := provider.ClaudeCode{}.ReadHookInput(r)
 	if err != nil {
 		logger.Warn("Failed to read hook input: %v", err)
 		return nil // Exit silently, don't block Claude
@@ -109,7 +110,7 @@ func handlePostToolUse(r io.Reader, _ io.Writer) error {
 }
 
 // handleMCPPRCreateOutput handles PostToolUse for GitHub MCP PR creation
-func handleMCPPRCreateOutput(hookInput *types.HookInput) error {
+func handleMCPPRCreateOutput(hookInput *types.ClaudeHookInput) error {
 	// Extract PR URL from MCP tool response
 	prURL := extractPRURLFromResponse(hookInput.ToolResponse)
 	if prURL == "" {
@@ -247,4 +248,3 @@ func extractPRURLFromResponse(response map[string]any) string {
 	match := prURLPattern.FindString(string(data))
 	return match
 }
-

@@ -131,8 +131,8 @@ func TestSessionStartFromReader(t *testing.T) {
 
 		// Track if spawn was called
 		var spawnCalled bool
-		var spawnedInput *types.HookInput
-		spawnDaemonFunc = func(hookInput *types.HookInput) error {
+		var spawnedInput *types.ClaudeHookInput
+		spawnDaemonFunc = func(hookInput *types.ClaudeHookInput) error {
 			spawnCalled = true
 			spawnedInput = hookInput
 			return nil
@@ -170,7 +170,7 @@ func TestSessionStartFromReader(t *testing.T) {
 
 		// Track if spawn was called
 		var spawnCalled bool
-		spawnDaemonFunc = func(hookInput *types.HookInput) error {
+		spawnDaemonFunc = func(hookInput *types.ClaudeHookInput) error {
 			spawnCalled = true
 			return nil
 		}
@@ -205,7 +205,7 @@ func TestSessionStartFromReader(t *testing.T) {
 	t.Run("invalid JSON input", func(t *testing.T) {
 		setupSyncTestEnv(t)
 
-		spawnDaemonFunc = func(hookInput *types.HookInput) error {
+		spawnDaemonFunc = func(hookInput *types.ClaudeHookInput) error {
 			t.Error("should not spawn daemon on invalid input")
 			return nil
 		}
@@ -220,7 +220,7 @@ func TestSessionStartFromReader(t *testing.T) {
 	t.Run("missing session_id", func(t *testing.T) {
 		setupSyncTestEnv(t)
 
-		spawnDaemonFunc = func(hookInput *types.HookInput) error {
+		spawnDaemonFunc = func(hookInput *types.ClaudeHookInput) error {
 			t.Error("should not spawn daemon on missing session_id")
 			return nil
 		}

@@ -11,6 +11,7 @@ import (
 	"github.com/ConfabulousDev/confab/pkg/config"
 	"github.com/ConfabulousDev/confab/pkg/daemon"
 	"github.com/ConfabulousDev/confab/pkg/logger"
+	"github.com/ConfabulousDev/confab/pkg/provider"
 	"github.com/ConfabulousDev/confab/pkg/types"
 	"github.com/spf13/cobra"
 )
@@ -71,7 +72,7 @@ func handlePreToolUse(r io.Reader, w io.Writer) error {
 		return nil
 	}
 
-	hookInput, err := types.ReadHookInput(r)
+	hookInput, err := provider.ClaudeCode{}.ReadHookInput(r)
 	if err != nil {
 		logger.Warn("Failed to read hook input: %v", err)
 		return nil // Exit silently, don't block Claude
@@ -157,7 +158,7 @@ func handlePreToolUse(r io.Reader, w io.Writer) error {
 }
 
 // handleMCPPRCreate handles GitHub MCP tool PR creation
-func handleMCPPRCreate(hookInput *types.HookInput, w io.Writer) error {
+func handleMCPPRCreate(hookInput *types.ClaudeHookInput, w io.Writer) error {
 	// Get the Confab session ID from daemon state
 	confabSessionID, err := getConfabSessionID(hookInput.SessionID)
 	if err != nil || confabSessionID == "" {
@@ -268,8 +269,8 @@ func formatPRLink(sessionURL string) string {
 
 // outputAllow outputs a PreToolUse response allowing the tool call
 func outputAllow(w io.Writer, reason string) {
-	response := types.PreToolUseResponse{
-		HookSpecificOutput: &types.PreToolUseOutput{
+	response := types.ClaudePreToolUseResponse{
+		HookSpecificOutput: &types.ClaudePreToolUseOutput{
 			HookEventName:            "PreToolUse",
 			PermissionDecision:       "allow",
 			PermissionDecisionReason: reason,
@@ -282,8 +283,8 @@ func outputAllow(w io.Writer, reason string) {
 
 // outputDeny outputs a PreToolUse response denying the tool call
 func outputDeny(w io.Writer, reason string) {
-	response := types.PreToolUseResponse{
-		HookSpecificOutput: &types.PreToolUseOutput{
+	response := types.ClaudePreToolUseResponse{
+		HookSpecificOutput: &types.ClaudePreToolUseOutput{
 			HookEventName:            "PreToolUse",
 			PermissionDecision:       "deny",
 			PermissionDecisionReason: reason,

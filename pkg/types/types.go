@@ -23,7 +23,7 @@ func NewJSONLScanner(r io.Reader) *bufio.Scanner {
 	return scanner
 }
 
-// HookInput represents hook data from Claude Code.
+// ClaudeHookInput represents hook data from Claude Code.
 //
 // This is a union type containing fields from all hook types (SessionStart,
 // UserPromptSubmit, PreToolUse, PostToolUse, etc.). JSON unmarshaling handles
@@ -31,7 +31,7 @@ func NewJSONLScanner(r io.Reader) *bufio.Scanner {
 // hooks with mostly orthogonal fields. Consider splitting into separate types
 // if hooks start having conflicting field semantics or the number of hook
 // types grows significantly.
-type HookInput struct {
+type ClaudeHookInput struct {
 	SessionID      string `json:"session_id"`
 	TranscriptPath string `json:"transcript_path"`
 	CWD            string `json:"cwd"`
@@ -63,15 +63,15 @@ func ValidateSessionID(id string) error {
 	return nil
 }
 
-// ReadHookInput reads and parses hook input JSON from a reader.
+// ReadClaudeHookInput reads and parses hook input JSON from a reader.
 // Used by PreToolUse, PostToolUse, and other hook handlers.
-func ReadHookInput(r io.Reader) (*HookInput, error) {
+func ReadClaudeHookInput(r io.Reader) (*ClaudeHookInput, error) {
 	data, err := io.ReadAll(io.LimitReader(r, MaxJSONLLineSize))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read input: %w", err)
 	}
 
-	var input HookInput
+	var input ClaudeHookInput
 	if err := json.Unmarshal(data, &input); err != nil {
 		return nil, fmt.Errorf("failed to parse hook input: %w", err)
 	}
@@ -87,21 +87,21 @@ func ReadHookInput(r io.Reader) (*HookInput, error) {
 	return &input, nil
 }
 
-// HookResponse is the JSON response sent back to Claude Code
-type HookResponse struct {
+// ClaudeHookResponse is the JSON response sent back to Claude Code
+type ClaudeHookResponse struct {
 	Continue       bool   `json:"continue"`
 	StopReason     string `json:"stopReason"`
 	SuppressOutput bool   `json:"suppressOutput"`
 	SystemMessage  string `json:"systemMessage,omitempty"`
 }
 
-// PreToolUseResponse is the JSON response for PreToolUse hooks
-type PreToolUseResponse struct {
-	HookSpecificOutput *PreToolUseOutput `json:"hookSpecificOutput,omitempty"`
+// ClaudePreToolUseResponse is the JSON response for PreToolUse hooks
+type ClaudePreToolUseResponse struct {
+	HookSpecificOutput *ClaudePreToolUseOutput `json:"hookSpecificOutput,omitempty"`
 }
 
-// PreToolUseOutput contains PreToolUse-specific decision fields
-type PreToolUseOutput struct {
+// ClaudePreToolUseOutput contains PreToolUse-specific decision fields
+type ClaudePreToolUseOutput struct {
 	HookEventName            string         `json:"hookEventName"`
 	PermissionDecision       string         `json:"permissionDecision,omitempty"` // "allow", "deny", or "ask"
 	PermissionDecisionReason string         `json:"permissionDecisionReason,omitempty"`
@@ -111,7 +111,7 @@ type PreToolUseOutput struct {
 // InboxEvent represents an event written to the daemon's inbox file.
 // The inbox is a JSONL file where each line is an event.
 type InboxEvent struct {
-	Type      string     `json:"type"`                 // Event type: "session_end"
-	Timestamp time.Time  `json:"timestamp"`            // When the event was written
-	HookInput *HookInput `json:"hook_input,omitempty"` // Full hook payload for session events
+	Type      string           `json:"type"`                 // Event type: "session_end"
+	Timestamp time.Time        `json:"timestamp"`            // When the event was written
+	HookInput *ClaudeHookInput `json:"hook_input,omitempty"` // Full hook payload for session events
 }

@@ -6,8 +6,8 @@ import (
 	"os"
 
 	"github.com/ConfabulousDev/confab/pkg/daemon"
-	"github.com/ConfabulousDev/confab/pkg/discovery"
 	"github.com/ConfabulousDev/confab/pkg/logger"
+	"github.com/ConfabulousDev/confab/pkg/provider"
 	"github.com/spf13/cobra"
 )
 
@@ -42,13 +42,13 @@ func sessionEndFromReader(r io.Reader) error {
 	logger.Info("Stopping sync daemon (hook mode)")
 
 	// Always output valid hook response, even on error
-	defer func() { writeHookResponse(os.Stdout, false) }()
+	defer func() { writeClaudeHookResponse(os.Stdout, false) }()
 
 	fmt.Fprintln(os.Stderr, "=== Confab: Stopping Sync Daemon ===")
 	fmt.Fprintln(os.Stderr)
 
 	// Read hook input from reader
-	hookInput, err := discovery.ReadHookInputFrom(r)
+	hookInput, err := provider.ClaudeCode{}.ReadSessionHookInput(r)
 	if err != nil {
 		logger.ErrorPrint("Error reading hook input: %v", err)
 		return nil
