@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/ConfabulousDev/confab/pkg/types"
 )
@@ -46,6 +47,11 @@ type codexSessionMeta struct {
 	AgentPath     string `json:"agent_path"`
 	AgentRole     string `json:"agent_role"`
 	AgentNickname string `json:"agent_nickname"`
+}
+
+type codexUserMessagePayload struct {
+	Type    string `json:"type"`
+	Message string `json:"message"`
 }
 
 var codexRolloutPattern = regexp.MustCompile(`^rollout-.+-([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\.jsonl$`)
@@ -226,6 +232,33 @@ func (p Codex) ReadSessionInfo(path string) (CodexSessionInfo, error) {
 	return info, nil
 }
 
+func (Codex) ExtractFirstUserMessageFromLines(lines []string) string {
+	for _, raw := range lines {
+		var line codexRolloutLine
+		if err := json.Unmarshal([]byte(raw), &line); err != nil {
+			continue
+		}
+		if line.Type != "event_msg" {
+			continue
+		}
+
+		var payload codexUserMessagePayload
+		if err := json.Unmarshal(line.Payload, &payload); err != nil {
+			continue
+		}
+		if payload.Type != "user_message" {
+			continue
+		}
+
+		message := strings.TrimSpace(payload.Message)
+		if message == "" {
+			continue
+		}
+		return truncateUTF8Bytes(message, types.MaxFirstUserMessageLength)
+	}
+	return ""
+}
+
 func (s CodexSessionInfo) IsUserSession() bool {
 	if s.ThreadSource != "" && s.ThreadSource != "user" {
 		return false
@@ -268,6 +301,21 @@ func (p Codex) ValidateRolloutPath(path string) error {
 	}
 
 	return fmt.Errorf("must be under Codex sessions directory (%s)", sessionsDir)
+}
+
+func truncateUTF8Bytes(s string, maxBytes int) string {
+	if maxBytes <= 0 {
+		return ""
+	}
+	if len(s) <= maxBytes {
+		return s
+	}
+	for i, r := range s {
+		if i+utf8.RuneLen(r) > maxBytes {
+			return s[:i]
+		}
+	}
+	return s[:maxBytes]
 }
 
 func (p Codex) ReadHookInput(r io.Reader) (*types.CodexHookInput, error) {

@@ -21,15 +21,16 @@ import (
 // Engine is the core sync engine used by both daemon and manual save.
 // It provides a unified interface for syncing session data to the backend.
 type Engine struct {
-	backend        Backend
-	redactor       *redactor.Redactor
-	tracker        *FileTracker
-	sessionID      string // Backend session ID (set after Init)
-	providerName   string
-	externalID     string
-	transcriptPath string
-	cwd            string
-	initialized    bool
+	backend              Backend
+	redactor             *redactor.Redactor
+	tracker              *FileTracker
+	sessionID            string // Backend session ID (set after Init)
+	providerName         string
+	externalID           string
+	transcriptPath       string
+	cwd                  string
+	initialized          bool
+	sentFirstUserMessage bool
 }
 
 // Backend is the sync transport used by Engine. The HTTP client implements this
@@ -226,26 +227,10 @@ func (e *Engine) SyncAll() (int, error) {
 					newAgentIDs = append(newAgentIDs, chunk.AgentIDs...)
 				}
 
-				// Extract and add summary/first_user_message for transcript files
+				// Extract and add provider-owned metadata for transcript files.
+				includedFirstUserMessage := false
 				if file.Type == "transcript" {
-					result := discovery.ExtractMetadataFromLines(chunk.Lines)
-					if chunk.Metadata == nil {
-						chunk.Metadata = &ChunkMetadata{}
-					}
-					// Apply redaction to metadata — extraction runs on raw lines,
-					// so secrets in summaries/first messages must be redacted before upload.
-					if e.redactor != nil {
-						chunk.Metadata.Summary = e.redactor.Redact(result.Summary)
-						chunk.Metadata.FirstUserMessage = e.redactor.Redact(result.FirstUserMessage)
-					} else {
-						chunk.Metadata.Summary = result.Summary
-						chunk.Metadata.FirstUserMessage = result.FirstUserMessage
-					}
-
-					// Trigger session linking for summaries with leafUuid
-					for _, link := range result.SummaryLinks {
-						e.linkSummaryToPreviousSession(link.Summary, link.LeafUUID)
-					}
+					includedFirstUserMessage = e.addTranscriptMetadata(chunk)
 				}
 
 				// Upload chunk
@@ -275,6 +260,9 @@ func (e *Engine) SyncAll() (int, error) {
 				}
 
 				// Update tracking state
+				if includedFirstUserMessage {
+					e.sentFirstUserMessage = true
+				}
 				e.tracker.UpdateAfterSync(file, lastLine, chunk.NewOffset)
 
 				logger.Debug("Synced file: file=%s first_line=%d last_line=%d lines=%d",
@@ -296,6 +284,46 @@ func (e *Engine) SyncAll() (int, error) {
 	}
 
 	return totalChunks, firstErr
+}
+
+func (e *Engine) addTranscriptMetadata(chunk *Chunk) bool {
+	if e.providerName == provider.NameCodex {
+		if e.sentFirstUserMessage {
+			return false
+		}
+		firstUserMessage := provider.Codex{}.ExtractFirstUserMessageFromLines(chunk.Lines)
+		if firstUserMessage == "" {
+			return false
+		}
+		if e.redactor != nil {
+			firstUserMessage = e.redactor.Redact(firstUserMessage)
+		}
+		if chunk.Metadata == nil {
+			chunk.Metadata = &ChunkMetadata{}
+		}
+		chunk.Metadata.FirstUserMessage = firstUserMessage
+		return true
+	}
+
+	result := discovery.ExtractMetadataFromLines(chunk.Lines)
+	if chunk.Metadata == nil {
+		chunk.Metadata = &ChunkMetadata{}
+	}
+	// Apply redaction to metadata — extraction runs on raw lines,
+	// so secrets in summaries/first messages must be redacted before upload.
+	if e.redactor != nil {
+		chunk.Metadata.Summary = e.redactor.Redact(result.Summary)
+		chunk.Metadata.FirstUserMessage = e.redactor.Redact(result.FirstUserMessage)
+	} else {
+		chunk.Metadata.Summary = result.Summary
+		chunk.Metadata.FirstUserMessage = result.FirstUserMessage
+	}
+
+	// Trigger session linking for summaries with leafUuid.
+	for _, link := range result.SummaryLinks {
+		e.linkSummaryToPreviousSession(link.Summary, link.LeafUUID)
+	}
+	return false
 }
 
 // SendSessionEnd sends a session_end event to the backend

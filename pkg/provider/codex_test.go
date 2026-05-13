@@ -5,6 +5,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
+
+	"github.com/ConfabulousDev/confab/pkg/types"
 )
 
 func TestCodexSessionIDFromRolloutPath(t *testing.T) {
@@ -127,6 +130,60 @@ func TestCodexFindSessionByIDUsesFilenameBeforeMetadata(t *testing.T) {
 	}
 	if !strings.Contains(gotPath, sessionID) {
 		t.Fatalf("path = %q, want filename-derived session", gotPath)
+	}
+}
+
+func TestCodexExtractFirstUserMessageFromLines(t *testing.T) {
+	lines := []string{
+		`{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<environment_context>ignore me</environment_context>"}]}}`,
+		`{"type":"event_msg","payload":{"type":"agent_message","message":"ignore me too"}}`,
+		`{"type":"event_msg","payload":{"type":"user_message","message":"  Ship Codex support  "}}`,
+		`{"type":"event_msg","payload":{"type":"user_message","message":"second prompt"}}`,
+	}
+
+	got := Codex{}.ExtractFirstUserMessageFromLines(lines)
+	if got != "Ship Codex support" {
+		t.Fatalf("ExtractFirstUserMessageFromLines() = %q, want first event_msg user_message", got)
+	}
+}
+
+func TestCodexExtractFirstUserMessageFromLinesSkipsEmptyAndNonUser(t *testing.T) {
+	lines := []string{
+		`not json`,
+		`{"type":"session_meta","payload":{"id":"session-id"}}`,
+		`{"type":"event_msg","payload":{"type":"user_message","message":"   "}}`,
+		`{"type":"event_msg","payload":{"type":"agent_message","message":"assistant text"}}`,
+	}
+
+	got := Codex{}.ExtractFirstUserMessageFromLines(lines)
+	if got != "" {
+		t.Fatalf("ExtractFirstUserMessageFromLines() = %q, want empty", got)
+	}
+}
+
+func TestCodexExtractFirstUserMessageFromLinesTruncates(t *testing.T) {
+	message := strings.Repeat("a", types.MaxFirstUserMessageLength+100)
+	lines := []string{`{"type":"event_msg","payload":{"type":"user_message","message":"` + message + `"}}`}
+
+	got := Codex{}.ExtractFirstUserMessageFromLines(lines)
+	if len(got) != types.MaxFirstUserMessageLength {
+		t.Fatalf("len(got) = %d, want %d", len(got), types.MaxFirstUserMessageLength)
+	}
+}
+
+func TestCodexExtractFirstUserMessageFromLinesTruncatesAtUTF8Boundary(t *testing.T) {
+	message := strings.Repeat("a", types.MaxFirstUserMessageLength-1) + "é"
+	lines := []string{`{"type":"event_msg","payload":{"type":"user_message","message":"` + message + `"}}`}
+
+	got := Codex{}.ExtractFirstUserMessageFromLines(lines)
+	if len(got) > types.MaxFirstUserMessageLength {
+		t.Fatalf("len(got) = %d, want <= %d", len(got), types.MaxFirstUserMessageLength)
+	}
+	if !utf8.ValidString(got) {
+		t.Fatalf("got invalid UTF-8 after truncation")
+	}
+	if strings.HasSuffix(got, "é") {
+		t.Fatalf("expected partial multibyte rune to be omitted")
 	}
 }
 
