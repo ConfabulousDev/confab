@@ -8,6 +8,7 @@ import (
 	"github.com/ConfabulousDev/confab/pkg/config"
 	"github.com/ConfabulousDev/confab/pkg/git"
 	"github.com/ConfabulousDev/confab/pkg/http"
+	"github.com/ConfabulousDev/confab/pkg/provider"
 	"github.com/ConfabulousDev/confab/pkg/utils"
 )
 
@@ -37,8 +38,9 @@ type InitMetadata struct {
 
 // InitRequest is the request body for POST /api/v1/sync/init
 type InitRequest struct {
-	ExternalID     string       `json:"external_id"`
-	TranscriptPath string       `json:"transcript_path"`
+	Provider       string        `json:"provider"`
+	ExternalID     string        `json:"external_id"`
+	TranscriptPath string        `json:"transcript_path"`
 	Metadata       *InitMetadata `json:"metadata,omitempty"`
 }
 
@@ -90,8 +92,12 @@ type EventResponse struct {
 
 // Init initializes or resumes a sync session
 // Returns the session ID and current sync state for all files
-func (c *Client) Init(externalID, transcriptPath string, metadata *InitMetadata) (*InitResponse, error) {
+func (c *Client) Init(providerName, externalID, transcriptPath string, metadata *InitMetadata) (*InitResponse, error) {
+	if providerName == "" {
+		providerName = provider.NameClaudeCode
+	}
 	req := InitRequest{
+		Provider:       providerName,
 		ExternalID:     externalID,
 		TranscriptPath: transcriptPath,
 		Metadata:       metadata,

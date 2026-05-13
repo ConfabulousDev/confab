@@ -78,11 +78,11 @@ func codexSessionEndFromHook() error {
 }
 
 func codexSessionEndFromReader(r io.Reader) error {
-	logger.Info("Stopping Codex dry-run sync daemon (hook mode)")
+	logger.Info("Stopping Codex sync daemon (hook mode)")
 
 	defer func() { writeCodexHookResponse(os.Stdout, false, "") }()
 
-	fmt.Fprintln(os.Stderr, "=== Confab: Stopping Codex Dry-Run Sync Daemon ===")
+	fmt.Fprintln(os.Stderr, "=== Confab: Stopping Codex Sync Daemon ===")
 	fmt.Fprintln(os.Stderr)
 
 	hookInput, err := provider.Codex{}.ReadHookInput(r)
@@ -95,7 +95,7 @@ func codexSessionEndFromReader(r io.Reader) error {
 		logger.Warn("Could not stop Codex daemon: %v", err)
 		fmt.Fprintf(os.Stderr, "Note: %v\n", err)
 	} else {
-		fmt.Fprintln(os.Stderr, "Codex daemon signaled to stop (final dry-run sync in background)")
+		fmt.Fprintln(os.Stderr, "Codex daemon signaled to stop (final sync in background)")
 	}
 
 	return nil

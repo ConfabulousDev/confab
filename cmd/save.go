@@ -74,6 +74,11 @@ func saveSessionsByIDForProvider(providerName string, sessionIDs []string) error
 }
 
 func saveCodexSessionsByID(sessionIDs []string) error {
+	cfg, err := config.EnsureAuthenticated()
+	if err != nil {
+		return err
+	}
+
 	codex := provider.Codex{}
 	for _, sessionID := range sessionIDs {
 		fullSessionID, rolloutPath, err := codex.FindSessionByID(sessionID)
@@ -88,13 +93,13 @@ func saveCodexSessionsByID(sessionIDs []string) error {
 			cwd = info.CWD
 		}
 
-		fmt.Printf("Dry-run syncing Codex session %s...\n", utils.TruncateSecret(fullSessionID, 8, 0))
-		result := dryRunSingleCodexSession(fullSessionID, rolloutPath, cwd)
+		fmt.Printf("Uploading Codex session %s...\n", utils.TruncateSecret(fullSessionID, 8, 0))
+		result := uploadSingleCodexSession(cfg, fullSessionID, rolloutPath, cwd)
 		if result.Error != nil {
 			fmt.Printf("  Error syncing: %v\n", result.Error)
 			continue
 		}
-		fmt.Printf("  ✓ Dry-run logged locally (%d chunks)\n", result.FilesUploaded)
+		fmt.Printf("  ✓ Uploaded (%d chunks)\n", result.FilesUploaded)
 	}
 	return nil
 }
@@ -107,13 +112,18 @@ type UploadResult struct {
 	Error         error
 }
 
-func dryRunSingleCodexSession(sessionID, rolloutPath, cwd string) UploadResult {
+func uploadSingleCodexSession(cfg *config.UploadConfig, sessionID, rolloutPath, cwd string) UploadResult {
 	result := UploadResult{SessionID: sessionID}
-	engine := sync.NewWithBackend(sync.NewDryRunBackend(provider.NameCodex), nil, sync.EngineConfig{
+	engine, err := sync.New(cfg, sync.EngineConfig{
+		Provider:       provider.NameCodex,
 		ExternalID:     sessionID,
 		TranscriptPath: rolloutPath,
 		CWD:            cwd,
 	})
+	if err != nil {
+		result.Error = err
+		return result
+	}
 	if err := engine.Init(); err != nil {
 		result.Error = err
 		return result
@@ -138,6 +148,7 @@ func uploadSingleSession(cfg *config.UploadConfig, sessionID, transcriptPath str
 
 	// Create sync engine
 	engine, err := sync.New(cfg, sync.EngineConfig{
+		Provider:       provider.NameClaudeCode,
 		ExternalID:     sessionID,
 		TranscriptPath: transcriptPath,
 		CWD:            cwd,

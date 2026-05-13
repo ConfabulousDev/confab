@@ -36,65 +36,9 @@ func runSetup(cmd *cobra.Command, args []string) error {
 		return runCodexSetup(cmd)
 	}
 
-	backendURL, err := cmd.Flags().GetString("backend-url")
+	backendURL, needsLogin, err := runSetupAuth(cmd)
 	if err != nil {
-		return fmt.Errorf("failed to get backend-url flag: %w", err)
-	}
-	apiKey, err := cmd.Flags().GetString("api-key")
-	if err != nil {
-		return fmt.Errorf("failed to get api-key flag: %w", err)
-	}
-
-	// Check if API key was provided directly
-	needsLogin := true
-	if apiKey != "" {
-		if err := loginWithAPIKey(backendURL, apiKey); err != nil {
-			return err
-		}
-		fmt.Println()
-		needsLogin = false
-	} else {
-		// Check if already authenticated
-		cfg, err := config.GetUploadConfig()
-		if err == nil && cfg.APIKey != "" {
-			// Check if backend URL matches
-			if cfg.BackendURL == backendURL {
-				fmt.Println("Checking existing authentication...")
-				if err := verifyAPIKey(cfg); err == nil {
-					logger.Info("Existing API key is valid, skipping login")
-					fmt.Println("Already authenticated")
-					fmt.Println()
-					needsLogin = false
-				} else {
-					logger.Info("Existing API key is invalid: %v", err)
-					fmt.Println("❌ Existing credentials invalid, need to re-authenticate")
-					fmt.Println()
-				}
-			} else {
-				logger.Info("Backend URL changed from %s to %s, need to re-login", cfg.BackendURL, backendURL)
-				fmt.Println("Backend URL changed, need to re-authenticate")
-				fmt.Println()
-			}
-		}
-
-		// Login if needed
-		if needsLogin {
-			fmt.Println("Step 1/2: Authentication")
-			fmt.Println()
-			if err := doDeviceLogin(backendURL, defaultKeyName()); err != nil {
-				return err
-			}
-			fmt.Println()
-		}
-	}
-
-	// Ensure default redaction config exists
-	added, err := config.EnsureDefaultRedaction()
-	if err != nil {
-		logger.Warn("Failed to initialize redaction config: %v", err)
-	} else if added {
-		logger.Info("Initialized default redaction config")
-		fmt.Println("Redaction enabled (default patterns)")
+		return err
 	}
 
 	// Install hooks
@@ -152,18 +96,21 @@ func runSetup(cmd *cobra.Command, args []string) error {
 }
 
 func runCodexSetup(cmd *cobra.Command) error {
-	backendURL, err := cmd.Flags().GetString("backend-url")
-	if err != nil {
-		return fmt.Errorf("failed to get backend-url flag: %w", err)
-	}
-
 	fmt.Println("Setting up Confab for Codex")
 	fmt.Println()
-	fmt.Printf("Backend URL: %s\n", backendURL)
-	fmt.Println("Backend mode: dry-run only for Codex in this phase")
-	fmt.Println()
+
+	backendURL, needsLogin, err := runSetupAuth(cmd)
+	if err != nil {
+		return err
+	}
+
+	if needsLogin {
+		fmt.Println("Step 2/2: Installing Codex hooks")
+	} else {
+		fmt.Println("Installing Codex hooks...")
+	}
 	fmt.Println("Installing Codex hooks in ~/.codex/config.toml...")
-	fmt.Println("Enabling Codex feature flag: features.codex_hooks = true")
+	fmt.Println("Enabling Codex feature flag: features.hooks = true")
 
 	configPath, err := provider.Codex{}.InstallHooks()
 	if err != nil {
@@ -173,9 +120,70 @@ func runCodexSetup(cmd *cobra.Command) error {
 
 	fmt.Println()
 	fmt.Printf("✅ Setup complete. Codex hooks installed in %s\n", configPath)
-	fmt.Println("Codex rollout files will be dry-run synced to the local Confab log.")
-	fmt.Println("No Codex sessions will be uploaded to the backend yet.")
+	fmt.Println("Codex root rollout sessions will sync to", backendURL)
 	return nil
+}
+
+func runSetupAuth(cmd *cobra.Command) (backendURL string, needsLogin bool, err error) {
+	backendURL, err = cmd.Flags().GetString("backend-url")
+	if err != nil {
+		return "", false, fmt.Errorf("failed to get backend-url flag: %w", err)
+	}
+	apiKey, err := cmd.Flags().GetString("api-key")
+	if err != nil {
+		return "", false, fmt.Errorf("failed to get api-key flag: %w", err)
+	}
+
+	fmt.Printf("Backend URL: %s\n", backendURL)
+	fmt.Println()
+
+	needsLogin = true
+	if apiKey != "" {
+		if err := loginWithAPIKey(backendURL, apiKey); err != nil {
+			return "", false, err
+		}
+		fmt.Println()
+		needsLogin = false
+	} else {
+		cfg, err := config.GetUploadConfig()
+		if err == nil && cfg.APIKey != "" {
+			if cfg.BackendURL == backendURL {
+				fmt.Println("Checking existing authentication...")
+				if err := verifyAPIKey(cfg); err == nil {
+					logger.Info("Existing API key is valid, skipping login")
+					fmt.Println("Already authenticated")
+					fmt.Println()
+					needsLogin = false
+				} else {
+					logger.Info("Existing API key is invalid: %v", err)
+					fmt.Println("❌ Existing credentials invalid, need to re-authenticate")
+					fmt.Println()
+				}
+			} else {
+				logger.Info("Backend URL changed from %s to %s, need to re-login", cfg.BackendURL, backendURL)
+				fmt.Println("Backend URL changed, need to re-authenticate")
+				fmt.Println()
+			}
+		}
+
+		if needsLogin {
+			fmt.Println("Step 1/2: Authentication")
+			fmt.Println()
+			if err := doDeviceLogin(backendURL, defaultKeyName()); err != nil {
+				return "", false, err
+			}
+			fmt.Println()
+		}
+	}
+
+	if added, err := config.EnsureDefaultRedaction(); err != nil {
+		logger.Warn("Failed to initialize redaction config: %v", err)
+	} else if added {
+		logger.Info("Initialized default redaction config")
+		fmt.Println("Redaction enabled (default patterns)")
+	}
+
+	return backendURL, needsLogin, nil
 }
 
 func init() {

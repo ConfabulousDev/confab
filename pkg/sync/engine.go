@@ -13,6 +13,7 @@ import (
 	"github.com/ConfabulousDev/confab/pkg/git"
 	"github.com/ConfabulousDev/confab/pkg/http"
 	"github.com/ConfabulousDev/confab/pkg/logger"
+	"github.com/ConfabulousDev/confab/pkg/provider"
 	"github.com/ConfabulousDev/confab/pkg/redactor"
 	"github.com/ConfabulousDev/confab/pkg/types"
 )
@@ -24,6 +25,7 @@ type Engine struct {
 	redactor       *redactor.Redactor
 	tracker        *FileTracker
 	sessionID      string // Backend session ID (set after Init)
+	providerName   string
 	externalID     string
 	transcriptPath string
 	cwd            string
@@ -31,9 +33,9 @@ type Engine struct {
 }
 
 // Backend is the sync transport used by Engine. The HTTP client implements this
-// for Claude Code; Codex uses a local dry-run backend until server support exists.
+// for provider-aware backend sync.
 type Backend interface {
-	Init(externalID, transcriptPath string, metadata *InitMetadata) (*InitResponse, error)
+	Init(providerName, externalID, transcriptPath string, metadata *InitMetadata) (*InitResponse, error)
 	UploadChunk(sessionID, fileName, fileType string, firstLine int, lines []string, metadata *ChunkMetadata) (int, error)
 	SendEvent(sessionID, eventType string, timestamp time.Time, payload json.RawMessage) error
 	UpdateSessionSummary(externalID, summary string) error
@@ -41,6 +43,7 @@ type Backend interface {
 
 // EngineConfig holds configuration for creating an Engine
 type EngineConfig struct {
+	Provider       string
 	ExternalID     string
 	TranscriptPath string
 	CWD            string
@@ -70,6 +73,7 @@ func New(uploadCfg *config.UploadConfig, engineCfg EngineConfig) (*Engine, error
 		backend:        client,
 		redactor:       r,
 		tracker:        tracker,
+		providerName:   normalizeEngineProvider(engineCfg.Provider),
 		externalID:     engineCfg.ExternalID,
 		transcriptPath: engineCfg.TranscriptPath,
 		cwd:            engineCfg.CWD,
@@ -90,10 +94,18 @@ func NewWithBackend(backend Backend, r *redactor.Redactor, engineCfg EngineConfi
 		backend:        backend,
 		redactor:       r,
 		tracker:        tracker,
+		providerName:   normalizeEngineProvider(engineCfg.Provider),
 		externalID:     engineCfg.ExternalID,
 		transcriptPath: engineCfg.TranscriptPath,
 		cwd:            engineCfg.CWD,
 	}
+}
+
+func normalizeEngineProvider(providerName string) string {
+	if providerName == "" {
+		return provider.NameClaudeCode
+	}
+	return providerName
 }
 
 // Init initializes the sync session with the backend.
@@ -124,7 +136,7 @@ func (e *Engine) Init() error {
 		Username: username,
 	}
 
-	resp, err := e.backend.Init(e.externalID, e.transcriptPath, metadata)
+	resp, err := e.backend.Init(e.providerName, e.externalID, e.transcriptPath, metadata)
 	if err != nil {
 		return err
 	}
@@ -331,7 +343,7 @@ func (e *Engine) Reset() {
 // received data but we didn't get a response (e.g., timeout).
 func (e *Engine) refreshStateFromBackend() error {
 	// Call Init without metadata - we just want to refresh file states
-	resp, err := e.backend.Init(e.externalID, e.transcriptPath, nil)
+	resp, err := e.backend.Init(e.providerName, e.externalID, e.transcriptPath, nil)
 	if err != nil {
 		return err
 	}

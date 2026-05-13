@@ -367,11 +367,13 @@ func ensureCodexHooksConfig(config, binaryPath string) string {
 }
 
 func ensureCodexHooksFeature(config string) string {
-	re := regexp.MustCompile(`(?m)^codex_hooks\s*=\s*false\s*$`)
+	config = removeCodexHooksDeprecatedFeature(config)
+
+	re := regexp.MustCompile(`(?m)^hooks\s*=\s*false\s*$`)
 	if re.MatchString(config) {
-		return re.ReplaceAllString(config, "codex_hooks = true")
+		return re.ReplaceAllString(config, "hooks = true")
 	}
-	re = regexp.MustCompile(`(?m)^codex_hooks\s*=\s*true\s*$`)
+	re = regexp.MustCompile(`(?m)^hooks\s*=\s*true\s*$`)
 	if re.MatchString(config) {
 		return config
 	}
@@ -380,13 +382,25 @@ func ensureCodexHooksFeature(config string) string {
 		for i, line := range lines {
 			if strings.TrimSpace(line) == "[features]" {
 				next := append([]string{}, lines[:i+1]...)
-				next = append(next, "codex_hooks = true")
+				next = append(next, "hooks = true")
 				next = append(next, lines[i+1:]...)
 				return strings.Join(next, "\n")
 			}
 		}
 	}
-	return appendTOMLBlock(config, "[features]\ncodex_hooks = true\n")
+	return appendTOMLBlock(config, "[features]\nhooks = true\n")
+}
+
+func removeCodexHooksDeprecatedFeature(config string) string {
+	lines := strings.Split(config, "\n")
+	out := lines[:0]
+	for _, line := range lines {
+		if regexp.MustCompile(`^\s*codex_hooks\s*=`).MatchString(line) {
+			continue
+		}
+		out = append(out, line)
+	}
+	return strings.Join(out, "\n")
 }
 
 func appendTOMLBlock(config, block string) string {

@@ -72,7 +72,7 @@ trust_level = "trusted"
 	got := ensureCodexHooksConfig(input, "/usr/local/bin/confab")
 	for _, want := range []string{
 		"[features]",
-		"codex_hooks = true",
+		"hooks = true",
 		confabCodexHooksStart,
 		"[[hooks.SessionStart]]",
 		"command = \"/usr/local/bin/confab hook session-start --provider codex\"",
@@ -95,8 +95,11 @@ func TestCodexEnsureHooksConfigIsIdempotent(t *testing.T) {
 	if strings.Count(twice, confabCodexHooksStart) != 1 {
 		t.Fatalf("expected one managed block, got:\n%s", twice)
 	}
-	if strings.Contains(twice, "codex_hooks = false") {
-		t.Fatalf("expected feature flag to be enabled:\n%s", twice)
+	if strings.Contains(twice, "codex_hooks") {
+		t.Fatalf("expected deprecated feature flag to be removed:\n%s", twice)
+	}
+	if !strings.Contains(twice, "hooks = true") {
+		t.Fatalf("expected hooks feature flag to be enabled:\n%s", twice)
 	}
 }
 

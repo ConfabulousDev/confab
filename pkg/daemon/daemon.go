@@ -272,23 +272,18 @@ func (d *Daemon) tryInit() error {
 	// Create engine if not already created
 	if d.engine == nil {
 		engineCfg := pkgsync.EngineConfig{
+			Provider:       d.providerName,
 			ExternalID:     d.externalID,
 			TranscriptPath: d.transcriptPath,
 			CWD:            d.cwd,
 		}
 
-		var engine *pkgsync.Engine
-		var err error
-		if d.providerName == provider.NameCodex {
-			engine = pkgsync.NewWithBackend(pkgsync.NewDryRunBackend(provider.NameCodex), nil, engineCfg)
-		} else {
-			// Get authenticated config lazily, only when we need to talk to backend.
-			cfg, cfgErr := config.EnsureAuthenticated()
-			if cfgErr != nil {
-				return fmt.Errorf("not authenticated: %w", cfgErr)
-			}
-			engine, err = pkgsync.New(cfg, engineCfg)
+		// Get authenticated config lazily, only when we need to talk to backend.
+		cfg, cfgErr := config.EnsureAuthenticated()
+		if cfgErr != nil {
+			return fmt.Errorf("not authenticated: %w", cfgErr)
 		}
+		engine, err := pkgsync.New(cfg, engineCfg)
 		if err != nil {
 			return fmt.Errorf("failed to create sync engine: %w", err)
 		}

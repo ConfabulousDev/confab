@@ -186,11 +186,45 @@ func TestEngine_Init_NewSession(t *testing.T) {
 	}
 
 	req := mock.initRequests[0]
+	if req.Provider != "claude-code" {
+		t.Errorf("expected provider 'claude-code', got %q", req.Provider)
+	}
 	if req.ExternalID != "test-external-id" {
 		t.Errorf("expected external_id 'test-external-id', got %q", req.ExternalID)
 	}
 	if req.TranscriptPath != transcriptPath {
 		t.Errorf("expected transcript_path %q, got %q", transcriptPath, req.TranscriptPath)
+	}
+}
+
+func TestEngine_Init_CodexProvider(t *testing.T) {
+	mock := newMockBackend(t)
+	server := httptest.NewServer(mock)
+	defer server.Close()
+
+	tmpDir, transcriptPath := setupTestEnv(t, server.URL)
+	os.WriteFile(transcriptPath, []byte(`{"type":"session_meta","payload":{}}`+"\n"), 0644)
+
+	engine := NewWithClient(
+		mustNewClient(t, server.URL, tmpDir),
+		nil,
+		EngineConfig{
+			Provider:       "codex",
+			ExternalID:     "codex-external-id",
+			TranscriptPath: transcriptPath,
+			CWD:            tmpDir,
+		},
+	)
+
+	if err := engine.Init(); err != nil {
+		t.Fatalf("Init failed: %v", err)
+	}
+
+	if len(mock.initRequests) != 1 {
+		t.Fatalf("expected 1 init request, got %d", len(mock.initRequests))
+	}
+	if got := mock.initRequests[0].Provider; got != "codex" {
+		t.Fatalf("provider = %q, want codex", got)
 	}
 }
 
@@ -1284,9 +1318,9 @@ func TestEngine_SyncAll_DirScanAfterRestart(t *testing.T) {
 	// --- Second engine: simulates restart ---
 	// Backend reports all files as fully synced (transcript: 3 lines, agents: 1 line each)
 	mock.initResponse.Files = map[string]FileState{
-		"transcript.jsonl":                         {LastSyncedLine: 3},
-		"agent-a3eaf63159a07953f.jsonl":            {LastSyncedLine: 1},
-		"agent-acompact-2aaa241e456ebc94.jsonl":    {LastSyncedLine: 1},
+		"transcript.jsonl":                      {LastSyncedLine: 3},
+		"agent-a3eaf63159a07953f.jsonl":         {LastSyncedLine: 1},
+		"agent-acompact-2aaa241e456ebc94.jsonl": {LastSyncedLine: 1},
 	}
 
 	engine2 := NewWithClient(

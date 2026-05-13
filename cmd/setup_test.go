@@ -399,12 +399,17 @@ func TestSetupCmd_BackendURLRequired(t *testing.T) {
 }
 
 func TestRunCodexSetupOutput(t *testing.T) {
-	tmpDir, _ := setupSetupTestEnv(t, "https://example.invalid")
+	backend := &setupTestBackend{validateValid: true}
+	server := httptest.NewServer(backend)
+	defer server.Close()
+
+	tmpDir, _ := setupSetupTestEnv(t, server.URL)
 	codexDir := filepath.Join(tmpDir, ".codex")
 	t.Setenv(provider.CodexStateDirEnv, codexDir)
 
 	cmd := &cobra.Command{}
-	cmd.Flags().String("backend-url", "https://confab.example", "")
+	cmd.Flags().String("backend-url", server.URL, "")
+	cmd.Flags().String("api-key", "cfb_codex-test-key-12345678", "")
 
 	output := captureStdout(t, func() {
 		if err := runCodexSetup(cmd); err != nil {
@@ -413,11 +418,11 @@ func TestRunCodexSetupOutput(t *testing.T) {
 	})
 
 	wantSnippets := []string{
-		"Backend URL: https://confab.example",
-		"Backend mode: dry-run only for Codex in this phase",
-		"Enabling Codex feature flag: features.codex_hooks = true",
+		"Backend URL: " + server.URL,
+		"✓ API key validated and saved",
+		"Enabling Codex feature flag: features.hooks = true",
 		"Codex hooks installed in",
-		"No Codex sessions will be uploaded to the backend yet.",
+		"Codex root rollout sessions will sync to " + server.URL,
 	}
 	for _, want := range wantSnippets {
 		if !strings.Contains(output, want) {
@@ -431,8 +436,11 @@ func TestRunCodexSetupOutput(t *testing.T) {
 		t.Fatalf("failed to read Codex config: %v", err)
 	}
 	content := string(data)
-	if !strings.Contains(content, "codex_hooks = true") {
+	if !strings.Contains(content, "hooks = true") {
 		t.Fatal("expected Codex feature flag to be enabled")
+	}
+	if strings.Contains(content, "codex_hooks") {
+		t.Fatal("expected deprecated Codex hooks feature flag to be absent")
 	}
 	if !strings.Contains(content, "hook session-start --provider codex") {
 		t.Fatal("expected Codex session-start hook command")

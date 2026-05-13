@@ -118,11 +118,11 @@ func codexSessionStartFromHook() error {
 }
 
 func codexSessionStartFromReader(r io.Reader) error {
-	logger.Info("Starting Codex dry-run sync daemon (hook mode)")
+	logger.Info("Starting Codex sync daemon (hook mode)")
 
-	defer func() { writeCodexHookResponse(os.Stdout, false, "Confab Codex dry-run sync daemon started") }()
+	defer func() { writeCodexHookResponse(os.Stdout, false, "Confab Codex sync daemon started") }()
 
-	fmt.Fprintln(os.Stderr, "=== Confab: Starting Codex Dry-Run Sync Daemon ===")
+	fmt.Fprintln(os.Stderr, "=== Confab: Starting Codex Sync Daemon ===")
 	fmt.Fprintln(os.Stderr)
 
 	hookInput, err := provider.Codex{}.ReadSessionHookInput(r)
@@ -138,7 +138,7 @@ func codexSessionStartFromReader(r io.Reader) error {
 	fmt.Fprintf(os.Stderr, "Provider: codex\n")
 	fmt.Fprintf(os.Stderr, "Session:  %s\n", sessionPrefix)
 	fmt.Fprintf(os.Stderr, "Path:     %s\n", hookInput.TranscriptPath)
-	fmt.Fprintln(os.Stderr, "Backend:  dry-run (logged locally)")
+	fmt.Fprintln(os.Stderr, "Backend:  configured Confab backend")
 	fmt.Fprintln(os.Stderr)
 
 	spawned, err := maybeSpawnCodexDaemon(hookInput)
@@ -147,9 +147,9 @@ func codexSessionStartFromReader(r io.Reader) error {
 		return nil
 	}
 	if spawned {
-		fmt.Fprintln(os.Stderr, "Codex dry-run sync daemon started in background")
+		fmt.Fprintln(os.Stderr, "Codex sync daemon started in background")
 	} else {
-		fmt.Fprintln(os.Stderr, "Codex dry-run sync daemon already running")
+		fmt.Fprintln(os.Stderr, "Codex sync daemon already running")
 	}
 
 	return nil

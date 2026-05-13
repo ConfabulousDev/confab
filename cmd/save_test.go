@@ -53,12 +53,16 @@ func TestParseDuration(t *testing.T) {
 type saveTestBackend struct {
 	initCount  int32
 	chunkCount int32
+	initReqs   []sync.InitRequest
 }
 
 func (b *saveTestBackend) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch r.URL.Path {
 	case "/api/v1/sync/init":
 		atomic.AddInt32(&b.initCount, 1)
+		var req sync.InitRequest
+		json.NewDecoder(r.Body).Decode(&req)
+		b.initReqs = append(b.initReqs, req)
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(sync.InitResponse{
 			SessionID: "internal-123",
@@ -114,6 +118,7 @@ func TestSaveSessionsByID(t *testing.T) {
 	t.Run("upload by full ID", func(t *testing.T) {
 		atomic.StoreInt32(&backend.initCount, 0)
 		atomic.StoreInt32(&backend.chunkCount, 0)
+		backend.initReqs = nil
 
 		err := saveSessionsByID([]string{sessionID})
 		if err != nil {
@@ -125,6 +130,9 @@ func TestSaveSessionsByID(t *testing.T) {
 		}
 		if backend.chunkCount != 1 {
 			t.Errorf("Expected 1 chunk call, got %d", backend.chunkCount)
+		}
+		if len(backend.initReqs) != 1 || backend.initReqs[0].Provider != "claude-code" {
+			t.Fatalf("expected explicit claude-code provider in init request, got %#v", backend.initReqs)
 		}
 	})
 
@@ -217,5 +225,39 @@ func TestSaveSessionsByID_NoAuth(t *testing.T) {
 	err := saveSessionsByID([]string{"some-session"})
 	if err == nil {
 		t.Fatal("Expected auth error, got nil")
+	}
+}
+
+func TestSaveCodexSessionsByID_UploadsWithCodexProvider(t *testing.T) {
+	backend := &saveTestBackend{}
+	server := httptest.NewServer(backend)
+	defer server.Close()
+
+	tmpDir := setupCodexSyncTestEnv(t)
+	configPath := filepath.Join(tmpDir, ".confab", "config.json")
+	t.Setenv("CONFAB_CONFIG_PATH", configPath)
+	configContent := `{"backend_url": "` + server.URL + `", "api_key": "test-key-12345678"}`
+	if err := os.WriteFile(configPath, []byte(configContent), 0600); err != nil {
+		t.Fatalf("failed to write config: %v", err)
+	}
+
+	sessionID := "cccccccc-3333-3333-3333-333333333333"
+	writeCodexTestRollout(t, tmpDir, sessionID, `"thread_source":"user","cwd":"/work/user"`)
+
+	if err := saveSessionsByIDForProvider("codex", []string{"cccccccc"}); err != nil {
+		t.Fatalf("saveSessionsByIDForProvider failed: %v", err)
+	}
+
+	if backend.initCount != 1 {
+		t.Fatalf("expected 1 init call, got %d", backend.initCount)
+	}
+	if backend.chunkCount != 1 {
+		t.Fatalf("expected 1 chunk call, got %d", backend.chunkCount)
+	}
+	if len(backend.initReqs) != 1 {
+		t.Fatalf("expected 1 init request, got %d", len(backend.initReqs))
+	}
+	if got := backend.initReqs[0].Provider; got != "codex" {
+		t.Fatalf("provider = %q, want codex", got)
 	}
 }

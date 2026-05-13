@@ -72,7 +72,7 @@ func printSessionTable(providerName string, sessions []discovery.SessionInfo) {
 	}
 
 	if providerName == provider.NameCodex {
-		fmt.Printf("\n%d session(s) found. Use 'confab save --provider codex <id>' to dry-run sync locally.\n", len(sessions))
+		fmt.Printf("\n%d session(s) found. Use 'confab save --provider codex <id>' to sync to the backend.\n", len(sessions))
 		return
 	}
 	if len(sessions) == 1 {

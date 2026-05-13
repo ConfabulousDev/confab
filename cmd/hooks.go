@@ -121,7 +121,7 @@ var hooksRemoveCmd = &cobra.Command{
 
 func installCodexHooks() error {
 	fmt.Println("Installing Codex hooks...")
-	fmt.Println("Enabling Codex feature flag: features.codex_hooks = true")
+	fmt.Println("Enabling Codex feature flag: features.hooks = true")
 
 	configPath, err := provider.Codex{}.InstallHooks()
 	if err != nil {
@@ -132,8 +132,7 @@ func installCodexHooks() error {
 	logger.Info("Codex hooks installed in %s", configPath)
 	fmt.Printf("✓ Codex hooks installed in %s\n", configPath)
 	fmt.Println()
-	fmt.Println("Confab will now dry-run sync Codex rollout files locally.")
-	fmt.Println("No Codex sessions are uploaded to the backend in this phase.")
+	fmt.Println("Confab will now sync Codex root rollout sessions to the configured backend.")
 	return nil
 }
 
