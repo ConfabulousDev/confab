@@ -103,26 +103,15 @@ func (p Codex) ScanSessions() ([]CodexSessionInfo, error) {
 	}
 
 	var sessions []CodexSessionInfo
-	err = filepath.WalkDir(sessionsDir, func(path string, d os.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return nil
-		}
-		if d.IsDir() || !strings.HasPrefix(d.Name(), "rollout-") || !strings.HasSuffix(d.Name(), ".jsonl") {
-			return nil
-		}
-		sessionID, ok := p.SessionIDFromRolloutPath(path)
-		if !ok {
-			return nil
-		}
+	err = p.walkRollouts(sessionsDir, func(path, sessionID string) {
 		info, err := p.ReadSessionInfo(path)
 		if err != nil {
-			return nil
+			return
 		}
 		info.SessionID = sessionID
 		if info.IsUserSession() {
 			sessions = append(sessions, info)
 		}
-		return nil
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to walk Codex sessions directory: %w", err)
@@ -139,28 +128,15 @@ func (p Codex) FindSessionByID(partialID string) (string, string, error) {
 		return "", "", fmt.Errorf("session not found: %s", partialID)
 	}
 
-	var matches []struct {
+	type rolloutMatch struct {
 		id   string
 		path string
 	}
-	err = filepath.WalkDir(sessionsDir, func(path string, d os.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return nil
-		}
-		if d.IsDir() || !strings.HasPrefix(d.Name(), "rollout-") || !strings.HasSuffix(d.Name(), ".jsonl") {
-			return nil
-		}
-		sessionID, ok := p.SessionIDFromRolloutPath(path)
-		if !ok {
-			return nil
-		}
+	var matches []rolloutMatch
+	err = p.walkRollouts(sessionsDir, func(path, sessionID string) {
 		if sessionID == partialID || strings.HasPrefix(sessionID, partialID) {
-			matches = append(matches, struct {
-				id   string
-				path string
-			}{id: sessionID, path: path})
+			matches = append(matches, rolloutMatch{id: sessionID, path: path})
 		}
-		return nil
 	})
 	if err != nil {
 		return "", "", fmt.Errorf("failed to walk Codex sessions directory: %w", err)
@@ -180,6 +156,30 @@ func (p Codex) FindSessionByID(partialID string) (string, string, error) {
 		return "", "", fmt.Errorf("session not found: %s", partialID)
 	}
 	return matches[0].id, matches[0].path, nil
+}
+
+// walkRollouts visits every Codex rollout JSONL file under root, invoking fn
+// with the file path and the session ID parsed from its filename. Entries with
+// walk errors or unrecognized names are silently skipped.
+func (p Codex) walkRollouts(root string, fn func(path, sessionID string)) error {
+	return filepath.WalkDir(root, func(path string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return nil
+		}
+		if d.IsDir() {
+			return nil
+		}
+		name := d.Name()
+		if !strings.HasPrefix(name, "rollout-") || !strings.HasSuffix(name, ".jsonl") {
+			return nil
+		}
+		sessionID, ok := p.SessionIDFromRolloutPath(path)
+		if !ok {
+			return nil
+		}
+		fn(path, sessionID)
+		return nil
+	})
 }
 
 func (p Codex) ReadSessionInfo(path string) (CodexSessionInfo, error) {
@@ -232,6 +232,9 @@ func (p Codex) ReadSessionInfo(path string) (CodexSessionInfo, error) {
 	return info, nil
 }
 
+// ExtractFirstUserMessageFromLines returns the first non-empty user message
+// found in the given rollout lines, truncated to MaxFirstUserMessageLength
+// bytes on a UTF-8 boundary. Returns "" when no user message is present.
 func (Codex) ExtractFirstUserMessageFromLines(lines []string) string {
 	for _, raw := range lines {
 		var line codexRolloutLine
@@ -241,7 +244,6 @@ func (Codex) ExtractFirstUserMessageFromLines(lines []string) string {
 		if line.Type != "event_msg" {
 			continue
 		}
-
 		var payload codexUserMessagePayload
 		if err := json.Unmarshal(line.Payload, &payload); err != nil {
 			continue
@@ -249,7 +251,6 @@ func (Codex) ExtractFirstUserMessageFromLines(lines []string) string {
 		if payload.Type != "user_message" {
 			continue
 		}
-
 		message := strings.TrimSpace(payload.Message)
 		if message == "" {
 			continue
@@ -303,6 +304,9 @@ func (p Codex) ValidateRolloutPath(path string) error {
 	return fmt.Errorf("must be under Codex sessions directory (%s)", sessionsDir)
 }
 
+// truncateUTF8Bytes returns s truncated so its byte length is at most maxBytes,
+// without splitting a multi-byte rune. Returns an empty string when maxBytes is
+// non-positive.
 func truncateUTF8Bytes(s string, maxBytes int) string {
 	if maxBytes <= 0 {
 		return ""
@@ -310,11 +314,15 @@ func truncateUTF8Bytes(s string, maxBytes int) string {
 	if len(s) <= maxBytes {
 		return s
 	}
+	// Walk runes in order; stop at the first rune that wouldn't fit.
 	for i, r := range s {
 		if i+utf8.RuneLen(r) > maxBytes {
 			return s[:i]
 		}
 	}
+	// Defensive: unreachable for valid UTF-8 (the loop above always returns
+	// before completion when len(s) > maxBytes). For invalid bytes, fall back
+	// to a hard byte cut so the byte-limit invariant still holds.
 	return s[:maxBytes]
 }
 

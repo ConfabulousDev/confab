@@ -286,44 +286,67 @@ func (e *Engine) SyncAll() (int, error) {
 	return totalChunks, firstErr
 }
 
+// addTranscriptMetadata populates provider-owned metadata on chunk (summary,
+// first user message, session links) using the appropriate extractor for the
+// current provider. Returns true iff this call attached the first user message
+// to the chunk, so the caller can flip sentFirstUserMessage once the upload
+// succeeds.
 func (e *Engine) addTranscriptMetadata(chunk *Chunk) bool {
 	if e.providerName == provider.NameCodex {
-		if e.sentFirstUserMessage {
-			return false
-		}
-		firstUserMessage := provider.Codex{}.ExtractFirstUserMessageFromLines(chunk.Lines)
-		if firstUserMessage == "" {
-			return false
-		}
-		if e.redactor != nil {
-			firstUserMessage = e.redactor.Redact(firstUserMessage)
-		}
-		if chunk.Metadata == nil {
-			chunk.Metadata = &ChunkMetadata{}
-		}
-		chunk.Metadata.FirstUserMessage = firstUserMessage
-		return true
+		return e.addCodexTranscriptMetadata(chunk)
 	}
+	e.addClaudeTranscriptMetadata(chunk)
+	return false
+}
 
-	result := discovery.ExtractMetadataFromLines(chunk.Lines)
-	if chunk.Metadata == nil {
-		chunk.Metadata = &ChunkMetadata{}
+// addCodexTranscriptMetadata extracts the first user message from a Codex
+// rollout chunk. Codex sends the user prompt once at the start of the session;
+// later chunks are skipped.
+func (e *Engine) addCodexTranscriptMetadata(chunk *Chunk) bool {
+	if e.sentFirstUserMessage {
+		return false
 	}
-	// Apply redaction to metadata — extraction runs on raw lines,
-	// so secrets in summaries/first messages must be redacted before upload.
+	firstUserMessage := provider.Codex{}.ExtractFirstUserMessageFromLines(chunk.Lines)
+	if firstUserMessage == "" {
+		return false
+	}
 	if e.redactor != nil {
-		chunk.Metadata.Summary = e.redactor.Redact(result.Summary)
-		chunk.Metadata.FirstUserMessage = e.redactor.Redact(result.FirstUserMessage)
-	} else {
-		chunk.Metadata.Summary = result.Summary
-		chunk.Metadata.FirstUserMessage = result.FirstUserMessage
+		firstUserMessage = e.redactor.Redact(firstUserMessage)
 	}
+	ensureChunkMetadata(chunk).FirstUserMessage = firstUserMessage
+	return true
+}
+
+// addClaudeTranscriptMetadata extracts the local summary and first user
+// message from a Claude Code transcript chunk, and triggers session linking
+// for any summaries with leafUuid.
+func (e *Engine) addClaudeTranscriptMetadata(chunk *Chunk) {
+	result := discovery.ExtractMetadataFromLines(chunk.Lines)
+	meta := ensureChunkMetadata(chunk)
+
+	// Apply redaction to metadata — extraction runs on raw lines, so secrets
+	// in summaries/first messages must be redacted before upload.
+	summary := result.Summary
+	firstUserMessage := result.FirstUserMessage
+	if e.redactor != nil {
+		summary = e.redactor.Redact(summary)
+		firstUserMessage = e.redactor.Redact(firstUserMessage)
+	}
+	meta.Summary = summary
+	meta.FirstUserMessage = firstUserMessage
 
 	// Trigger session linking for summaries with leafUuid.
 	for _, link := range result.SummaryLinks {
 		e.linkSummaryToPreviousSession(link.Summary, link.LeafUUID)
 	}
-	return false
+}
+
+// ensureChunkMetadata returns chunk.Metadata, allocating it if nil.
+func ensureChunkMetadata(chunk *Chunk) *ChunkMetadata {
+	if chunk.Metadata == nil {
+		chunk.Metadata = &ChunkMetadata{}
+	}
+	return chunk.Metadata
 }
 
 // SendSessionEnd sends a session_end event to the backend

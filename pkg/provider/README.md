@@ -1,22 +1,44 @@
 # pkg/provider
 
-Provider-specific local behavior for tools that Confab can integrate with.
+Provider-specific local behavior for the tools Confab integrates with (currently Claude Code and Codex). Each provider is a concrete type that owns its paths, hook parsing, session discovery, and transcript metadata extraction.
 
-Phase 2 starts with concrete Claude Code extraction only. This package does not define a generic Codex provider, a normalized hook model, backend tool identity, or skill abstraction yet.
+This package does **not** define a generic provider interface, a normalized hook model, or a normalized transcript shape. Provider-specific concerns stay in provider-specific code.
 
 ## Files
 
 | File | Role |
 |------|------|
-| `claude.go` | Claude Code paths, hook parsing, transcript path validation, and parent process detection |
+| `provider.go` | `NameClaudeCode = "claude-code"`, `NameCodex = "codex"`, and `Normalize(name)` for canonical provider names |
+| `claude.go` | `ClaudeCode` — Claude Code paths, hook parsing, transcript path validation, parent process detection |
+| `codex.go` | `Codex` — Codex paths, rollout scanning, hook parsing/installation, transcript path validation, first-user-message extraction |
+
+## Provider surfaces
+
+### `ClaudeCode`
+- Paths: `StateDir`, `SettingsPath`, `ProjectsDir`, transcript path validation against `CONFAB_CLAUDE_DIR`.
+- Hooks: `ReadHookInput`, `ReadSessionHookInput`, install/uninstall in `~/.claude/settings.json`.
+- Parent detection: parent PID monitoring helpers, Claude-specific.
+
+### `Codex`
+- Paths: `StateDir` (override via `CONFAB_CODEX_DIR`), `SessionsDir`, `ConfigPath`.
+- Rollout discovery: `SessionIDFromRolloutPath`, `ScanSessions`, `FindSessionByID`, `ReadSessionInfo`, internal `walkRollouts` helper.
+- Filtering: `CodexSessionInfo.IsUserSession()` excludes subagents/memory rollouts by `thread_source` and `agent_*` metadata.
+- Hooks: `ReadHookInput`, `ReadSessionHookInput`, `InstallHooks`/`UninstallHooks` for `~/.codex/config.toml` (preserves user config, makes backups, idempotent, enables `features.hooks = true`, removes deprecated `features.codex_hooks`).
+- Transcript metadata: `ExtractFirstUserMessageFromLines` reads the first `event_msg.user_message` from rollout lines, trims whitespace, and truncates to `types.MaxFirstUserMessageLength` on a UTF-8 boundary.
+- Path validation: `ValidateRolloutPath` requires an absolute path under `SessionsDir` matching `rollout-<timestamp>-<uuid>.jsonl`.
 
 ## Invariants
 
+- `NameClaudeCode` and `NameCodex` are the canonical wire values. Backend session uniqueness is `(user_id, provider, external_id)`.
+- `Normalize(name)` returns `claude-code` for empty input (legacy default) and rejects unknown providers.
 - `ClaudeCode` preserves existing Claude Code behavior, including `CONFAB_CLAUDE_DIR`.
-- Claude hook parsing returns `types.ClaudeHookInput`; there is no generic normalized hook payload.
-- Transcript validation preserves legacy behavior where `CONFAB_CLAUDE_DIR` may be treated as an allowed transcript root.
-- Parent PID detection is Claude-specific and is not part of a generic provider interface.
+- Claude hook parsing returns `types.ClaudeHookInput`; Codex hook parsing returns `types.CodexHookInput`. There is no generic normalized hook payload.
+- `Codex.ExtractFirstUserMessageFromLines` only considers `event_msg.user_message` — the first `response_item.message[role=user]` line in a Codex rollout contains an `<environment_context>` wrapper, not the user's prompt, and must be skipped.
+- `truncateUTF8Bytes` never returns a string longer than `maxBytes`, even on invalid UTF-8 input.
+- `Codex.IsUserSession` filters out subagents and memory rollouts so `ScanSessions` only surfaces top-level user sessions.
+- `Codex.InstallHooks` is idempotent and never strips unmanaged Codex config sections.
+- Parent PID detection is Claude-specific and not part of a generic provider interface.
 
 ## Used By
 
-`cmd/`, `pkg/config/`, and `pkg/discovery/`.
+`cmd/`, `pkg/config/`, `pkg/discovery/`, `pkg/sync/` (Codex first-user-message extraction is called from the sync engine's transcript-metadata path).
