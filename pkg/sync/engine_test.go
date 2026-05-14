@@ -15,6 +15,7 @@ import (
 
 	"github.com/ConfabulousDev/confab/pkg/config"
 	pkghttp "github.com/ConfabulousDev/confab/pkg/http"
+	"github.com/ConfabulousDev/confab/pkg/provider"
 	"github.com/ConfabulousDev/confab/pkg/redactor"
 	"github.com/klauspost/compress/zstd"
 )
@@ -507,6 +508,52 @@ func TestEngine_SyncAll_WithMetadata(t *testing.T) {
 	}
 	if chunkReq.Metadata.FirstUserMessage != "Help me with this task" {
 		t.Errorf("expected first_user_message 'Help me with this task', got %q", chunkReq.Metadata.FirstUserMessage)
+	}
+}
+
+func TestEngine_SyncAll_WithCodexFirstUserMessage(t *testing.T) {
+	mock := newMockBackend(t)
+	server := httptest.NewServer(mock)
+	defer server.Close()
+
+	tmpDir, transcriptPath := setupTestEnv(t, server.URL)
+
+	content := `{"type":"session_meta","payload":{"id":"codex-session","thread_source":"user","cwd":"/tmp/test"}}
+{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<environment_context>ignore me</environment_context>"}]}}
+{"type":"event_msg","payload":{"type":"user_message","message":"  Explain this failure  "}}
+{"type":"event_msg","payload":{"type":"user_message","message":"second prompt"}}
+`
+	os.WriteFile(transcriptPath, []byte(content), 0644)
+
+	engine := NewWithClient(
+		mustNewClient(t, server.URL, tmpDir),
+		nil,
+		EngineConfig{
+			Provider:       provider.NameCodex,
+			ExternalID:     "codex-metadata-test",
+			TranscriptPath: transcriptPath,
+			CWD:            tmpDir,
+		},
+	)
+
+	if err := engine.Init(); err != nil {
+		t.Fatalf("Init failed: %v", err)
+	}
+
+	_, err := engine.SyncAll()
+	if err != nil {
+		t.Fatalf("SyncAll failed: %v", err)
+	}
+
+	chunkReq := mock.chunkRequests[0]
+	if chunkReq.Metadata == nil {
+		t.Fatal("expected metadata in chunk request")
+	}
+	if chunkReq.Metadata.FirstUserMessage != "Explain this failure" {
+		t.Errorf("expected Codex first_user_message from event_msg user_message, got %q", chunkReq.Metadata.FirstUserMessage)
+	}
+	if chunkReq.Metadata.Summary != "" {
+		t.Errorf("expected Codex upload not to send summary, got %q", chunkReq.Metadata.Summary)
 	}
 }
 

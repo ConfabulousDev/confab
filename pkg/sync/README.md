@@ -54,7 +54,7 @@ SyncAll() loop:
 
 **Adding a new API endpoint:** Add request/response types in `client.go`, add a method on `Client`, call it from the engine or command layer.
 
-**Adding new metadata extraction:** Modify the metadata extraction section in `SyncAll()` where `ChunkMetadata` is built. Metadata is extracted from **raw lines before redaction**, then the extracted values are redacted separately before upload.
+**Adding new metadata extraction:** Modify `addTranscriptMetadata` (or its per-provider helper `addClaudeTranscriptMetadata` / `addCodexTranscriptMetadata`) where `ChunkMetadata` is built. Metadata is extracted from **raw lines before redaction**, then the extracted values are redacted separately before upload. Provider-specific extractors live in `pkg/provider`.
 
 **Tracking a new file type:** Add discovery logic in `DiscoverNewFiles()`. Set the file type in `TrackedFile.Type`. The rest of the pipeline (read, chunk, upload) is file-type agnostic.
 

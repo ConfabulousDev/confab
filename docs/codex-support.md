@@ -24,7 +24,7 @@ In particular, existing Claude Code users must continue to use commands such as:
 
 ## Current Phase: Codex Root Session Rollout
 
-Goal: ship root Codex session upload and transcript viewing while preserving Claude Code behavior. Backend provider support and frontend Codex transcript rendering are already merged in `../confab-web`; the CLI implementation exists locally in this repo and is not yet pushed from `main`.
+Goal: ship root Codex session upload and transcript viewing while preserving Claude Code behavior. Backend provider support and frontend Codex transcript rendering are already merged in `../confab-web`; the CLI implementation has shipped via the CF-348 PR and the preceding direct-pushed Codex rollout commits.
 
 Completed checkpoints:
 
@@ -43,10 +43,11 @@ Completed checkpoints:
 - [x] Codex daemon behavior: run the real daemon lifecycle against Codex rollout files, initially with a local dry-run backend.
 - [x] Codex root backend upload: send top-level `provider="codex"` and upload root rollout JSONL as `file_type="transcript"`.
 - [x] Codex frontend transcript view v1 in `../confab-web`: route `provider="codex"` sessions through the Codex parser and renderer.
+- [x] Populate `first_user_message` metadata on Codex chunk uploads so freshly-uploaded Codex sessions appear in the web session list (CF-348).
+- [x] Ship the local CLI Codex commits to `origin/main` (CF-348 PR for `first_user_message`, direct push for the preceding Codex provider/daemon/backend-sync/dry-run/doc commits).
 
 Current rollout TODOs:
 
-- [ ] Push or PR the local CLI Codex commits from this repo.
 - [ ] Run an end-to-end manual QA cycle against a real `confab-web` backend with `confab setup --provider codex`, Codex hooks, daemon sync, and web transcript viewing.
 - [ ] Update public/user-facing docs once Codex support is ready to advertise.
 - [ ] Clean up compatibility shims after provider ownership is stable: move remaining path and hook parsing callers directly to provider APIs, then remove wrappers that no runtime code needs.

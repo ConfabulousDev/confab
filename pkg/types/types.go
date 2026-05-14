@@ -14,6 +14,10 @@ import (
 // thinking blocks and tool results can exceed 1MB
 const MaxJSONLLineSize = 10 * 1024 * 1024 // 10MB
 
+// MaxFirstUserMessageLength is the maximum size for provider session title
+// metadata sent to the backend.
+const MaxFirstUserMessageLength = 8 * 1024 // 8KB
+
 // NewJSONLScanner creates a bufio.Scanner configured for large JSONL files
 // with a 10MB buffer to handle long transcript lines
 func NewJSONLScanner(r io.Reader) *bufio.Scanner {
