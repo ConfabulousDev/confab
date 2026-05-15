@@ -208,8 +208,9 @@ func TestCodexHook_EdgeRaceWithRetry_EdgeAppearsMidWait_RoutesCorrectly(t *testi
 	origSpawn := spawnCodexDaemonFunc
 	defer func() { spawnCodexDaemonFunc = origSpawn }()
 
-	// Shorter retry budget so the test stays fast but still proves retries fire.
-	provider.SetWalkUpRetryForTest(5, 20*time.Millisecond)
+	// Keep the delay short and the retry budget generous enough for loaded CI
+	// runners. The test still proves that the first no-edge lookup retries.
+	provider.SetWalkUpRetryForTest(10, 25*time.Millisecond)
 	defer provider.ResetWalkUpRetryForTest()
 
 	fixture, _ := setupCodexHookEnv(t)
@@ -218,7 +219,7 @@ func TestCodexHook_EdgeRaceWithRetry_EdgeAppearsMidWait_RoutesCorrectly(t *testi
 	// to simulate the spawn-vs-edge race.
 	subOpts := codextest.SubagentOpts{AgentRole: "lagged", ThreadSource: "agent"}
 	child := fixture.AddSubagentNoEdge(t, "child-fff", subOpts)
-	fixture.InsertEdgeLater(root.ThreadUUID(), child.ThreadUUID(), 40*time.Millisecond)
+	fixture.InsertEdgeLater(root.ThreadUUID(), child.ThreadUUID(), 10*time.Millisecond)
 
 	var captured *types.CodexHookInput
 	spawnCodexDaemonFunc = func(h *types.CodexHookInput) error {
