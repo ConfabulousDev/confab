@@ -501,13 +501,17 @@ func (t *FileTracker) DiscoverCodexDescendants(rootThreadUUID string) ([]*Tracke
 				row.ThreadUUID)
 			continue
 		}
+		// SQLite's `threads.source` mirrors the rollout's polymorphic shape
+		// (a 167-char JSON object for subagents in recent Codex versions),
+		// so use the rollout-side flattened discriminator to stay under the
+		// backend's 64-char `source` cap.
 		meta := CodexRolloutMetadata{
 			ThreadUUID:       row.ThreadUUID,
 			ParentThreadUUID: row.ParentThreadUUID,
 			RolloutPath:      row.RolloutPath,
 			CWD:              row.CWD,
 			Model:            row.Model,
-			Source:           row.Source,
+			Source:           info.Source,
 			ThreadSource:     row.ThreadSource,
 			AgentPath:        row.AgentPath,
 			AgentRole:        row.AgentRole,

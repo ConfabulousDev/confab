@@ -19,10 +19,16 @@ const CodexStateDirEnv = "CONFAB_CODEX_DIR"
 type Codex struct{}
 
 type CodexSessionInfo struct {
-	SessionID      string
-	RolloutPath    string
-	CWD            string
-	Model          string
+	SessionID   string
+	RolloutPath string
+	CWD         string
+	Model       string
+	// Source is a short discriminator extracted from the rollout's `source`
+	// field. Codex writes that field as either a bare string ("cli") for
+	// user-initiated rollouts or a tagged object ({"subagent":{...}}) for
+	// spawned subagents. The string case is passed through; the object case
+	// is collapsed to its top-level key. Empty when session_meta omits the
+	// field. Matches the backend's 64-char `codex_rollouts.source` column.
 	Source         string
 	ThreadSource   string
 	AgentPath      string
@@ -39,14 +45,39 @@ type codexRolloutLine struct {
 }
 
 type codexSessionMeta struct {
-	ID            string `json:"id"`
-	CWD           string `json:"cwd"`
-	Model         string `json:"model"`
-	Source        string `json:"source"`
-	ThreadSource  string `json:"thread_source"`
-	AgentPath     string `json:"agent_path"`
-	AgentRole     string `json:"agent_role"`
-	AgentNickname string `json:"agent_nickname"`
+	ID  string `json:"id"`
+	CWD string `json:"cwd"`
+	// Source is parsed as raw JSON because Codex writes a polymorphic shape
+	// — flatten via flattenCodexSource before exposing to callers.
+	Source        json.RawMessage `json:"source"`
+	Model         string          `json:"model"`
+	ThreadSource  string          `json:"thread_source"`
+	AgentPath     string          `json:"agent_path"`
+	AgentRole     string          `json:"agent_role"`
+	AgentNickname string          `json:"agent_nickname"`
+}
+
+// flattenCodexSource collapses Codex's polymorphic `source` field to a short
+// discriminator string suitable for the backend's `codex_rollouts.source`
+// column. Returns "" when raw is empty, the unquoted string when raw is a
+// JSON string ("cli" -> "cli"), or the single top-level key when raw is a
+// JSON object ({"subagent":{...}} -> "subagent"). Anything else falls back
+// to "" so the malformed input doesn't trip the backend's 64-char limit.
+func flattenCodexSource(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		return s
+	}
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &obj); err == nil {
+		for k := range obj {
+			return k
+		}
+	}
+	return ""
 }
 
 type codexUserMessagePayload struct {
@@ -234,11 +265,11 @@ func (p Codex) ReadSessionInfo(path string) (CodexSessionInfo, error) {
 		}
 		var meta codexSessionMeta
 		if err := json.Unmarshal(line.Payload, &meta); err != nil {
-			return info, nil
+			return info, fmt.Errorf("failed to parse session_meta payload: %w", err)
 		}
 		info.CWD = meta.CWD
 		info.Model = meta.Model
-		info.Source = meta.Source
+		info.Source = flattenCodexSource(meta.Source)
 		info.ThreadSource = meta.ThreadSource
 		info.AgentPath = meta.AgentPath
 		info.AgentRole = meta.AgentRole

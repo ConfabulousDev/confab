@@ -86,11 +86,14 @@ type CodexRolloutMetadata struct {
 	RolloutPath      string `json:"rollout_path"`
 	CWD              string `json:"cwd,omitempty"`
 	Model            string `json:"model,omitempty"`
-	Source           string `json:"source,omitempty"`
-	ThreadSource     string `json:"thread_source,omitempty"`
-	AgentPath        string `json:"agent_path,omitempty"`
-	AgentRole        string `json:"agent_role,omitempty"`
-	AgentNickname    string `json:"agent_nickname,omitempty"`
+	// Source is the flattened discriminator extracted by flattenCodexSource
+	// in pkg/provider/codex.go — a short string like "cli" or "subagent".
+	// The backend's `codex_rollouts.source` column caps this at 64 chars.
+	Source        string `json:"source,omitempty"`
+	ThreadSource  string `json:"thread_source,omitempty"`
+	AgentPath     string `json:"agent_path,omitempty"`
+	AgentRole     string `json:"agent_role,omitempty"`
+	AgentNickname string `json:"agent_nickname,omitempty"`
 }
 
 // ChunkResponse is the response for POST /api/v1/sync/chunk

@@ -187,6 +187,100 @@ func TestCodexExtractFirstUserMessageFromLinesTruncatesAtUTF8Boundary(t *testing
 	}
 }
 
+// TestCodexReadSessionInfoParsesNestedSourceObject covers the real shape Codex
+// v0.130.0 writes for spawned subagents: `source` is a nested object, not a
+// string. Earlier struct typing (Source string) caused json.Unmarshal to fail
+// and ReadSessionInfo silently returned an empty CodexSessionInfo, which then
+// looked like a user-session and got skipped by DiscoverCodexDescendants.
+// The flattening also has to fit the backend's 64-char `source` cap.
+func TestCodexReadSessionInfoParsesNestedSourceObject(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv(CodexStateDirEnv, tmpDir)
+
+	sessionsDir := filepath.Join(tmpDir, "sessions", "2026", "05", "15")
+	if err := os.MkdirAll(sessionsDir, 0700); err != nil {
+		t.Fatalf("failed to create sessions dir: %v", err)
+	}
+
+	subagentID := "019e2ce8-8314-7560-a8c4-536edbb5e99a"
+	rootID := "019e2ce8-2637-7db0-85c4-09ed1a293016"
+	nestedSource := `"source":{"subagent":{"thread_spawn":{"parent_thread_id":"` + rootID + `","depth":1,"agent_nickname":"Turing","agent_role":"explorer"}}}`
+	writeCodexRollout(t, sessionsDir, subagentID,
+		nestedSource+`,"thread_source":"subagent","agent_nickname":"Turing","agent_role":"explorer","cwd":"/work"`)
+
+	path := filepath.Join(sessionsDir, "rollout-2026-05-12T18-06-53-"+subagentID+".jsonl")
+	info, err := Codex{}.ReadSessionInfo(path)
+	if err != nil {
+		t.Fatalf("ReadSessionInfo() error = %v", err)
+	}
+	if info.ThreadSource != "subagent" {
+		t.Errorf("ThreadSource = %q, want %q", info.ThreadSource, "subagent")
+	}
+	if info.AgentNickname != "Turing" {
+		t.Errorf("AgentNickname = %q, want %q", info.AgentNickname, "Turing")
+	}
+	if info.AgentRole != "explorer" {
+		t.Errorf("AgentRole = %q, want %q", info.AgentRole, "explorer")
+	}
+	if info.IsUserSession() {
+		t.Errorf("IsUserSession() = true; want false for a subagent rollout")
+	}
+	if info.Source != "subagent" {
+		t.Errorf("Source = %q; want flattened top-level key %q", info.Source, "subagent")
+	}
+}
+
+// TestCodexReadSessionInfoFlattensStringSource covers the legacy/user-session
+// shape where `source` is a bare string ("cli"). Flattening passes it through
+// unchanged.
+func TestCodexReadSessionInfoFlattensStringSource(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv(CodexStateDirEnv, tmpDir)
+
+	sessionsDir := filepath.Join(tmpDir, "sessions", "2026", "05", "15")
+	if err := os.MkdirAll(sessionsDir, 0700); err != nil {
+		t.Fatalf("failed to create sessions dir: %v", err)
+	}
+
+	id := "55555555-5555-5555-5555-555555555555"
+	writeCodexRollout(t, sessionsDir, id, `"source":"cli","thread_source":"user","cwd":"/work"`)
+
+	path := filepath.Join(sessionsDir, "rollout-2026-05-12T18-06-53-"+id+".jsonl")
+	info, err := Codex{}.ReadSessionInfo(path)
+	if err != nil {
+		t.Fatalf("ReadSessionInfo() error = %v", err)
+	}
+	if info.Source != "cli" {
+		t.Errorf("Source = %q, want %q", info.Source, "cli")
+	}
+	if !info.IsUserSession() {
+		t.Errorf("IsUserSession() = false; want true for user rollout")
+	}
+}
+
+func TestFlattenCodexSource(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"empty", ``, ""},
+		{"string", `"cli"`, "cli"},
+		{"object_subagent", `{"subagent":{"thread_spawn":{"depth":1}}}`, "subagent"},
+		{"object_unknown_key", `{"some_future_variant":{}}`, "some_future_variant"},
+		{"malformed", `not json`, ""},
+		{"number", `42`, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := flattenCodexSource([]byte(tc.in))
+			if got != tc.want {
+				t.Errorf("flattenCodexSource(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
 func writeCodexRollout(t *testing.T, dir, id, metaFields string) {
 	t.Helper()
 	path := filepath.Join(dir, "rollout-2026-05-12T18-06-53-"+id+".jsonl")
