@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -433,7 +434,7 @@ func (p Codex) InstallHooks() (string, error) {
 		return "", err
 	}
 
-	updated := ensureCodexHooksConfig(string(existing), binaryPath)
+	updated := ensureCodexHooksConfig(string(existing), configPath, binaryPath)
 	if err := writeFileAtomic(configPath, []byte(updated), 0600); err != nil {
 		return "", fmt.Errorf("failed to write Codex config: %w", err)
 	}
@@ -466,10 +467,12 @@ func (p Codex) UninstallHooks() (string, error) {
 const confabCodexHooksStart = "# >>> confab codex hooks >>>"
 const confabCodexHooksEnd = "# <<< confab codex hooks <<<"
 
-func ensureCodexHooksConfig(config, binaryPath string) string {
+func ensureCodexHooksConfig(config, configPath, binaryPath string) string {
 	config = removeManagedBlock(config, confabCodexHooksStart, confabCodexHooksEnd)
 	config = ensureCodexHooksFeature(config)
-	return appendTOMLBlock(config, confabCodexHooksStart+"\n"+codexHooksTOML(binaryPath)+confabCodexHooksEnd+"\n")
+	sessionStartGroupIndex := countCodexHookMatcherGroups(config, "SessionStart")
+	stopGroupIndex := countCodexHookMatcherGroups(config, "Stop")
+	return appendTOMLBlock(config, confabCodexHooksStart+"\n"+codexHooksTOML(configPath, binaryPath, sessionStartGroupIndex, stopGroupIndex)+confabCodexHooksEnd+"\n")
 }
 
 func ensureCodexHooksFeature(config string) string {
@@ -533,9 +536,20 @@ func removeManagedBlock(config, start, end string) string {
 	return strings.TrimRight(config[:startIdx], "\n") + "\n" + config[endIdx:]
 }
 
-func codexHooksTOML(binaryPath string) string {
+func countCodexHookMatcherGroups(config, eventName string) int {
+	re := regexp.MustCompile(`(?m)^\s*\[\[\s*hooks\.` + regexp.QuoteMeta(eventName) + `\s*\]\]\s*(?:#.*)?$`)
+	return len(re.FindAllStringIndex(config, -1))
+}
+
+func codexHooksTOML(configPath, binaryPath string, sessionStartGroupIndex, stopGroupIndex int) string {
 	escapedBinaryPath := strings.ReplaceAll(binaryPath, `\`, `\\`)
 	escapedBinaryPath = strings.ReplaceAll(escapedBinaryPath, `"`, `\"`)
+	sessionStartCommand := binaryPath + " hook session-start --provider codex"
+	sessionEndCommand := binaryPath + " hook session-end --provider codex"
+	sessionStartHash := codexTrustedHookHash("session_start", "startup|resume|clear", sessionStartCommand, "Starting Confab sync")
+	sessionEndHash := codexTrustedHookHash("stop", "", sessionEndCommand, "Stopping Confab sync")
+	sessionStartKey := tomlQuoteString(fmt.Sprintf("%s:session_start:%d:0", configPath, sessionStartGroupIndex))
+	sessionEndKey := tomlQuoteString(fmt.Sprintf("%s:stop:%d:0", configPath, stopGroupIndex))
 	return fmt.Sprintf(`[[hooks.SessionStart]]
 matcher = "startup|resume|clear"
 [[hooks.SessionStart.hooks]]
@@ -548,7 +562,49 @@ statusMessage = "Starting Confab sync"
 type = "command"
 command = "%s hook session-end --provider codex"
 statusMessage = "Stopping Confab sync"
-`, escapedBinaryPath, escapedBinaryPath)
+
+[hooks.state.%s]
+trusted_hash = "%s"
+
+[hooks.state.%s]
+trusted_hash = "%s"
+`, escapedBinaryPath, escapedBinaryPath, sessionStartKey, sessionStartHash, sessionEndKey, sessionEndHash)
+}
+
+type codexHookTrustIdentity struct {
+	EventName string                  `json:"event_name"`
+	Hooks     []codexTrustedHookEntry `json:"hooks"`
+	Matcher   string                  `json:"matcher,omitempty"`
+}
+
+type codexTrustedHookEntry struct {
+	Async         bool   `json:"async"`
+	Command       string `json:"command"`
+	StatusMessage string `json:"statusMessage"`
+	Timeout       int    `json:"timeout"`
+	Type          string `json:"type"`
+}
+
+func codexTrustedHookHash(eventName, matcher, command, statusMessage string) string {
+	identity := codexHookTrustIdentity{
+		EventName: eventName,
+		Hooks: []codexTrustedHookEntry{{
+			Async:         false,
+			Command:       command,
+			StatusMessage: statusMessage,
+			Timeout:       600,
+			Type:          "command",
+		}},
+		Matcher: matcher,
+	}
+	b, _ := json.Marshal(identity)
+	sum := sha256.Sum256(b)
+	return fmt.Sprintf("sha256:%x", sum)
+}
+
+func tomlQuoteString(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b)
 }
 
 func binaryPath() (string, error) {

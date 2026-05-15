@@ -72,7 +72,7 @@ func TestCodexEnsureHooksConfig(t *testing.T) {
 trust_level = "trusted"
 `
 
-	got := ensureCodexHooksConfig(input, "/usr/local/bin/confab")
+	got := ensureCodexHooksConfig(input, "/Users/test/.codex/config.toml", "/usr/local/bin/confab")
 	for _, want := range []string{
 		"[features]",
 		"hooks = true",
@@ -81,6 +81,9 @@ trust_level = "trusted"
 		"command = \"/usr/local/bin/confab hook session-start --provider codex\"",
 		"[[hooks.Stop]]",
 		"command = \"/usr/local/bin/confab hook session-end --provider codex\"",
+		`[hooks.state."/Users/test/.codex/config.toml:session_start:0:0"]`,
+		`[hooks.state."/Users/test/.codex/config.toml:stop:0:0"]`,
+		`trusted_hash = "sha256:`,
 		confabCodexHooksEnd,
 	} {
 		if !strings.Contains(got, want) {
@@ -90,8 +93,8 @@ trust_level = "trusted"
 }
 
 func TestCodexEnsureHooksConfigIsIdempotent(t *testing.T) {
-	once := ensureCodexHooksConfig("[features]\ncodex_hooks = false\n", "/usr/local/bin/confab")
-	twice := ensureCodexHooksConfig(once, "/usr/local/bin/confab")
+	once := ensureCodexHooksConfig("[features]\ncodex_hooks = false\n", "/Users/test/.codex/config.toml", "/usr/local/bin/confab")
+	twice := ensureCodexHooksConfig(once, "/Users/test/.codex/config.toml", "/usr/local/bin/confab")
 	if once != twice {
 		t.Fatalf("expected idempotent config update\nonce:\n%s\n\ntwice:\n%s", once, twice)
 	}
@@ -103,6 +106,67 @@ func TestCodexEnsureHooksConfigIsIdempotent(t *testing.T) {
 	}
 	if !strings.Contains(twice, "hooks = true") {
 		t.Fatalf("expected hooks feature flag to be enabled:\n%s", twice)
+	}
+}
+
+func TestCodexEnsureHooksConfigTrustKeysUseExistingHookPositions(t *testing.T) {
+	input := `[[hooks.SessionStart]]
+matcher = "startup"
+[[hooks.SessionStart.hooks]]
+type = "command"
+command = "/usr/bin/other start"
+
+[[hooks.Stop]]
+[[hooks.Stop.hooks]]
+type = "command"
+command = "/usr/bin/other stop"
+`
+
+	got := ensureCodexHooksConfig(input, "/Users/test/.codex/config.toml", "/usr/local/bin/confab")
+	for _, want := range []string{
+		`[hooks.state."/Users/test/.codex/config.toml:session_start:1:0"]`,
+		`[hooks.state."/Users/test/.codex/config.toml:stop:1:0"]`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected generated config to contain %q\n%s", want, got)
+		}
+	}
+	for _, notWant := range []string{
+		`[hooks.state."/Users/test/.codex/config.toml:session_start:0:0"]`,
+		`[hooks.state."/Users/test/.codex/config.toml:stop:0:0"]`,
+	} {
+		if strings.Contains(got, notWant) {
+			t.Fatalf("generated config contains stale positional trust key %q\n%s", notWant, got)
+		}
+	}
+}
+
+func TestCodexTrustedHookHashMatchesKnownCodexHashes(t *testing.T) {
+	startHash := codexTrustedHookHash(
+		"session_start",
+		"startup|resume|clear",
+		"/Users/jackie/.local/bin/confab hook session-start --provider codex",
+		"Starting Confab sync",
+	)
+	if want := "sha256:d1f33ff2cf043a857782a0bb0661ae66a4d05446ae116f0774b7b5629af0a987"; startHash != want {
+		t.Fatalf("session-start trusted hash = %q, want %q", startHash, want)
+	}
+
+	stopHash := codexTrustedHookHash(
+		"stop",
+		"",
+		"/Users/jackie/.local/bin/confab hook session-end --provider codex",
+		"Stopping Confab sync",
+	)
+	if want := "sha256:f9058d7f2c0414b4f14b1d55a14f855dc4b610a3a9064e43eff7a0508fb83fb1"; stopHash != want {
+		t.Fatalf("stop trusted hash = %q, want %q", stopHash, want)
+	}
+}
+
+func TestCodexHooksTOMLEscapesTrustStateKey(t *testing.T) {
+	got := codexHooksTOML(`/tmp/codex "quoted"/config.toml`, `/tmp/confab`, 0, 0)
+	if !strings.Contains(got, `[hooks.state."/tmp/codex \"quoted\"/config.toml:session_start:0:0"]`) {
+		t.Fatalf("expected quoted session-start trust key, got:\n%s", got)
 	}
 }
 
