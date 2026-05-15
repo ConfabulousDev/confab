@@ -94,69 +94,7 @@ func TestIsRetroSkillInstalled(t *testing.T) {
 	}
 }
 
-func TestEnsureRetroSkill_FreshInstall(t *testing.T) {
-	setupSkillTest(t)
-
-	installed, err := EnsureRetroSkill()
-	if err != nil {
-		t.Fatalf("EnsureRetroSkill() failed: %v", err)
-	}
-	if !installed {
-		t.Error("EnsureRetroSkill() returned false for fresh install")
-	}
-
-	if !IsRetroSkillInstalled() {
-		t.Error("Skill not installed after EnsureRetroSkill")
-	}
-}
-
-func TestEnsureRetroSkill_AlreadyUpToDate(t *testing.T) {
-	setupSkillTest(t)
-
-	// Install first
-	if err := InstallRetroSkill(); err != nil {
-		t.Fatalf("InstallRetroSkill() failed: %v", err)
-	}
-
-	// Ensure should return false (not newly installed)
-	installed, err := EnsureRetroSkill()
-	if err != nil {
-		t.Fatalf("EnsureRetroSkill() failed: %v", err)
-	}
-	if installed {
-		t.Error("EnsureRetroSkill() returned true when already up to date")
-	}
-}
-
-func TestEnsureRetroSkill_UpdatesOutdated(t *testing.T) {
-	setupSkillTest(t)
-
-	// Install first
-	if err := InstallRetroSkill(); err != nil {
-		t.Fatalf("InstallRetroSkill() failed: %v", err)
-	}
-
-	// Modify the file to simulate an outdated version
-	path, _ := getRetroSkillPath()
-	os.WriteFile(path, []byte("old content"), 0644)
-
-	// Ensure should update it
-	installed, err := EnsureRetroSkill()
-	if err != nil {
-		t.Fatalf("EnsureRetroSkill() failed: %v", err)
-	}
-	if installed {
-		t.Error("EnsureRetroSkill() returned true for update (not fresh install)")
-	}
-
-	// Content should match template
-	content, _ := os.ReadFile(path)
-	if string(content) != retroSkillTemplate {
-		t.Error("Skill content not updated to template")
-	}
-}
-
-func TestEnsureRetroSkill_BackupOnUpdate(t *testing.T) {
+func TestInstallRetroSkill_BackupOnUpdate(t *testing.T) {
 	setupSkillTest(t)
 
 	// Install first
@@ -167,11 +105,13 @@ func TestEnsureRetroSkill_BackupOnUpdate(t *testing.T) {
 	// Modify the file
 	path, _ := getRetroSkillPath()
 	oldContent := "user customized content"
-	os.WriteFile(path, []byte(oldContent), 0644)
+	if err := os.WriteFile(path, []byte(oldContent), 0644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
 
-	// Ensure should create backup
-	if _, err := EnsureRetroSkill(); err != nil {
-		t.Fatalf("EnsureRetroSkill() failed: %v", err)
+	// Install again — should back up the modified file before overwriting
+	if err := InstallRetroSkill(); err != nil {
+		t.Fatalf("InstallRetroSkill() failed: %v", err)
 	}
 
 	bakPath := path + ".bak"

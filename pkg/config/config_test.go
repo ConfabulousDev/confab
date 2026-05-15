@@ -771,9 +771,9 @@ func TestValidateBackendURL(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := ValidateBackendURL(tt.url)
+			err := validateBackendURL(tt.url)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("ValidateBackendURL(%q) error = %v, wantErr %v", tt.url, err, tt.wantErr)
+				t.Errorf("validateBackendURL(%q) error = %v, wantErr %v", tt.url, err, tt.wantErr)
 			}
 		})
 	}
@@ -829,9 +829,9 @@ func TestValidateAPIKey(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := ValidateAPIKey(tt.apiKey)
+			err := validateAPIKey(tt.apiKey)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("ValidateAPIKey(%q) error = %v, wantErr %v", tt.apiKey, err, tt.wantErr)
+				t.Errorf("validateAPIKey(%q) error = %v, wantErr %v", tt.apiKey, err, tt.wantErr)
 			}
 		})
 	}
@@ -1756,13 +1756,13 @@ func TestParseLogLevel(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			level, err := ParseLogLevel(tt.input)
+			level, err := parseLogLevel(tt.input)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("ParseLogLevel(%q) error = %v, wantErr %v", tt.input, err, tt.wantErr)
+				t.Errorf("parseLogLevel(%q) error = %v, wantErr %v", tt.input, err, tt.wantErr)
 				return
 			}
 			if level.String() != tt.wantLevel {
-				t.Errorf("ParseLogLevel(%q) = %v, want %v", tt.input, level.String(), tt.wantLevel)
+				t.Errorf("parseLogLevel(%q) = %v, want %v", tt.input, level.String(), tt.wantLevel)
 			}
 		})
 	}

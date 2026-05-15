@@ -18,7 +18,9 @@ err := client.Post("/api/v1/sync/chunk", reqBody, &respBody)
 - **`NewClient(cfg, timeout)`** — Creates client with zstd encoder, TLS config, and timeout.
 - **`DoJSON(method, path, reqBody, respBody)`** — Core method: marshals JSON, optionally compresses, sends request, handles retries/errors, unmarshals response.
 - **`Get` / `Post` / `Patch`** — Convenience wrappers around `DoJSON`.
+- **`GetRawToWriter(path, w)`** — Streaming GET that writes the raw response body to `w`. Used by `confab session download` for large transcript files. Body is streamed through `io.LimitReader(maxResponseSize)`; on write error mid-stream the destination may be left partially populated, so callers should treat the output as incomplete on error.
 - **`SetUserAgent(ua)`** — Package-level function, must be called once at startup (from `main.go`).
+- **`BuildUserAgent(version)`** — Constructs the canonical user-agent string from a version.
 
 ## Sentinel Errors
 

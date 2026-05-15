@@ -1,13 +1,15 @@
 package discovery
 
 import (
-	"bufio"
 	"encoding/json"
 	"html"
 	"os"
 	"regexp"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/ConfabulousDev/confab/pkg/logger"
+	"github.com/ConfabulousDev/confab/pkg/types"
 )
 
 // MaxLinesForExtraction limits how many lines we read when extracting metadata.
@@ -45,14 +47,14 @@ func ExtractSessionMetadata(transcriptPath string) ExtractionResult {
 	}
 	defer file.Close()
 
-	scanner := bufio.NewScanner(file)
-	// Increase buffer size to handle long lines (default is 64KB, increase to 1MB)
-	buf := make([]byte, 0, 64*1024)
-	scanner.Buffer(buf, 1024*1024)
+	scanner := types.NewJSONLScanner(file)
 
 	var lines []string
 	for scanner.Scan() && len(lines) < MaxLinesForExtraction {
 		lines = append(lines, scanner.Text())
+	}
+	if err := scanner.Err(); err != nil {
+		logger.Warn("Error reading transcript %s during metadata extraction: %v", transcriptPath, err)
 	}
 
 	return ExtractMetadataFromLines(lines)

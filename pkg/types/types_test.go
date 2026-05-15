@@ -166,6 +166,17 @@ func TestReadHookInput(t *testing.T) {
 		}
 	})
 
+	t.Run("invalid session_id format", func(t *testing.T) {
+		input := `{"session_id":"../../tmp/evil","transcript_path":"/tmp/test.jsonl"}`
+		_, err := ReadClaudeHookInput(strings.NewReader(input))
+		if err == nil {
+			t.Fatal("expected error for invalid session_id format")
+		}
+		if !strings.Contains(err.Error(), "invalid session_id") {
+			t.Errorf("error should mention 'invalid session_id', got: %v", err)
+		}
+	})
+
 	t.Run("optional fields are zero-valued", func(t *testing.T) {
 		input := `{"session_id":"abc123"}`
 		got, err := ReadClaudeHookInput(strings.NewReader(input))

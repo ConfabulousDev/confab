@@ -1,11 +1,10 @@
-// ABOUTME: Manages the /retro Claude Code skill — install, uninstall, and ensure up-to-date.
+// ABOUTME: Manages the /retro Claude Code skill — install and uninstall.
 // ABOUTME: The skill file lives at ~/.claude/skills/retro/SKILL.md and enables the /retro slash command.
 package config
 
 import (
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/ConfabulousDev/confab/pkg/logger"
 )
@@ -119,34 +118,4 @@ func IsRetroSkillInstalled() bool {
 	}
 	_, err = os.Stat(path)
 	return err == nil
-}
-
-// EnsureRetroSkill installs the /retro skill if missing, or updates it if outdated.
-// Returns true if the skill was newly installed (not present before).
-func EnsureRetroSkill() (bool, error) {
-	path, err := getRetroSkillPath()
-	if err != nil {
-		return false, err
-	}
-
-	existing, readErr := os.ReadFile(path)
-	if readErr != nil {
-		// File doesn't exist — fresh install
-		if err := InstallRetroSkill(); err != nil {
-			return false, err
-		}
-		return true, nil
-	}
-
-	// File exists — update if content differs
-	if strings.TrimSpace(string(existing)) != strings.TrimSpace(retroSkillTemplate) {
-		if err := InstallRetroSkill(); err != nil {
-			return false, err
-		}
-		// Updated, not newly installed
-		return false, nil
-	}
-
-	// Already up to date
-	return false, nil
 }

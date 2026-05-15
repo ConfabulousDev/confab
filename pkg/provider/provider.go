@@ -18,8 +18,3 @@ func NormalizeName(name string) (string, error) {
 		return "", fmt.Errorf("unsupported provider %q (expected %q or %q)", name, NameClaudeCode, NameCodex)
 	}
 }
-
-func IsKnownName(name string) bool {
-	_, err := NormalizeName(name)
-	return err == nil
-}

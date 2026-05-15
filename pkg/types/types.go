@@ -127,10 +127,9 @@ type ClaudePreToolUseResponse struct {
 
 // ClaudePreToolUseOutput contains PreToolUse-specific decision fields
 type ClaudePreToolUseOutput struct {
-	HookEventName            string         `json:"hookEventName"`
-	PermissionDecision       string         `json:"permissionDecision,omitempty"` // "allow", "deny", or "ask"
-	PermissionDecisionReason string         `json:"permissionDecisionReason,omitempty"`
-	UpdatedInput             map[string]any `json:"updatedInput,omitempty"`
+	HookEventName            string `json:"hookEventName"`
+	PermissionDecision       string `json:"permissionDecision,omitempty"` // "allow", "deny", or "ask"
+	PermissionDecisionReason string `json:"permissionDecisionReason,omitempty"`
 }
 
 // InboxEvent represents an event written to the daemon's inbox file.

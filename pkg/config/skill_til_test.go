@@ -100,69 +100,7 @@ func TestIsTilSkillInstalled(t *testing.T) {
 	}
 }
 
-func TestEnsureTilSkill_FreshInstall(t *testing.T) {
-	setupSkillTest(t)
-
-	installed, err := EnsureTilSkill()
-	if err != nil {
-		t.Fatalf("EnsureTilSkill() failed: %v", err)
-	}
-	if !installed {
-		t.Error("EnsureTilSkill() returned false for fresh install")
-	}
-
-	if !IsTilSkillInstalled() {
-		t.Error("Skill not installed after EnsureTilSkill")
-	}
-}
-
-func TestEnsureTilSkill_AlreadyUpToDate(t *testing.T) {
-	setupSkillTest(t)
-
-	// Install first
-	if err := InstallTilSkill(); err != nil {
-		t.Fatalf("InstallTilSkill() failed: %v", err)
-	}
-
-	// Ensure should return false (not newly installed)
-	installed, err := EnsureTilSkill()
-	if err != nil {
-		t.Fatalf("EnsureTilSkill() failed: %v", err)
-	}
-	if installed {
-		t.Error("EnsureTilSkill() returned true when already up to date")
-	}
-}
-
-func TestEnsureTilSkill_UpdatesOutdated(t *testing.T) {
-	setupSkillTest(t)
-
-	// Install first
-	if err := InstallTilSkill(); err != nil {
-		t.Fatalf("InstallTilSkill() failed: %v", err)
-	}
-
-	// Modify the file to simulate an outdated version
-	path, _ := getTilSkillPath()
-	os.WriteFile(path, []byte("old content"), 0644)
-
-	// Ensure should update it
-	installed, err := EnsureTilSkill()
-	if err != nil {
-		t.Fatalf("EnsureTilSkill() failed: %v", err)
-	}
-	if installed {
-		t.Error("EnsureTilSkill() returned true for update (not fresh install)")
-	}
-
-	// Content should match template
-	content, _ := os.ReadFile(path)
-	if string(content) != tilSkillTemplate {
-		t.Error("Skill content not updated to template")
-	}
-}
-
-func TestEnsureTilSkill_BackupOnUpdate(t *testing.T) {
+func TestInstallTilSkill_BackupOnUpdate(t *testing.T) {
 	setupSkillTest(t)
 
 	// Install first
@@ -173,11 +111,13 @@ func TestEnsureTilSkill_BackupOnUpdate(t *testing.T) {
 	// Modify the file
 	path, _ := getTilSkillPath()
 	oldContent := "user customized content"
-	os.WriteFile(path, []byte(oldContent), 0644)
+	if err := os.WriteFile(path, []byte(oldContent), 0644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
 
-	// Ensure should create backup
-	if _, err := EnsureTilSkill(); err != nil {
-		t.Fatalf("EnsureTilSkill() failed: %v", err)
+	// Install again — should back up the modified file before overwriting
+	if err := InstallTilSkill(); err != nil {
+		t.Fatalf("InstallTilSkill() failed: %v", err)
 	}
 
 	bakPath := path + ".bak"

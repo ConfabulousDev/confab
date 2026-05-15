@@ -76,6 +76,6 @@ Tests cover hook installation/uninstallation, atomic updates under concurrency, 
 
 ## Dependencies
 
-**Uses:** standard library only
+**Uses:** `pkg/logger` (logging), `pkg/provider` (path constants)
 
-**Used by:** `cmd/` (setup, login, hooks, status), `pkg/discovery/` (paths), `pkg/sync/` (upload config), `pkg/daemon/` (state dir), `pkg/logger/` (log level)
+**Used by:** `cmd/` (setup, login, hooks, status), `pkg/daemon/` (state dir), `pkg/discovery/` (paths), `pkg/http/` (upload config), `pkg/redactor/` (redaction patterns), `pkg/sync/` (upload config)

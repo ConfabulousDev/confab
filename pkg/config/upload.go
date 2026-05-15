@@ -123,8 +123,8 @@ func getConfigPath() (string, error) {
 	return filepath.Join(home, ".confab", "config.json"), nil
 }
 
-// ValidateBackendURL checks if the backend URL is valid
-func ValidateBackendURL(backendURL string) error {
+// validateBackendURL checks if the backend URL is valid
+func validateBackendURL(backendURL string) error {
 	if backendURL == "" {
 		return nil // Empty is allowed (not configured)
 	}
@@ -152,10 +152,10 @@ func ValidateBackendURL(backendURL string) error {
 	return nil
 }
 
-// ValidateAPIKey checks if the API key format is valid.
+// validateAPIKey checks if the API key format is valid.
 // Confab API keys have the format: cfb_<40 alphanumeric chars>
 // Returns nil for empty string (not configured), but empty is not a valid key.
-func ValidateAPIKey(apiKey string) error {
+func validateAPIKey(apiKey string) error {
 	// Empty means not configured - skip validation but callers should
 	// check separately if authentication is required
 	if apiKey == "" {
@@ -185,11 +185,11 @@ func ValidateAPIKey(apiKey string) error {
 
 // Validate checks if the upload config is valid
 func (c *UploadConfig) Validate() error {
-	if err := ValidateBackendURL(c.BackendURL); err != nil {
+	if err := validateBackendURL(c.BackendURL); err != nil {
 		return fmt.Errorf("invalid backend URL: %w", err)
 	}
 
-	if err := ValidateAPIKey(c.APIKey); err != nil {
+	if err := validateAPIKey(c.APIKey); err != nil {
 		return fmt.Errorf("invalid API key: %w", err)
 	}
 
@@ -211,8 +211,8 @@ func EnsureAuthenticated() (*UploadConfig, error) {
 	return cfg, nil
 }
 
-// ParseLogLevel parses a log level string and returns the corresponding logger.Level
-func ParseLogLevel(level string) (logger.Level, error) {
+// parseLogLevel parses a log level string and returns the corresponding logger.Level
+func parseLogLevel(level string) (logger.Level, error) {
 	switch strings.ToLower(strings.TrimSpace(level)) {
 	case "debug":
 		return logger.DEBUG, nil
@@ -234,7 +234,7 @@ func ApplyLogLevel() {
 		return // Use default level if config can't be read
 	}
 
-	level, err := ParseLogLevel(cfg.LogLevel)
+	level, err := parseLogLevel(cfg.LogLevel)
 	if err != nil {
 		logger.Warn("Invalid log_level in config: %v", err)
 		return
