@@ -124,6 +124,8 @@ This is a cross-cutting change spanning multiple packages:
 
 **`maybeSpawnDaemon` is called from both `session-start` and `user-prompt-submit`.** The `user-prompt-submit` hook handles the "teleport" case where Claude Code resumes a session without firing `SessionStart`. If the daemon isn't running, it spawns one.
 
+**Codex SessionStart rewrites firing UUID to top-most root.** Codex fires SessionStart for every spawned subagent rollout, not just user sessions. `codexSessionStartFromReader` calls `provider.Codex{}.WalkUpToRoot(hookInput.SessionID)` before spawning the daemon, so every subagent SessionStart that lands in an already-running root tree becomes a no-op via the existing state-file dedup. `confab save --provider codex <subagent-uuid>` performs the same walk-up so manual saves of any UUID in a tree always sync the whole tree.
+
 **Testable function pattern.** Hook handlers extract core logic into functions that take `io.Reader`/`io.Writer` parameters (e.g., `sessionStartFromReader(r io.Reader, w io.Writer)`). Tests call these directly without needing stdin/stdout. Some functions use overridable function variables (e.g., `spawnDaemonFunc`) for test injection.
 
 ## Testing

@@ -39,6 +39,8 @@ Confab is a CLI tool that captures Claude Code session transcripts and uploads t
 - **pkg/redactor/**: JSON-aware redaction of sensitive data before upload
 - **pkg/config/**: Configuration, Claude Code hook management (`~/.claude/settings.json`), and skill management (`~/.claude/skills/`)
 - **pkg/http/**: HTTP client with zstd compression, auth, and retry logic
+- **pkg/provider/**: Per-tool integration (Claude Code, Codex). `codex_state.go` reads Codex's local SQLite DB to walk subagent rollouts up to their root.
+- **pkg/codextest/**: Reusable Codex SQLite + sessions-tree fixture builder used by tests in `pkg/provider`, `pkg/sync`, `pkg/daemon`, and `cmd`.
 
 ## Backend
 
@@ -50,6 +52,13 @@ The backend API lives in the sibling repo `../confab-web`. When implementing CLI
 2. Daemon watches transcript file, reads new lines, applies redaction, uploads as chunks
 3. Backend tracks `last_synced_line` per file; daemon syncs only new content
 4. Agent sidechain files (`agent-*.jsonl`) are synced alongside the main transcript
+
+### Codex provider differences
+
+- Codex rollouts live at `~/.codex/sessions/<yyyy>/<mm>/<dd>/rollout-...<uuid>.jsonl`. A "session" is a user-initiated thread; subagents spawn their own rollouts and are tracked in Codex's local SQLite (`~/.codex/state_*.sqlite`, `threads` + `thread_spawn_edges`).
+- Codex fires `SessionStart` for every spawned subagent. The hook handler in `cmd/hook_sessionstart.go` calls `provider.Codex{}.WalkUpToRoot` to resolve the firing UUID to its top-most root before spawning a daemon — so only one daemon runs per root tree, and subagent SessionStart events for already-tracked trees are no-ops.
+- The sync engine queries `tracker.DiscoverCodexDescendants` once per `SyncAll` cycle (a recursive SQLite walk under the root UUID). New subagent rollouts become `file_type=agent` sidechain files under the root's backend session — the same primitive Claude uses for its subagent files.
+- The first chunk of every Codex rollout (root or descendant) carries `chunk.metadata.codex_rollout` with the rollout's identity (thread UUID, parent UUID, rollout path, cwd, model, agent metadata). The backend upserts this into `codex_rollouts` keyed by thread UUID. Retries are safe: the metadata rides along again because `FirstLine == 1` is preserved across retries.
 
 ## Hook System
 

@@ -13,6 +13,7 @@ import (
 	"github.com/ConfabulousDev/confab/pkg/discovery"
 	"github.com/ConfabulousDev/confab/pkg/git"
 	"github.com/ConfabulousDev/confab/pkg/logger"
+	"github.com/ConfabulousDev/confab/pkg/provider"
 	"github.com/ConfabulousDev/confab/pkg/redactor"
 	"github.com/ConfabulousDev/confab/pkg/types"
 )
@@ -26,6 +27,14 @@ type TrackedFile struct {
 	ByteOffset     int64     // Byte position after LastSyncedLine (for seeking)
 	LastModTime    time.Time // Last modification time (for change detection)
 	LastSize       int64     // Last known size (for change detection)
+
+	// CodexRollout, if non-nil, marks this tracked file as a Codex rollout
+	// for which the engine should emit `codex_rollout` chunk metadata on
+	// the FIRST chunk uploaded for this file. "First chunk" is detected
+	// via chunk.FirstLine == 1; no separate state field is required.
+	// Roots and descendants both carry this; only the engine's emission
+	// gate (FirstLine==1) determines when it goes on the wire.
+	CodexRollout *CodexRolloutMetadata
 }
 
 // Chunk represents a range of lines read from a file with extracted metadata
@@ -63,17 +72,29 @@ func NewFileTracker(transcriptPath string) *FileTracker {
 
 // InitFromBackendState initializes the tracker with state from the backend.
 // This sets up tracking for the transcript and any files the backend knows about.
+//
+// Called from both Engine.Init() (first time) and Engine.refreshStateFromBackend()
+// (after a chunk-upload failure). On refresh, any per-file metadata that the
+// engine has already set on a tracked file (notably Codex rollout metadata)
+// must survive — otherwise a retried first chunk would lose its codex_rollout
+// payload. We preserve CodexRollout for existing entries and only refresh the
+// fields that can legitimately drift (sync position).
 func (t *FileTracker) InitFromBackendState(backendFiles map[string]FileState) {
 	transcriptName := filepath.Base(t.transcriptPath)
 
 	// Add transcript
 	transcriptState := backendFiles[transcriptName]
+	var existingTranscriptRollout *CodexRolloutMetadata
+	if prev, ok := t.files[transcriptName]; ok {
+		existingTranscriptRollout = prev.CodexRollout
+	}
 	t.files[transcriptName] = &TrackedFile{
 		Path:           t.transcriptPath,
 		Name:           transcriptName,
 		Type:           "transcript",
 		LastSyncedLine: transcriptState.LastSyncedLine,
 		ByteOffset:     0, // Will be set on first read
+		CodexRollout:   existingTranscriptRollout,
 	}
 
 	// Add any other files from backend state (agent files)
@@ -82,12 +103,27 @@ func (t *FileTracker) InitFromBackendState(backendFiles map[string]FileState) {
 			continue
 		}
 
+		var existingRollout *CodexRolloutMetadata
+		var existingPath string
+		if prev, ok := t.files[fileName]; ok {
+			existingRollout = prev.CodexRollout
+			existingPath = prev.Path
+		}
+		path := existingPath
+		if path == "" {
+			// First time we've seen this file; default to subagents dir.
+			// Codex children, when present in the tracker, already have an
+			// absolute rollout path from AddCodexRollout, so this branch is
+			// only taken for genuinely-new Claude agent files.
+			path = filepath.Join(t.subagentsDir, fileName)
+		}
 		t.files[fileName] = &TrackedFile{
-			Path:           filepath.Join(t.subagentsDir, fileName),
+			Path:           path,
 			Name:           fileName,
 			Type:           "agent",
 			LastSyncedLine: state.LastSyncedLine,
 			ByteOffset:     0, // Will be set on first read
+			CodexRollout:   existingRollout,
 		}
 	}
 }
@@ -385,4 +421,99 @@ func (t *FileTracker) trackAgentFile(fileName string) *TrackedFile {
 func (t *FileTracker) GetTranscriptFile() *TrackedFile {
 	transcriptName := filepath.Base(t.transcriptPath)
 	return t.files[transcriptName]
+}
+
+// AddCodexRollout registers a Codex rollout file in the tracker.
+//
+// isRoot=true → file type "transcript" (the Codex root's primary rollout).
+// isRoot=false → file type "agent" (every descendant, at any depth).
+//
+// All descendants sync as sidechain files under the root's backend session
+// — the same primitive Claude Code uses for its `agent-*.jsonl` files —
+// while the Codex thread tree is preserved separately in the backend's
+// `codex_rollouts` table via `meta.ParentThreadUUID`.
+//
+// Idempotent: a second call for an already-tracked path returns the
+// existing TrackedFile without modifying it. The caller can use this to
+// avoid maintaining a separate "already added" set.
+func (t *FileTracker) AddCodexRollout(path, fileName string, isRoot bool, meta CodexRolloutMetadata) *TrackedFile {
+	if existing, ok := t.files[fileName]; ok {
+		return existing
+	}
+	fileType := "agent"
+	if isRoot {
+		fileType = "transcript"
+	}
+	tracked := &TrackedFile{
+		Path:         path,
+		Name:         fileName,
+		Type:         fileType,
+		CodexRollout: &meta,
+	}
+	t.files[fileName] = tracked
+	return tracked
+}
+
+// DiscoverCodexDescendants queries the local Codex SQLite state DB for
+// every descendant of rootThreadUUID, verifies each rollout file exists
+// on disk and looks like an actual subagent (per ValidateRolloutPath +
+// !IsUserSession check on its session_meta), and adds the verified ones
+// to the tracker as `file_type=agent` entries.
+//
+// Returns only newly-added files; ones already in the tracker are skipped.
+// This makes the function safe to call every SyncAll cycle — it acts as
+// an incremental discovery step rather than a full rebuild.
+//
+// Gracefully degrades when the state DB is missing or its schema doesn't
+// match (returns nil, nil). Per-descendant verification failures are
+// logged at warn level and the offending row is skipped — the rest of
+// the subtree still goes through.
+func (t *FileTracker) DiscoverCodexDescendants(rootThreadUUID string) ([]*TrackedFile, error) {
+	rows, err := provider.Codex{}.ListSubtree(rootThreadUUID)
+	if err != nil {
+		return nil, err
+	}
+	var newFiles []*TrackedFile
+	for _, row := range rows {
+		fileName := filepath.Base(row.RolloutPath)
+		if t.IsTracked(fileName) {
+			continue
+		}
+		// Verify the rollout file actually exists and lives under Codex's
+		// sessions tree — refuse to upload a descendant pointed at a path
+		// that doesn't pass our validation.
+		if err := (provider.Codex{}).ValidateRolloutPath(row.RolloutPath); err != nil {
+			logger.Warn("Codex descendant %s: invalid rollout path %q: %v",
+				row.ThreadUUID, row.RolloutPath, err)
+			continue
+		}
+		info, err := (provider.Codex{}).ReadSessionInfo(row.RolloutPath)
+		if err != nil {
+			logger.Warn("Codex descendant %s: failed to read session_meta: %v",
+				row.ThreadUUID, err)
+			continue
+		}
+		// The DB says this is a descendant edge, but only trust the row
+		// if the rollout itself confirms it's a subagent (thread_source
+		// != "user" or any agent_* field set). Symmetric to provider.IsUserSession.
+		if info.IsUserSession() {
+			logger.Warn("Codex descendant %s: session_meta says user-session, skipping",
+				row.ThreadUUID)
+			continue
+		}
+		meta := CodexRolloutMetadata{
+			ThreadUUID:       row.ThreadUUID,
+			ParentThreadUUID: row.ParentThreadUUID,
+			RolloutPath:      row.RolloutPath,
+			CWD:              row.CWD,
+			Model:            row.Model,
+			Source:           row.Source,
+			ThreadSource:     row.ThreadSource,
+			AgentPath:        row.AgentPath,
+			AgentRole:        row.AgentRole,
+			AgentNickname:    row.AgentNickname,
+		}
+		newFiles = append(newFiles, t.AddCodexRollout(row.RolloutPath, fileName, false, meta))
+	}
+	return newFiles, nil
 }

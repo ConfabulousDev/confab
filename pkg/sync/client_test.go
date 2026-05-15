@@ -184,3 +184,123 @@ func mustNewTestClient(t *testing.T, serverURL string) *Client {
 	}
 	return client
 }
+
+// ============================================================================
+// ChunkMetadata.CodexRollout wire format (CF-387)
+// ============================================================================
+
+func TestChunkMetadata_CodexRollout_JSONMarshal_IncludedWhenSet(t *testing.T) {
+	meta := &ChunkMetadata{
+		CodexRollout: &CodexRolloutMetadata{
+			ThreadUUID:       "abc-uuid",
+			ParentThreadUUID: "root-uuid",
+			RolloutPath:      "/codex/sessions/2026/01/01/rollout-abc.jsonl",
+			CWD:              "/work",
+			Model:            "gpt-5",
+			Source:           "cli",
+			ThreadSource:     "agent",
+			AgentPath:        "~/agents/planner.md",
+			AgentRole:        "planner",
+			AgentNickname:    "Planny",
+		},
+	}
+	b, err := json.Marshal(meta)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	got := string(b)
+	for _, want := range []string{
+		`"codex_rollout"`,
+		`"thread_uuid":"abc-uuid"`,
+		`"parent_thread_uuid":"root-uuid"`,
+		`"rollout_path":"/codex/sessions/2026/01/01/rollout-abc.jsonl"`,
+		`"cwd":"/work"`,
+		`"model":"gpt-5"`,
+		`"source":"cli"`,
+		`"thread_source":"agent"`,
+		`"agent_path":"~/agents/planner.md"`,
+		`"agent_role":"planner"`,
+		`"agent_nickname":"Planny"`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("JSON missing %s; full payload: %s", want, got)
+		}
+	}
+}
+
+func TestChunkMetadata_CodexRollout_JSONMarshal_OmittedWhenNil(t *testing.T) {
+	meta := &ChunkMetadata{
+		Summary: "x", // ensure the wrapper itself isn't empty
+	}
+	b, err := json.Marshal(meta)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if strings.Contains(string(b), "codex_rollout") {
+		t.Errorf("expected codex_rollout omitted when nil; got %s", b)
+	}
+}
+
+func TestChunkMetadata_CodexRollout_JSONMarshal_OmitsEmptyOptionalStringFields(t *testing.T) {
+	// Only required fields set; optional fields should be elided.
+	meta := &ChunkMetadata{
+		CodexRollout: &CodexRolloutMetadata{
+			ThreadUUID:  "root-uuid",
+			RolloutPath: "/codex/sessions/2026/01/01/rollout-root.jsonl",
+		},
+	}
+	b, err := json.Marshal(meta)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	got := string(b)
+	for _, wantPresent := range []string{`"thread_uuid":"root-uuid"`, `"rollout_path":"`} {
+		if !strings.Contains(got, wantPresent) {
+			t.Errorf("expected %s present; got %s", wantPresent, got)
+		}
+	}
+	for _, wantAbsent := range []string{
+		"parent_thread_uuid",
+		`"cwd":`,
+		`"model":`,
+		`"source":`,
+		`"thread_source":`,
+		`"agent_path":`,
+		`"agent_role":`,
+		`"agent_nickname":`,
+	} {
+		if strings.Contains(got, wantAbsent) {
+			t.Errorf("expected %s omitted (empty optional); got %s", wantAbsent, got)
+		}
+	}
+}
+
+func TestChunkMetadata_CodexRollout_JSONUnmarshal_RoundTrips(t *testing.T) {
+	original := &ChunkMetadata{
+		CodexRollout: &CodexRolloutMetadata{
+			ThreadUUID:       "abc",
+			ParentThreadUUID: "root",
+			RolloutPath:      "/codex/rollout-abc.jsonl",
+			ThreadSource:     "agent",
+			AgentRole:        "planner",
+		},
+	}
+	b, err := json.Marshal(original)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	var decoded ChunkMetadata
+	if err := json.Unmarshal(b, &decoded); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if decoded.CodexRollout == nil {
+		t.Fatal("decoded.CodexRollout = nil; want populated")
+	}
+	if decoded.CodexRollout.ThreadUUID != "abc" ||
+		decoded.CodexRollout.ParentThreadUUID != "root" ||
+		decoded.CodexRollout.RolloutPath != "/codex/rollout-abc.jsonl" ||
+		decoded.CodexRollout.ThreadSource != "agent" ||
+		decoded.CodexRollout.AgentRole != "planner" {
+		t.Errorf("decoded payload doesn't match original: %+v", decoded.CodexRollout)
+	}
+}

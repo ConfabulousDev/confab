@@ -67,9 +67,30 @@ type ChunkRequest struct {
 
 // ChunkMetadata contains metadata sent to the backend with a chunk
 type ChunkMetadata struct {
-	GitInfo          *git.GitInfo `json:"git_info,omitempty"`
-	Summary          string       `json:"summary,omitempty"`
-	FirstUserMessage string       `json:"first_user_message,omitempty"`
+	GitInfo          *git.GitInfo          `json:"git_info,omitempty"`
+	Summary          string                `json:"summary,omitempty"`
+	FirstUserMessage string                `json:"first_user_message,omitempty"`
+	CodexRollout     *CodexRolloutMetadata `json:"codex_rollout,omitempty"`
+}
+
+// CodexRolloutMetadata is the per-rollout metadata transmitted on the FIRST
+// chunk of a Codex rollout (root or descendant). The backend upserts it
+// into the `codex_rollouts` table keyed by ThreadUUID. Omitted on chunks
+// where chunk.FirstLine != 1, so the backend handler treats absence as
+// "no metadata to record this round."
+//
+// Codex-only; the backend rejects this field on non-codex sessions with 400.
+type CodexRolloutMetadata struct {
+	ThreadUUID       string `json:"thread_uuid"`
+	ParentThreadUUID string `json:"parent_thread_uuid,omitempty"` // "" for roots
+	RolloutPath      string `json:"rollout_path"`
+	CWD              string `json:"cwd,omitempty"`
+	Model            string `json:"model,omitempty"`
+	Source           string `json:"source,omitempty"`
+	ThreadSource     string `json:"thread_source,omitempty"`
+	AgentPath        string `json:"agent_path,omitempty"`
+	AgentRole        string `json:"agent_role,omitempty"`
+	AgentNickname    string `json:"agent_nickname,omitempty"`
 }
 
 // ChunkResponse is the response for POST /api/v1/sync/chunk

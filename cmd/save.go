@@ -81,10 +81,27 @@ func saveCodexSessionsByID(sessionIDs []string) error {
 
 	codex := provider.Codex{}
 	for _, sessionID := range sessionIDs {
-		fullSessionID, rolloutPath, err := codex.FindSessionByID(sessionID)
+		// Use FindRolloutByID (not FindSessionByID) so subagent UUIDs resolve
+		// too — we walk up to the root next.
+		fullSessionID, rolloutPath, err := codex.FindRolloutByID(sessionID)
 		if err != nil {
 			fmt.Printf("Error: %v\n", err)
 			continue
+		}
+
+		// If the user passed a subagent UUID, transparently switch to syncing
+		// the root tree. The engine + tracker discover and upload every
+		// descendant as a sidechain file under the root's session, so the
+		// caller gets the whole tree from one save invocation.
+		rootUUID, rootRolloutPath, _ := codex.WalkUpToRoot(fullSessionID)
+		if rootUUID != "" && rootUUID != fullSessionID {
+			fmt.Printf("Resolved subagent %s → root %s\n",
+				utils.TruncateSecret(fullSessionID, 8, 0),
+				utils.TruncateSecret(rootUUID, 8, 0))
+			fullSessionID = rootUUID
+			if rootRolloutPath != "" {
+				rolloutPath = rootRolloutPath
+			}
 		}
 
 		info, err := codex.ReadSessionInfo(rolloutPath)

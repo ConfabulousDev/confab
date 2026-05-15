@@ -152,6 +152,31 @@ func (e *Engine) Init() error {
 	}
 	e.tracker.InitFromBackendState(backendState)
 
+	// For Codex, the root rollout itself is a "rollout" that needs its own
+	// codex_rollouts row populated server-side. Attach metadata to the
+	// tracker's transcript file so the first-chunk upload carries it.
+	// Descendants get their metadata attached during DiscoverCodexDescendants.
+	if e.providerName == provider.NameCodex {
+		if transcript := e.tracker.GetTranscriptFile(); transcript != nil {
+			info, infoErr := provider.Codex{}.ReadSessionInfo(e.transcriptPath)
+			if infoErr != nil {
+				logger.Warn("Codex root session_meta read failed: %v", infoErr)
+			}
+			transcript.CodexRollout = &CodexRolloutMetadata{
+				ThreadUUID:    e.externalID,
+				RolloutPath:   e.transcriptPath,
+				CWD:           info.CWD,
+				Model:         info.Model,
+				Source:        info.Source,
+				ThreadSource:  info.ThreadSource,
+				AgentPath:     info.AgentPath,
+				AgentRole:     info.AgentRole,
+				AgentNickname: info.AgentNickname,
+				// ParentThreadUUID stays "" for a root.
+			}
+		}
+	}
+
 	logger.Info("Sync session initialized: session_id=%s existing_files=%d", e.sessionID, len(resp.Files))
 
 	return nil
@@ -192,6 +217,25 @@ func (e *Engine) SyncAll() (int, error) {
 	totalChunks := 0
 	var firstErr error
 
+	// For Codex, query the local SQLite state DB once per cycle for every
+	// descendant of the root thread. New descendants are added as agent
+	// files in the tracker so the BFS loop below uploads them as sidechain
+	// files under the root's backend session. This is the symmetric
+	// discovery counterpart to Claude's per-iteration agent-ID extraction
+	// (which doesn't apply to Codex — Codex rolls don't reference children
+	// via transcript content).
+	if e.providerName == provider.NameCodex {
+		newDescendants, err := e.tracker.DiscoverCodexDescendants(e.externalID)
+		if err != nil {
+			logger.Warn("Codex descendant discovery failed: %v", err)
+		} else {
+			for _, f := range newDescendants {
+				logger.Info("Discovered Codex descendant: thread=%s path=%s",
+					f.CodexRollout.ThreadUUID, f.Path)
+			}
+		}
+	}
+
 	// Start with all currently tracked files
 	filesToProcess := e.tracker.GetTrackedFiles()
 
@@ -227,10 +271,20 @@ func (e *Engine) SyncAll() (int, error) {
 					newAgentIDs = append(newAgentIDs, chunk.AgentIDs...)
 				}
 
-				// Extract and add provider-owned metadata for transcript files.
+				// Provider-owned chunk metadata.
+				//
+				// For Codex, the helper runs on EVERY rollout chunk (root or
+				// descendant) so codex_rollout metadata can be attached to the
+				// first chunk of each rollout. The first-user-message extraction
+				// inside the helper is internally gated to transcript chunks.
+				//
+				// For Claude, only the transcript file gets metadata extracted
+				// (summary linking + first user message), as today.
 				includedFirstUserMessage := false
-				if file.Type == "transcript" {
-					includedFirstUserMessage = e.addTranscriptMetadata(chunk)
+				if e.providerName == provider.NameCodex {
+					includedFirstUserMessage = e.addCodexTranscriptMetadata(chunk, file)
+				} else if file.Type == "transcript" {
+					e.addClaudeTranscriptMetadata(chunk)
 				}
 
 				// Upload chunk
@@ -286,35 +340,37 @@ func (e *Engine) SyncAll() (int, error) {
 	return totalChunks, firstErr
 }
 
-// addTranscriptMetadata populates provider-owned metadata on chunk (summary,
-// first user message, session links) using the appropriate extractor for the
-// current provider. Returns true iff this call attached the first user message
-// to the chunk, so the caller can flip sentFirstUserMessage once the upload
-// succeeds.
-func (e *Engine) addTranscriptMetadata(chunk *Chunk) bool {
-	if e.providerName == provider.NameCodex {
-		return e.addCodexTranscriptMetadata(chunk)
+// addCodexTranscriptMetadata attaches provider-owned chunk metadata for a
+// Codex chunk. Two concerns are handled here, both gated independently:
+//
+//   - first_user_message: extracted from the root transcript's chunks
+//     (Codex emits the user prompt once at the start of the session). Gated
+//     by chunk.FileType == "transcript" + e.sentFirstUserMessage. Returns
+//     true on this code path so the caller can flip sentFirstUserMessage
+//     after upload succeeds.
+//
+//   - codex_rollout: per-rollout metadata that lets the backend upsert into
+//     `codex_rollouts`. Emitted on the FIRST chunk of any Codex rollout
+//     (root or descendant) — detected via chunk.FirstLine == 1. No
+//     persistent state flag is needed; if a chunk-with-meta fails and is
+//     retried, FirstLine is still 1 and the meta rides along again.
+//     Backend upsert is idempotent.
+func (e *Engine) addCodexTranscriptMetadata(chunk *Chunk, file *TrackedFile) bool {
+	sentFirst := false
+	if !e.sentFirstUserMessage && chunk.FileType == "transcript" {
+		firstUserMessage := provider.Codex{}.ExtractFirstUserMessageFromLines(chunk.Lines)
+		if firstUserMessage != "" {
+			if e.redactor != nil {
+				firstUserMessage = e.redactor.Redact(firstUserMessage)
+			}
+			ensureChunkMetadata(chunk).FirstUserMessage = firstUserMessage
+			sentFirst = true
+		}
 	}
-	e.addClaudeTranscriptMetadata(chunk)
-	return false
-}
-
-// addCodexTranscriptMetadata extracts the first user message from a Codex
-// rollout chunk. Codex sends the user prompt once at the start of the session;
-// later chunks are skipped.
-func (e *Engine) addCodexTranscriptMetadata(chunk *Chunk) bool {
-	if e.sentFirstUserMessage {
-		return false
+	if file != nil && file.CodexRollout != nil && chunk.FirstLine == 1 {
+		ensureChunkMetadata(chunk).CodexRollout = file.CodexRollout
 	}
-	firstUserMessage := provider.Codex{}.ExtractFirstUserMessageFromLines(chunk.Lines)
-	if firstUserMessage == "" {
-		return false
-	}
-	if e.redactor != nil {
-		firstUserMessage = e.redactor.Redact(firstUserMessage)
-	}
-	ensureChunkMetadata(chunk).FirstUserMessage = firstUserMessage
-	return true
+	return sentFirst
 }
 
 // addClaudeTranscriptMetadata extracts the local summary and first user

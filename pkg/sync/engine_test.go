@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/ConfabulousDev/confab/pkg/codextest"
 	"github.com/ConfabulousDev/confab/pkg/config"
 	pkghttp "github.com/ConfabulousDev/confab/pkg/http"
 	"github.com/ConfabulousDev/confab/pkg/provider"
@@ -1563,4 +1564,325 @@ func mustNewClient(t *testing.T, serverURL, tmpDir string) *Client {
 		t.Fatalf("failed to create client: %v", err)
 	}
 	return client
+}
+
+// ============================================================================
+// Codex subagent rollout sync (CF-387)
+// ============================================================================
+
+// findChunkForFile returns the first chunk request whose FileName matches.
+func findChunkForFile(reqs []ChunkRequest, fileName string) (ChunkRequest, bool) {
+	for _, r := range reqs {
+		if r.FileName == fileName {
+			return r, true
+		}
+	}
+	return ChunkRequest{}, false
+}
+
+// codexEngineSetup wires HOME + config, sets up a Codex fixture, populates
+// the root rollout's session_meta + initial content, and returns the
+// fixture plus a usable engine pointed at the root.
+func codexEngineSetup(t *testing.T, mock *mockBackend) (*codextest.Fixture, *Engine, *codextest.RolloutBuilder) {
+	t.Helper()
+	server := httptest.NewServer(mock)
+	t.Cleanup(server.Close)
+
+	tmpDir, _ := setupTestEnv(t, server.URL)
+	fixture := codextest.NewFixture(t)
+
+	root := fixture.AddRoot("root-thread").
+		WithSessionMeta("/workdir", "gpt-5").
+		WithUserMessage("hello codex")
+
+	engine := NewWithClient(
+		mustNewClient(t, server.URL, tmpDir),
+		nil,
+		EngineConfig{
+			Provider:       provider.NameCodex,
+			ExternalID:     root.ThreadUUID(),
+			TranscriptPath: root.Path(),
+			CWD:            "/workdir",
+		},
+	)
+	if err := engine.Init(); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	return fixture, engine, root
+}
+
+func TestEngine_SyncAll_CodexRoot_FirstChunk_EmitsCodexRolloutMeta(t *testing.T) {
+	mock := newMockBackend(t)
+	_, engine, root := codexEngineSetup(t, mock)
+
+	if _, err := engine.SyncAll(); err != nil {
+		t.Fatalf("SyncAll: %v", err)
+	}
+	if len(mock.chunkRequests) != 1 {
+		t.Fatalf("chunk requests = %d, want 1", len(mock.chunkRequests))
+	}
+	req := mock.chunkRequests[0]
+	if req.FileType != "transcript" {
+		t.Errorf("FileType = %q, want transcript", req.FileType)
+	}
+	if req.Metadata == nil || req.Metadata.CodexRollout == nil {
+		t.Fatalf("Metadata.CodexRollout = nil, want populated; full meta=%+v", req.Metadata)
+	}
+	cr := req.Metadata.CodexRollout
+	if cr.ThreadUUID != root.ThreadUUID() {
+		t.Errorf("ThreadUUID = %q, want %q", cr.ThreadUUID, root.ThreadUUID())
+	}
+	if cr.ParentThreadUUID != "" {
+		t.Errorf("ParentThreadUUID = %q, want \"\" (root)", cr.ParentThreadUUID)
+	}
+	if cr.RolloutPath != root.Path() {
+		t.Errorf("RolloutPath = %q, want %q", cr.RolloutPath, root.Path())
+	}
+	if cr.Model != "gpt-5" {
+		t.Errorf("Model = %q, want gpt-5", cr.Model)
+	}
+	if cr.ThreadSource != "user" {
+		t.Errorf("ThreadSource = %q, want user", cr.ThreadSource)
+	}
+}
+
+func TestEngine_SyncAll_CodexRoot_SubsequentChunks_DoNotRepeatCodexRolloutMeta(t *testing.T) {
+	mock := newMockBackend(t)
+	fixture, engine, root := codexEngineSetup(t, mock)
+
+	// First cycle uploads the initial content.
+	if _, err := engine.SyncAll(); err != nil {
+		t.Fatalf("SyncAll #1: %v", err)
+	}
+	// Append more content to the root rollout, then sync again.
+	root.WithRawLine(`{"type":"event_msg","payload":{"type":"agent_message","message":"reply"}}`)
+	_ = fixture
+	if _, err := engine.SyncAll(); err != nil {
+		t.Fatalf("SyncAll #2: %v", err)
+	}
+
+	if len(mock.chunkRequests) < 2 {
+		t.Fatalf("expected at least 2 chunk requests, got %d", len(mock.chunkRequests))
+	}
+	// First chunk should carry meta; subsequent chunks (FirstLine > 1) should not.
+	first := mock.chunkRequests[0]
+	if first.Metadata == nil || first.Metadata.CodexRollout == nil {
+		t.Fatalf("first chunk missing codex_rollout meta")
+	}
+	for i := 1; i < len(mock.chunkRequests); i++ {
+		req := mock.chunkRequests[i]
+		if req.Metadata != nil && req.Metadata.CodexRollout != nil {
+			t.Errorf("chunk %d (FirstLine=%d) unexpectedly carries codex_rollout meta", i, req.FirstLine)
+		}
+	}
+}
+
+func TestEngine_SyncAll_CodexChild_FirstChunk_EmitsCodexRolloutMeta_WithParentSet(t *testing.T) {
+	mock := newMockBackend(t)
+	fixture, engine, root := codexEngineSetup(t, mock)
+	child := fixture.AddSubagent(root.ThreadUUID(), "child-thread",
+		codextest.SubagentOpts{
+			AgentPath:     "~/agents/planner.md",
+			AgentRole:     "planner",
+			AgentNickname: "Planny",
+		},
+	).WithSessionMeta("/childdir", "gpt-5").
+		WithUserMessage("plan the work")
+
+	if _, err := engine.SyncAll(); err != nil {
+		t.Fatalf("SyncAll: %v", err)
+	}
+
+	childChunk, ok := findChunkForFile(mock.chunkRequests, filepath.Base(child.Path()))
+	if !ok {
+		t.Fatalf("no chunk request for child %q; got %d requests", filepath.Base(child.Path()), len(mock.chunkRequests))
+	}
+	if childChunk.FileType != "agent" {
+		t.Errorf("FileType = %q, want agent (descendants upload as agent)", childChunk.FileType)
+	}
+	if childChunk.Metadata == nil || childChunk.Metadata.CodexRollout == nil {
+		t.Fatalf("child chunk missing codex_rollout meta")
+	}
+	cr := childChunk.Metadata.CodexRollout
+	if cr.ThreadUUID != child.ThreadUUID() {
+		t.Errorf("child meta ThreadUUID = %q, want %q", cr.ThreadUUID, child.ThreadUUID())
+	}
+	if cr.ParentThreadUUID != root.ThreadUUID() {
+		t.Errorf("child meta ParentThreadUUID = %q, want %q", cr.ParentThreadUUID, root.ThreadUUID())
+	}
+	if cr.AgentRole != "planner" {
+		t.Errorf("child meta AgentRole = %q, want planner", cr.AgentRole)
+	}
+	if cr.AgentNickname != "Planny" {
+		t.Errorf("child meta AgentNickname = %q, want Planny", cr.AgentNickname)
+	}
+	if cr.ThreadSource != "agent" {
+		t.Errorf("child meta ThreadSource = %q, want agent", cr.ThreadSource)
+	}
+}
+
+func TestEngine_SyncAll_CodexGrandchild_FirstChunk_EmitsCodexRolloutMeta_WithImmediateParent(t *testing.T) {
+	mock := newMockBackend(t)
+	fixture, engine, root := codexEngineSetup(t, mock)
+	child := fixture.AddSubagent(root.ThreadUUID(), "child",
+		codextest.SubagentOpts{AgentRole: "planner", AgentNickname: "P"}).
+		WithSessionMeta("/", "m").WithUserMessage("plan")
+	grand := fixture.AddSubagent(child.ThreadUUID(), "grand",
+		codextest.SubagentOpts{AgentRole: "sub-planner", AgentNickname: "SP"}).
+		WithSessionMeta("/", "m").WithUserMessage("sub-plan")
+
+	if _, err := engine.SyncAll(); err != nil {
+		t.Fatalf("SyncAll: %v", err)
+	}
+
+	grandChunk, ok := findChunkForFile(mock.chunkRequests, filepath.Base(grand.Path()))
+	if !ok {
+		t.Fatalf("no chunk request for grandchild")
+	}
+	cr := grandChunk.Metadata.CodexRollout
+	if cr == nil {
+		t.Fatalf("grandchild missing codex_rollout meta")
+	}
+	if cr.ParentThreadUUID != child.ThreadUUID() {
+		t.Errorf("grandchild ParentThreadUUID = %q, want %q (immediate parent, NOT root)",
+			cr.ParentThreadUUID, child.ThreadUUID())
+	}
+}
+
+func TestEngine_SyncAll_Codex_AllChildrenUploadAsAgentFileType_AndAllTargetRootSession(t *testing.T) {
+	mock := newMockBackend(t)
+	fixture, engine, root := codexEngineSetup(t, mock)
+	for _, id := range []string{"a", "b", "c"} {
+		fixture.AddSubagent(root.ThreadUUID(), id, codextest.SubagentOpts{AgentRole: id}).
+			WithSessionMeta("/", "m").WithUserMessage("task " + id)
+	}
+
+	if _, err := engine.SyncAll(); err != nil {
+		t.Fatalf("SyncAll: %v", err)
+	}
+
+	rootName := filepath.Base(root.Path())
+	for _, req := range mock.chunkRequests {
+		if req.SessionID != "test-session-id" {
+			t.Errorf("chunk for %s SessionID = %q, want test-session-id (root's session)", req.FileName, req.SessionID)
+		}
+		if req.FileName == rootName {
+			if req.FileType != "transcript" {
+				t.Errorf("root chunk FileType = %q, want transcript", req.FileType)
+			}
+		} else {
+			if req.FileType != "agent" {
+				t.Errorf("descendant chunk %s FileType = %q, want agent", req.FileName, req.FileType)
+			}
+		}
+	}
+}
+
+func TestEngine_SyncAll_Codex_NewDescendantAppearsBetweenCycles_PickedUpNextCycle(t *testing.T) {
+	mock := newMockBackend(t)
+	fixture, engine, root := codexEngineSetup(t, mock)
+
+	if _, err := engine.SyncAll(); err != nil {
+		t.Fatalf("SyncAll #1: %v", err)
+	}
+	chunksAfterFirst := len(mock.chunkRequests)
+
+	// Subagent appears between cycles (simulating Codex spawning one mid-session).
+	late := fixture.AddSubagent(root.ThreadUUID(), "late",
+		codextest.SubagentOpts{AgentRole: "late-arrival"}).
+		WithSessionMeta("/", "m").WithUserMessage("plan late")
+
+	if _, err := engine.SyncAll(); err != nil {
+		t.Fatalf("SyncAll #2: %v", err)
+	}
+	if len(mock.chunkRequests) <= chunksAfterFirst {
+		t.Fatalf("no new chunks after second cycle (had %d, total %d)",
+			chunksAfterFirst, len(mock.chunkRequests))
+	}
+	lateChunk, ok := findChunkForFile(mock.chunkRequests, filepath.Base(late.Path()))
+	if !ok {
+		t.Fatalf("late subagent never picked up")
+	}
+	if lateChunk.Metadata.CodexRollout.ParentThreadUUID != root.ThreadUUID() {
+		t.Errorf("late descendant parent = %q, want %q",
+			lateChunk.Metadata.CodexRollout.ParentThreadUUID, root.ThreadUUID())
+	}
+}
+
+func TestEngine_SyncAll_Codex_FailedChunkUpload_RetriesNextCycle_MetaSentAgainOnRetry(t *testing.T) {
+	mock := newMockBackend(t)
+	_, engine, _ := codexEngineSetup(t, mock)
+
+	// After Init succeeded, fail the next request (first chunk upload).
+	atomic.StoreInt32(&mock.failUntilCount, atomic.LoadInt32(&mock.requestCount)+1)
+
+	// First sync: chunk upload fails.
+	if _, err := engine.SyncAll(); err == nil {
+		t.Fatalf("SyncAll: expected error on first chunk, got nil")
+	}
+	if len(mock.chunkRequests) != 0 {
+		t.Fatalf("after failed sync, expected 0 successful chunkRequests; got %d", len(mock.chunkRequests))
+	}
+	// Reset fail counter so the next cycle can succeed.
+	atomic.StoreInt32(&mock.failUntilCount, 0)
+
+	if _, err := engine.SyncAll(); err != nil {
+		t.Fatalf("SyncAll retry: %v", err)
+	}
+	if len(mock.chunkRequests) == 0 {
+		t.Fatalf("no chunks uploaded on retry")
+	}
+	// FirstLine should still be 1 on retry, and codex_rollout meta should
+	// have ridden along again — backend upsert dedups.
+	retried := mock.chunkRequests[0]
+	if retried.FirstLine != 1 {
+		t.Errorf("retried chunk FirstLine = %d, want 1 (stable across retries)", retried.FirstLine)
+	}
+	if retried.Metadata == nil || retried.Metadata.CodexRollout == nil {
+		t.Errorf("retried chunk missing codex_rollout meta (should ride along again)")
+	}
+}
+
+func TestEngine_SyncAll_Claude_DoesNotEmitCodexRolloutMeta(t *testing.T) {
+	mock := newMockBackend(t)
+	server := httptest.NewServer(mock)
+	defer server.Close()
+	tmpDir, transcriptPath := setupTestEnv(t, server.URL)
+	os.WriteFile(transcriptPath, []byte(`{"type":"user","message":"hi"}`+"\n"), 0644)
+
+	engine := NewWithClient(
+		mustNewClient(t, server.URL, tmpDir),
+		nil,
+		EngineConfig{
+			ExternalID:     "claude-session",
+			TranscriptPath: transcriptPath,
+			CWD:            tmpDir,
+		},
+	)
+	if err := engine.Init(); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	if _, err := engine.SyncAll(); err != nil {
+		t.Fatalf("SyncAll: %v", err)
+	}
+	for i, req := range mock.chunkRequests {
+		if req.Metadata != nil && req.Metadata.CodexRollout != nil {
+			t.Errorf("Claude chunk %d unexpectedly carries codex_rollout meta", i)
+		}
+	}
+}
+
+func TestEngine_SyncAll_Codex_NoChildren_OnlyRootChunkUploaded(t *testing.T) {
+	mock := newMockBackend(t)
+	_, engine, root := codexEngineSetup(t, mock)
+
+	if _, err := engine.SyncAll(); err != nil {
+		t.Fatalf("SyncAll: %v", err)
+	}
+	if len(mock.chunkRequests) != 1 {
+		t.Errorf("expected 1 chunk (root only, no descendants), got %d", len(mock.chunkRequests))
+	}
+	if mock.chunkRequests[0].FileName != filepath.Base(root.Path()) {
+		t.Errorf("chunk file = %q, want root rollout", mock.chunkRequests[0].FileName)
+	}
 }

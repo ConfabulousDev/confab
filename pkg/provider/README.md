@@ -11,6 +11,7 @@ This package does **not** define a generic provider interface, a normalized hook
 | `provider.go` | `NameClaudeCode = "claude-code"`, `NameCodex = "codex"`, and `Normalize(name)` for canonical provider names |
 | `claude.go` | `ClaudeCode` — Claude Code paths, hook parsing, transcript path validation, parent process detection |
 | `codex.go` | `Codex` — Codex paths, rollout scanning, hook parsing/installation, transcript path validation, first-user-message extraction |
+| `codex_state.go` | Codex local SQLite reader: `StateDBPath()`, `WalkUpToRoot(threadUUID)`, `ListSubtree(rootUUID)`. Used by the hook handler, sync tracker, and `confab save` to discover subagent rollouts and route them to the top-most root |
 
 ## Provider surfaces
 
@@ -21,11 +22,12 @@ This package does **not** define a generic provider interface, a normalized hook
 
 ### `Codex`
 - Paths: `StateDir` (override via `CONFAB_CODEX_DIR`), `SessionsDir`, `ConfigPath`.
-- Rollout discovery: `SessionIDFromRolloutPath`, `ScanSessions`, `FindSessionByID`, `ReadSessionInfo`, internal `walkRollouts` helper.
+- Rollout discovery: `SessionIDFromRolloutPath`, `ScanSessions`, `FindSessionByID` (user sessions only), `FindRolloutByID` (any rollout — used by `confab save` to accept subagent UUIDs), `ReadSessionInfo`, internal `walkRollouts` helper.
 - Filtering: `CodexSessionInfo.IsUserSession()` excludes subagents/memory rollouts by `thread_source` and `agent_*` metadata.
 - Hooks: `ReadHookInput`, `ReadSessionHookInput`, `InstallHooks`/`UninstallHooks` for `~/.codex/config.toml` (preserves user config, makes backups, idempotent, enables `features.hooks = true`, removes deprecated `features.codex_hooks`).
 - Transcript metadata: `ExtractFirstUserMessageFromLines` reads the first `event_msg.user_message` from rollout lines, trims whitespace, and truncates to `types.MaxFirstUserMessageLength` on a UTF-8 boundary.
 - Path validation: `ValidateRolloutPath` requires an absolute path under `SessionsDir` matching `rollout-<timestamp>-<uuid>.jsonl`.
+- Local state DB (`codex_state.go`): reads Codex's `~/.codex/state_*.sqlite` (read-only, highest numeric suffix wins; `CONFAB_CODEX_STATE_DB` overrides). `WalkUpToRoot(threadUUID)` walks the `thread_spawn_edges` chain to the top-most root with a 5×50ms retry budget for the spawn-vs-edge race (and a `thread_source='user'` fast-path that skips retries for known roots). `ListSubtree(rootUUID)` returns every descendant via a recursive CTE. All paths degrade gracefully when the DB is unavailable — callers see `(threadUUID, "", nil)` for `WalkUpToRoot` and a nil slice for `ListSubtree`.
 
 ## Invariants
 
@@ -37,6 +39,8 @@ This package does **not** define a generic provider interface, a normalized hook
 - `truncateUTF8Bytes` never returns a string longer than `maxBytes`, even on invalid UTF-8 input.
 - `Codex.IsUserSession` filters out subagents and memory rollouts so `ScanSessions` only surfaces top-level user sessions.
 - `Codex.InstallHooks` is idempotent and never strips unmanaged Codex config sections.
+- `Codex.WalkUpToRoot` is the single point that converts a firing thread UUID to its top-most root. All Codex daemon spawning and `confab save` invocations route through it, so subagent rollouts always upload under the root's session — never as orphan sessions.
+- `Codex.WalkUpToRoot` never returns the empty string for the root UUID; on any failure mode (no DB, schema mismatch, edge-race exhausted) it returns the input thread UUID so callers can keep moving.
 - Parent PID detection is Claude-specific and not part of a generic provider interface.
 
 ## Used By

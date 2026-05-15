@@ -639,3 +639,93 @@ func TestShutdownTimeout(t *testing.T) {
 		t.Fatal("shutdown hung - timeout did not work")
 	}
 }
+
+// =================================================================================================
+// Codex-aware state keying (CF-387). The Codex hook handler walks subagent
+// SessionStart events up to the root before calling spawn, so by the time
+// state files get written, the externalID is always the root's. These
+// tests pin that contract: Codex state files are stored under the codex
+// provider namespace using ROOT UUID as the key, with provider isolation
+// from Claude.
+// =================================================================================================
+
+func TestDaemon_StateFileKeyedByRootUUID_NotFiringSessionUUID(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	rootUUID := "11111111-1111-1111-1111-111111111111"
+	state := NewStateForProvider("codex", rootUUID, "/work/rollout-root.jsonl", "/work", 0)
+	state.PID = 1234
+	if err := state.Save(); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	got, err := GetStatePathForProvider("codex", rootUUID)
+	if err != nil {
+		t.Fatalf("path: %v", err)
+	}
+	if _, err := os.Stat(got); err != nil {
+		t.Errorf("state file not at %q: %v", got, err)
+	}
+}
+
+func TestDaemon_LoadStateByRootUUID_FindsExistingDaemon(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	rootUUID := "22222222-2222-2222-2222-222222222222"
+	original := NewStateForProvider("codex", rootUUID, "/work/rollout-root.jsonl", "/work", 0)
+	original.PID = os.Getpid() // alive
+	if err := original.Save(); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	loaded, err := LoadStateForProvider("codex", rootUUID)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if loaded == nil {
+		t.Fatal("LoadStateForProvider returned nil")
+	}
+	if loaded.ExternalID != rootUUID {
+		t.Errorf("external_id = %q, want %q", loaded.ExternalID, rootUUID)
+	}
+	if loaded.Provider != "codex" {
+		t.Errorf("provider = %q, want codex", loaded.Provider)
+	}
+	if !loaded.IsDaemonRunning() {
+		t.Error("expected daemon to look alive (PID = self)")
+	}
+}
+
+func TestDaemon_StateProviderIsolation_ClaudeAndCodexCoexist(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	sharedID := "33333333-3333-3333-3333-333333333333"
+	claudeState := NewStateForProvider("claude-code", sharedID, "/work/transcript.jsonl", "/work", 0)
+	claudeState.PID = 1111
+	if err := claudeState.Save(); err != nil {
+		t.Fatalf("save claude: %v", err)
+	}
+	codexState := NewStateForProvider("codex", sharedID, "/work/rollout-root.jsonl", "/work", 0)
+	codexState.PID = 2222
+	if err := codexState.Save(); err != nil {
+		t.Fatalf("save codex: %v", err)
+	}
+
+	gotClaude, err := LoadStateForProvider("claude-code", sharedID)
+	if err != nil || gotClaude == nil {
+		t.Fatalf("load claude: %v %v", err, gotClaude)
+	}
+	gotCodex, err := LoadStateForProvider("codex", sharedID)
+	if err != nil || gotCodex == nil {
+		t.Fatalf("load codex: %v %v", err, gotCodex)
+	}
+	if gotClaude.PID == gotCodex.PID {
+		t.Errorf("provider state files crossed wires (both PID=%d)", gotClaude.PID)
+	}
+	if gotClaude.TranscriptPath == gotCodex.TranscriptPath {
+		t.Errorf("provider state files crossed wires (both transcript=%q)", gotClaude.TranscriptPath)
+	}
+}

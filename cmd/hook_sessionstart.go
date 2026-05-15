@@ -125,10 +125,33 @@ func codexSessionStartFromReader(r io.Reader) error {
 	fmt.Fprintln(os.Stderr, "=== Confab: Starting Codex Sync Daemon ===")
 	fmt.Fprintln(os.Stderr)
 
-	hookInput, err := provider.Codex{}.ReadSessionHookInput(r)
+	codex := provider.Codex{}
+	hookInput, err := codex.ReadSessionHookInput(r)
 	if err != nil {
 		logger.ErrorPrint("Error reading Codex hook input: %v", err)
 		return nil
+	}
+
+	// Walk up the Codex thread tree to the top-most root. Subagent rollouts
+	// fire their own SessionStart in Codex; left as-is, Confab would spawn an
+	// orphaned daemon per subagent. Rewriting to the root here makes
+	// maybeSpawnCodexDaemon's existing state-file dedup do the right thing:
+	// only one daemon runs per root tree, and it discovers descendants via
+	// the per-cycle SQLite walk in DiscoverCodexDescendants.
+	//
+	// WalkUpToRoot degrades gracefully — if the state DB is unavailable, the
+	// edge race exhausts retries, or the firing thread is already a root,
+	// it returns (firing UUID, "", nil) and we leave the input untouched.
+	if hookInput.SessionID != "" {
+		rootUUID, rootRolloutPath, _ := codex.WalkUpToRoot(hookInput.SessionID)
+		if rootUUID != "" && rootUUID != hookInput.SessionID {
+			logger.Info("Codex SessionStart hook resolved to root: firing=%s root=%s rollout=%s",
+				hookInput.SessionID, rootUUID, rootRolloutPath)
+			hookInput.SessionID = rootUUID
+			if rootRolloutPath != "" {
+				hookInput.TranscriptPath = rootRolloutPath
+			}
+		}
 	}
 
 	sessionPrefix := hookInput.SessionID

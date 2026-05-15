@@ -2108,3 +2108,360 @@ func TestDaemonSessionDeletedRecovery(t *testing.T) {
 
 	t.Logf("404 recovery test: daemon survived %d chunk requests (first 2 were 404s)", chunks)
 }
+
+// =================================================================================================
+// Codex daemon integration tests (CF-387)
+//
+// These exercise the daemon end-to-end with a Codex root rollout + an
+// in-memory SQLite fixture for descendant discovery. The daemon should:
+//   - upload the root rollout as file_type=transcript
+//   - discover descendants on each cycle via DiscoverCodexDescendants
+//   - upload children as file_type=agent under the root's session
+//   - attach codex_rollout metadata to the FIRST chunk of every rollout
+// =================================================================================================
+
+// setupCodexDaemonEnv combines a codextest fixture with the daemon's
+// HOME-based config (config.json + sync state dir).
+func setupCodexDaemonEnv(t *testing.T, backendURL string) *codextestFixtureShim {
+	t.Helper()
+	tmpHome := t.TempDir()
+
+	// Config + auth.
+	confabDir := filepath.Join(tmpHome, ".confab")
+	if err := os.MkdirAll(confabDir, 0o755); err != nil {
+		t.Fatalf("mkdir confab dir: %v", err)
+	}
+	cfg := fmt.Sprintf(`{"backend_url":"%s","api_key":"test-api-key-12345678"}`, backendURL)
+	if err := os.WriteFile(filepath.Join(confabDir, "config.json"), []byte(cfg), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	t.Setenv("CONFAB_CONFIG_PATH", filepath.Join(confabDir, "config.json"))
+	t.Setenv("HOME", tmpHome)
+
+	return newCodexFixtureShim(t)
+}
+
+func TestDaemonIntegration_CodexRoot_NoChildren_FullLifecycle(t *testing.T) {
+	mock := newMockBackend(t)
+	server := httptest.NewServer(mock)
+	defer server.Close()
+
+	shim := setupCodexDaemonEnv(t, server.URL)
+	root := shim.addRoot("11111111-1111-1111-1111-111111111111", "hello root")
+
+	d := New(Config{
+		Provider:           "codex",
+		ExternalID:         root.threadUUID,
+		TranscriptPath:     root.rolloutPath,
+		CWD:                "/work",
+		SyncInterval:       50 * time.Millisecond,
+		SyncIntervalJitter: 0,
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	errCh := make(chan error, 1)
+	go func() { errCh <- d.Run(ctx) }()
+	time.Sleep(300 * time.Millisecond)
+	cancel()
+	<-errCh
+
+	initReqs := mock.getInitRequests()
+	if len(initReqs) == 0 || initReqs[0].Provider != "codex" {
+		t.Fatalf("init request not for codex: %+v", initReqs)
+	}
+	if initReqs[0].ExternalID != root.threadUUID {
+		t.Errorf("external_id = %q, want %q", initReqs[0].ExternalID, root.threadUUID)
+	}
+
+	chunkReqs := mock.getChunkRequests()
+	if len(chunkReqs) < 1 {
+		t.Fatalf("no chunk uploaded; got %d", len(chunkReqs))
+	}
+	got := chunkReqs[0]
+	if got.FileType != "transcript" {
+		t.Errorf("file_type = %q, want transcript", got.FileType)
+	}
+	if got.Metadata == nil || got.Metadata.CodexRollout == nil {
+		t.Fatal("first chunk should carry codex_rollout meta")
+	}
+	if got.Metadata.CodexRollout.ThreadUUID != root.threadUUID {
+		t.Errorf("codex_rollout.thread_uuid = %q, want %q",
+			got.Metadata.CodexRollout.ThreadUUID, root.threadUUID)
+	}
+	if got.Metadata.CodexRollout.ParentThreadUUID != "" {
+		t.Errorf("root codex_rollout.parent_thread_uuid = %q, want empty",
+			got.Metadata.CodexRollout.ParentThreadUUID)
+	}
+}
+
+func TestDaemonIntegration_CodexRoot_TwoChildren_FullLifecycle(t *testing.T) {
+	mock := newMockBackend(t)
+	server := httptest.NewServer(mock)
+	defer server.Close()
+
+	shim := setupCodexDaemonEnv(t, server.URL)
+	root := shim.addRoot("22222222-2222-2222-2222-222222222222", "root msg")
+	childA := shim.addChild(root.threadUUID, "33333333-3333-3333-3333-333333333333", "child a", "reviewer")
+	childB := shim.addChild(root.threadUUID, "44444444-4444-4444-4444-444444444444", "child b", "planner")
+
+	d := New(Config{
+		Provider:           "codex",
+		ExternalID:         root.threadUUID,
+		TranscriptPath:     root.rolloutPath,
+		CWD:                "/work",
+		SyncInterval:       50 * time.Millisecond,
+		SyncIntervalJitter: 0,
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	errCh := make(chan error, 1)
+	go func() { errCh <- d.Run(ctx) }()
+	time.Sleep(400 * time.Millisecond)
+	cancel()
+	<-errCh
+
+	chunkReqs := mock.getChunkRequests()
+	seenFiles := map[string]sync.ChunkRequest{}
+	for _, req := range chunkReqs {
+		// Only keep the first chunk seen per file — that's the one expected
+		// to carry codex_rollout meta.
+		if _, dup := seenFiles[req.FileName]; !dup {
+			seenFiles[req.FileName] = req
+		}
+	}
+	rootChunk, ok := seenFiles[filepath.Base(root.rolloutPath)]
+	if !ok {
+		t.Fatal("root rollout never uploaded")
+	}
+	if rootChunk.FileType != "transcript" {
+		t.Errorf("root file_type = %q, want transcript", rootChunk.FileType)
+	}
+	for _, c := range []codexShimEntry{childA, childB} {
+		chunk, ok := seenFiles[filepath.Base(c.rolloutPath)]
+		if !ok {
+			t.Errorf("child %s never uploaded", c.threadUUID)
+			continue
+		}
+		if chunk.FileType != "agent" {
+			t.Errorf("child %s file_type = %q, want agent", c.threadUUID, chunk.FileType)
+		}
+		if chunk.Metadata == nil || chunk.Metadata.CodexRollout == nil {
+			t.Errorf("child %s first chunk missing codex_rollout meta", c.threadUUID)
+			continue
+		}
+		if chunk.Metadata.CodexRollout.ParentThreadUUID != root.threadUUID {
+			t.Errorf("child %s parent = %q, want %q", c.threadUUID,
+				chunk.Metadata.CodexRollout.ParentThreadUUID, root.threadUUID)
+		}
+	}
+}
+
+func TestDaemonIntegration_CodexDeepTree_3Levels_FullLifecycle(t *testing.T) {
+	mock := newMockBackend(t)
+	server := httptest.NewServer(mock)
+	defer server.Close()
+
+	shim := setupCodexDaemonEnv(t, server.URL)
+	root := shim.addRoot("55555555-5555-5555-5555-555555555555", "root")
+	mid := shim.addChild(root.threadUUID, "66666666-6666-6666-6666-666666666666", "mid", "mid-role")
+	leaf := shim.addChild(mid.threadUUID, "77777777-7777-7777-7777-777777777777", "leaf", "leaf-role")
+
+	d := New(Config{
+		Provider:           "codex",
+		ExternalID:         root.threadUUID,
+		TranscriptPath:     root.rolloutPath,
+		CWD:                "/work",
+		SyncInterval:       50 * time.Millisecond,
+		SyncIntervalJitter: 0,
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	errCh := make(chan error, 1)
+	go func() { errCh <- d.Run(ctx) }()
+	time.Sleep(400 * time.Millisecond)
+	cancel()
+	<-errCh
+
+	// Build parent map from emitted metadata (first chunk per file).
+	parentOf := map[string]string{}
+	for _, req := range mock.getChunkRequests() {
+		if req.Metadata == nil || req.Metadata.CodexRollout == nil {
+			continue
+		}
+		uuid := req.Metadata.CodexRollout.ThreadUUID
+		if _, seen := parentOf[uuid]; seen {
+			continue // only count first chunk per rollout
+		}
+		parentOf[uuid] = req.Metadata.CodexRollout.ParentThreadUUID
+	}
+	if got := parentOf[mid.threadUUID]; got != root.threadUUID {
+		t.Errorf("mid.parent = %q, want %q", got, root.threadUUID)
+	}
+	if got := parentOf[leaf.threadUUID]; got != mid.threadUUID {
+		t.Errorf("leaf.parent = %q, want %q (immediate parent, not root)",
+			got, mid.threadUUID)
+	}
+	if got, ok := parentOf[root.threadUUID]; !ok || got != "" {
+		t.Errorf("root.parent = (%q, %v), want (\"\", true)", got, ok)
+	}
+}
+
+func TestDaemonIntegration_CodexNewChildAppears_DuringRun_PickedUpWithinOneCycle(t *testing.T) {
+	mock := newMockBackend(t)
+	server := httptest.NewServer(mock)
+	defer server.Close()
+
+	shim := setupCodexDaemonEnv(t, server.URL)
+	root := shim.addRoot("88888888-8888-8888-8888-888888888888", "root")
+
+	d := New(Config{
+		Provider:           "codex",
+		ExternalID:         root.threadUUID,
+		TranscriptPath:     root.rolloutPath,
+		CWD:                "/work",
+		SyncInterval:       80 * time.Millisecond,
+		SyncIntervalJitter: 0,
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	errCh := make(chan error, 1)
+	go func() { errCh <- d.Run(ctx) }()
+
+	// Wait long enough for the first cycle to have happened with no children.
+	time.Sleep(200 * time.Millisecond)
+	beforeCount := len(mock.getChunkRequests())
+
+	// Subagent appears in SQLite mid-run.
+	late := shim.addChild(root.threadUUID, "99999999-9999-9999-9999-999999999999", "late arrival", "late")
+
+	// Wait for at least one more sync cycle.
+	time.Sleep(400 * time.Millisecond)
+	cancel()
+	<-errCh
+
+	afterCount := len(mock.getChunkRequests())
+	if afterCount <= beforeCount {
+		t.Fatalf("no new chunks after subagent appeared (before=%d after=%d)", beforeCount, afterCount)
+	}
+	// Find the late child's first chunk.
+	var lateChunk *sync.ChunkRequest
+	for i, req := range mock.getChunkRequests() {
+		if req.FileName == filepath.Base(late.rolloutPath) {
+			lateChunk = &mock.getChunkRequests()[i]
+			break
+		}
+	}
+	if lateChunk == nil {
+		t.Fatal("late subagent never uploaded")
+	}
+	if lateChunk.FileType != "agent" {
+		t.Errorf("late file_type = %q, want agent", lateChunk.FileType)
+	}
+	if lateChunk.Metadata == nil || lateChunk.Metadata.CodexRollout == nil {
+		t.Fatal("late chunk missing codex_rollout meta")
+	}
+	if lateChunk.Metadata.CodexRollout.ParentThreadUUID != root.threadUUID {
+		t.Errorf("late.parent = %q, want %q",
+			lateChunk.Metadata.CodexRollout.ParentThreadUUID, root.threadUUID)
+	}
+}
+
+func TestDaemonIntegration_CodexBackendDown_DaemonRetries_AllChildrenSyncedOnRecovery(t *testing.T) {
+	mock := newMockBackend(t)
+	mock.failUntilCount = 2 // first 2 requests get 503; daemon retries.
+	server := httptest.NewServer(mock)
+	defer server.Close()
+
+	shim := setupCodexDaemonEnv(t, server.URL)
+	root := shim.addRoot("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", "r")
+	child := shim.addChild(root.threadUUID, "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb", "c", "x")
+
+	d := New(Config{
+		Provider:           "codex",
+		ExternalID:         root.threadUUID,
+		TranscriptPath:     root.rolloutPath,
+		CWD:                "/work",
+		SyncInterval:       80 * time.Millisecond,
+		SyncIntervalJitter: 0,
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	errCh := make(chan error, 1)
+	go func() { errCh <- d.Run(ctx) }()
+
+	time.Sleep(1 * time.Second) // enough for retries to succeed.
+	cancel()
+	<-errCh
+
+	totalRequests := atomic.LoadInt32(&mock.requestCount)
+	if totalRequests < 3 {
+		t.Errorf("expected ≥3 requests (failures + recovery), got %d", totalRequests)
+	}
+	chunkReqs := mock.getChunkRequests()
+	seen := map[string]bool{}
+	for _, req := range chunkReqs {
+		seen[req.FileName] = true
+	}
+	if !seen[filepath.Base(root.rolloutPath)] {
+		t.Errorf("root never uploaded after recovery; chunks=%v", seen)
+	}
+	if !seen[filepath.Base(child.rolloutPath)] {
+		t.Errorf("child never uploaded after recovery; chunks=%v", seen)
+	}
+}
+
+func TestDaemonIntegration_Codex_ShutdownPath_FinalSyncIncludesChildren(t *testing.T) {
+	mock := newMockBackend(t)
+	server := httptest.NewServer(mock)
+	defer server.Close()
+
+	shim := setupCodexDaemonEnv(t, server.URL)
+	root := shim.addRoot("cccccccc-cccc-cccc-cccc-cccccccccccc", "r")
+
+	d := New(Config{
+		Provider:           "codex",
+		ExternalID:         root.threadUUID,
+		TranscriptPath:     root.rolloutPath,
+		CWD:                "/work",
+		// Long interval — we deliberately do NOT want a regular tick to fire
+		// after the late child appears. Final SyncAll on shutdown must be
+		// the one that discovers and uploads the late child.
+		SyncInterval:       5 * time.Second,
+		SyncIntervalJitter: 0,
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	errCh := make(chan error, 1)
+	go func() { errCh <- d.Run(ctx) }()
+
+	// Wait for the first (immediate) cycle to happen with no children.
+	time.Sleep(300 * time.Millisecond)
+	preShutdown := mock.getChunkRequests()
+	if len(preShutdown) < 1 {
+		t.Fatalf("expected at least the root to upload on first cycle, got %d", len(preShutdown))
+	}
+
+	// Add a child AFTER the last regular cycle, then signal shutdown.
+	late := shim.addChild(root.threadUUID, "dddddddd-dddd-dddd-dddd-dddddddddddd",
+		"late", "late-role")
+	cancel() // triggers shutdown → final sync
+	<-errCh
+
+	// Final sync should have uploaded the late child.
+	var found bool
+	for _, req := range mock.getChunkRequests() {
+		if req.FileName == filepath.Base(late.rolloutPath) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("final sync did not include late child %s", late.threadUUID)
+	}
+}

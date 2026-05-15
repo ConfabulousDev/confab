@@ -120,6 +120,25 @@ func (p Codex) ScanSessions() ([]CodexSessionInfo, error) {
 }
 
 func (p Codex) FindSessionByID(partialID string) (string, string, error) {
+	id, path, err := p.findRolloutByID(partialID, true)
+	return id, path, err
+}
+
+// FindRolloutByID is like FindSessionByID but accepts subagent rollouts as
+// well as user-initiated ones. Callers that want to support `confab save
+// <subagent-uuid>` (then transparently walk up to the root) should use this.
+//
+// The returned id + path refer to the rollout the partial ID resolved to;
+// they are NOT walked up to the root. Use WalkUpToRoot on the result if
+// you want the top-most user session.
+func (p Codex) FindRolloutByID(partialID string) (string, string, error) {
+	return p.findRolloutByID(partialID, false)
+}
+
+// findRolloutByID is the shared implementation: scans the sessions directory
+// for rollouts whose filename UUID matches partialID, optionally filtering
+// out non-user (subagent) rollouts.
+func (p Codex) findRolloutByID(partialID string, userOnly bool) (string, string, error) {
 	sessionsDir, err := p.SessionsDir()
 	if err != nil {
 		return "", "", err
@@ -152,7 +171,7 @@ func (p Codex) FindSessionByID(partialID string) (string, string, error) {
 	if err != nil {
 		return "", "", err
 	}
-	if !info.IsUserSession() {
+	if userOnly && !info.IsUserSession() {
 		return "", "", fmt.Errorf("session not found: %s", partialID)
 	}
 	return matches[0].id, matches[0].path, nil

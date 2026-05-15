@@ -14,7 +14,7 @@ Sync engine that orchestrates incremental transcript uploads to the backend. Han
 ## Three Components
 
 ### Engine (orchestrator)
-`Engine.Init()` registers the session with the backend, receiving the current sync state (last synced line per file). `Engine.SyncAll()` performs a BFS traversal: for each tracked file, it checks for changes, reads a chunk, extracts metadata, uploads, and discovers new agent files. New agent files are added to the queue for the next iteration.
+`Engine.Init()` registers the session with the backend, receiving the current sync state (last synced line per file). For Codex, `Init` additionally attaches `CodexRolloutMetadata` to the root rollout's `TrackedFile` so the very first chunk uploaded carries `codex_rollout` metadata. `Engine.SyncAll()` performs a BFS traversal: for each tracked file, it checks for changes, reads a chunk, extracts metadata, uploads, and discovers new agent files. New agent files are added to the queue for the next iteration. For Codex sessions, `SyncAll` runs a per-cycle SQLite walk (`tracker.DiscoverCodexDescendants`) at the top of the loop to pick up new subagent rollouts; descendants are uploaded as `file_type=agent` sidechain files under the root's backend session.
 
 ### Client (API)
 Thin wrapper around `pkg/http.Client` that marshals/unmarshals request types for the sync API endpoints: `/api/v1/sync/init`, `/api/v1/sync/chunk`, `/api/v1/sync/event`, and session-specific endpoints for summaries and GitHub links.
@@ -58,6 +58,8 @@ SyncAll() loop:
 
 **Tracking a new file type:** Add discovery logic in `DiscoverNewFiles()`. Set the file type in `TrackedFile.Type`. The rest of the pipeline (read, chunk, upload) is file-type agnostic.
 
+**Codex subagent discovery:** Codex doesn't reference subagents via transcript content (unlike Claude's agent IDs), so the tracker has a dedicated `DiscoverCodexDescendants(rootThreadUUID)` method that queries the local Codex SQLite state DB (`pkg/provider.Codex.ListSubtree`). The engine calls it once per `SyncAll` cycle for Codex sessions; newly-discovered subagent rollouts are registered as `file_type=agent` with their `CodexRollout` metadata pre-populated so the next chunk upload carries the `codex_rollout` payload.
+
 ## Invariants
 
 - **Chunks must not exceed 14MB** (`DefaultMaxChunkBytes`). The backend rejects larger payloads. The limit is 14MB not 16MB to leave headroom for JSON encoding overhead.
@@ -68,6 +70,7 @@ SyncAll() loop:
 - **Metadata is extracted before redaction, then redacted.** Summaries and first user messages need the original text for meaningful extraction, but must be redacted before upload.
 - **Byte offsets must be maintained accurately.** `ReadChunk` returns `NewOffset` which is the byte position after the last line read. `UpdateAfterSync` stores this for the next read. Incorrect offsets cause duplicate or missing lines.
 - **Directory scan in `DiscoverNewFiles` catches agents from already-synced lines.** After a daemon restart, agent IDs from previously-synced lines are lost from memory. The directory scan recovers them.
+- **`codex_rollout` metadata rides on first chunks only.** The engine emits `ChunkMetadata.CodexRollout` whenever `chunk.FirstLine == 1` for a Codex rollout (root or descendant). On retry after a failed upload, `FirstLine` remains 1 so the metadata is automatically resent — the backend upsert is idempotent. `InitFromBackendState` preserves `TrackedFile.CodexRollout` across `refreshStateFromBackend` so retries don't lose the payload.
 
 ## Design Decisions
 

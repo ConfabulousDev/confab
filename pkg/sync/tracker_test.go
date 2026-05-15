@@ -5,7 +5,26 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/ConfabulousDev/confab/pkg/codextest"
+	"github.com/ConfabulousDev/confab/pkg/provider"
 )
+
+// Local helpers used by Codex rollout tests below — keep them lightweight
+// shims so the tests stay readable.
+func newCodexFixture(t *testing.T) *codextest.Fixture {
+	t.Helper()
+	return codextest.NewFixture(t)
+}
+
+func codextestSubagentOpts(role, nickname string) codextest.SubagentOpts {
+	return codextest.SubagentOpts{AgentRole: role, AgentNickname: nickname}
+}
+
+func invokeProviderReset() error {
+	provider.ResetStateDBPathCacheForTest()
+	return nil
+}
 
 func TestNewFileTracker(t *testing.T) {
 	ft := NewFileTracker("/path/to/transcript.jsonl")
@@ -1065,5 +1084,257 @@ func TestFileTracker_ReadChunk_ByteLimitRespectsLineNumber(t *testing.T) {
 	// Verify we got all 6 lines
 	if expectedLine != 7 {
 		t.Errorf("expected to end at line 7, ended at %d", expectedLine)
+	}
+}
+
+// ============================================================================
+// Codex rollout tracking (CF-387)
+// ============================================================================
+
+func TestFileTracker_AddCodexRollout_RootAsTranscriptType(t *testing.T) {
+	tr := NewFileTracker("/irrelevant.jsonl")
+	meta := CodexRolloutMetadata{
+		ThreadUUID:  "root-uuid",
+		RolloutPath: "/codex/sessions/.../rollout-root.jsonl",
+	}
+	got := tr.AddCodexRollout("/codex/sessions/.../rollout-root.jsonl", "rollout-root.jsonl", true, meta)
+	if got.Type != "transcript" {
+		t.Errorf("Type = %q, want transcript (isRoot=true)", got.Type)
+	}
+	if got.Name != "rollout-root.jsonl" {
+		t.Errorf("Name = %q, want rollout-root.jsonl", got.Name)
+	}
+	if got.CodexRollout == nil || got.CodexRollout.ThreadUUID != "root-uuid" {
+		t.Errorf("CodexRollout not preserved on tracked file: %+v", got.CodexRollout)
+	}
+}
+
+func TestFileTracker_AddCodexRollout_ChildAsAgentType(t *testing.T) {
+	tr := NewFileTracker("/irrelevant.jsonl")
+	meta := CodexRolloutMetadata{
+		ThreadUUID:       "child-uuid",
+		ParentThreadUUID: "root-uuid",
+		RolloutPath:      "/codex/sessions/.../rollout-child.jsonl",
+		AgentRole:        "planner",
+	}
+	got := tr.AddCodexRollout("/codex/sessions/.../rollout-child.jsonl", "rollout-child.jsonl", false, meta)
+	if got.Type != "agent" {
+		t.Errorf("Type = %q, want agent (isRoot=false)", got.Type)
+	}
+	if got.CodexRollout.ParentThreadUUID != "root-uuid" {
+		t.Errorf("ParentThreadUUID = %q, want root-uuid", got.CodexRollout.ParentThreadUUID)
+	}
+	if got.CodexRollout.AgentRole != "planner" {
+		t.Errorf("AgentRole = %q, want planner", got.CodexRollout.AgentRole)
+	}
+}
+
+func TestFileTracker_AddCodexRollout_IdempotentOnRepeatedAdd_SamePath(t *testing.T) {
+	tr := NewFileTracker("/irrelevant.jsonl")
+	meta := CodexRolloutMetadata{ThreadUUID: "x", RolloutPath: "/path.jsonl"}
+	first := tr.AddCodexRollout("/path.jsonl", "path.jsonl", true, meta)
+	// Pretend the second call has different (wrong) metadata — first call should win.
+	wrongMeta := CodexRolloutMetadata{ThreadUUID: "y", RolloutPath: "/path.jsonl"}
+	second := tr.AddCodexRollout("/path.jsonl", "path.jsonl", false, wrongMeta)
+	if first != second {
+		t.Errorf("second AddCodexRollout returned a different *TrackedFile; expected idempotent")
+	}
+	if second.CodexRollout.ThreadUUID != "x" {
+		t.Errorf("metadata mutated on second call: got %q, want x", second.CodexRollout.ThreadUUID)
+	}
+	if got := len(tr.GetTrackedFiles()); got != 1 {
+		t.Errorf("tracked files = %d, want 1", got)
+	}
+}
+
+func TestFileTracker_AddCodexRollout_DistinctPaths_AddsBoth(t *testing.T) {
+	tr := NewFileTracker("/irrelevant.jsonl")
+	tr.AddCodexRollout("/a.jsonl", "a.jsonl", true, CodexRolloutMetadata{ThreadUUID: "a", RolloutPath: "/a.jsonl"})
+	tr.AddCodexRollout("/b.jsonl", "b.jsonl", false, CodexRolloutMetadata{ThreadUUID: "b", RolloutPath: "/b.jsonl", ParentThreadUUID: "a"})
+	if got := len(tr.GetTrackedFiles()); got != 2 {
+		t.Errorf("tracked files = %d, want 2", got)
+	}
+}
+
+func TestFileTracker_DiscoverCodexDescendants_NoFixture_ReturnsEmpty(t *testing.T) {
+	// Point CONFAB_CODEX_DIR at an empty directory so no state DB resolves.
+	t.Setenv("CONFAB_CODEX_DIR", t.TempDir())
+	t.Setenv("CONFAB_CODEX_STATE_DB", "")
+	// Reset the cache so the empty dir is picked up fresh.
+	_ = invokeProviderReset()
+
+	tr := NewFileTracker("/irrelevant.jsonl")
+	got, err := tr.DiscoverCodexDescendants("any-root")
+	if err != nil {
+		t.Fatalf("DiscoverCodexDescendants: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("DiscoverCodexDescendants = %v, want empty", got)
+	}
+}
+
+func TestFileTracker_DiscoverCodexDescendants_HappyPath_OneRoot_TwoChildren(t *testing.T) {
+	f := newCodexFixture(t)
+	root := f.AddRoot("root-uuid").WithSessionMeta("/work", "model")
+	childA := f.AddSubagent(root.ThreadUUID(), "child-a", codextestSubagentOpts("planner-a", "Planny-A")).
+		WithSessionMeta("/work", "model")
+	childB := f.AddSubagent(root.ThreadUUID(), "child-b", codextestSubagentOpts("planner-b", "Planny-B")).
+		WithSessionMeta("/work", "model")
+
+	tr := NewFileTracker(root.Path())
+	tr.InitFromBackendState(nil)
+
+	got, err := tr.DiscoverCodexDescendants(root.ThreadUUID())
+	if err != nil {
+		t.Fatalf("DiscoverCodexDescendants: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("DiscoverCodexDescendants returned %d files, want 2", len(got))
+	}
+	paths := map[string]bool{}
+	for _, f := range got {
+		paths[f.Path] = true
+		if f.Type != "agent" {
+			t.Errorf("file %s Type = %q, want agent", f.Name, f.Type)
+		}
+		if f.CodexRollout == nil || f.CodexRollout.ParentThreadUUID != root.ThreadUUID() {
+			t.Errorf("file %s parent meta wrong: %+v", f.Name, f.CodexRollout)
+		}
+	}
+	if !paths[childA.Path()] || !paths[childB.Path()] {
+		t.Errorf("missing child paths: got %v", paths)
+	}
+}
+
+func TestFileTracker_DiscoverCodexDescendants_DeepTree_AllAddedAsAgents(t *testing.T) {
+	f := newCodexFixture(t)
+	root := f.AddRoot("R").WithSessionMeta("/", "m")
+	f.AddSubagent("R", "B", codextestSubagentOpts("r-b", "B")).WithSessionMeta("/", "m")
+	f.AddSubagent("B", "C", codextestSubagentOpts("r-c", "C")).WithSessionMeta("/", "m")
+
+	tr := NewFileTracker(root.Path())
+	tr.InitFromBackendState(nil)
+
+	got, err := tr.DiscoverCodexDescendants(root.ThreadUUID())
+	if err != nil {
+		t.Fatalf("DiscoverCodexDescendants: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("DiscoverCodexDescendants returned %d, want 2 (B + C)", len(got))
+	}
+	for _, f := range got {
+		if f.Type != "agent" {
+			t.Errorf("file %s Type = %q, want agent (descendants at any depth are agents)", f.Name, f.Type)
+		}
+	}
+	// Verify B.parent=R and C.parent=B (immediate parent preserved)
+	parents := map[string]string{}
+	for _, f := range got {
+		parents[f.CodexRollout.ThreadUUID] = f.CodexRollout.ParentThreadUUID
+	}
+	if parents["B"] != "R" {
+		t.Errorf("B.parent = %q, want R", parents["B"])
+	}
+	if parents["C"] != "B" {
+		t.Errorf("C.parent = %q, want B (immediate)", parents["C"])
+	}
+}
+
+func TestFileTracker_DiscoverCodexDescendants_IdempotentAcrossCycles_OnlyNewFilesReturned(t *testing.T) {
+	f := newCodexFixture(t)
+	root := f.AddRoot("R").WithSessionMeta("/", "m")
+	f.AddSubagent("R", "A", codextestSubagentOpts("a", "A")).WithSessionMeta("/", "m")
+
+	tr := NewFileTracker(root.Path())
+	tr.InitFromBackendState(nil)
+
+	first, err := tr.DiscoverCodexDescendants(root.ThreadUUID())
+	if err != nil {
+		t.Fatalf("first call: %v", err)
+	}
+	if len(first) != 1 {
+		t.Fatalf("first call returned %d, want 1", len(first))
+	}
+	second, err := tr.DiscoverCodexDescendants(root.ThreadUUID())
+	if err != nil {
+		t.Fatalf("second call: %v", err)
+	}
+	if len(second) != 0 {
+		t.Errorf("second call returned %d, want 0 (already tracked)", len(second))
+	}
+}
+
+func TestFileTracker_DiscoverCodexDescendants_FiltersMissingFiles(t *testing.T) {
+	f := newCodexFixture(t)
+	root := f.AddRoot("R").WithSessionMeta("/", "m")
+	gone := f.AddSubagent("R", "gone", codextestSubagentOpts("g", "G")).WithSessionMeta("/", "m")
+	f.AddSubagent("R", "kept", codextestSubagentOpts("k", "K")).WithSessionMeta("/", "m")
+	f.DeleteRolloutFile(gone.ThreadUUID())
+
+	tr := NewFileTracker(root.Path())
+	tr.InitFromBackendState(nil)
+
+	got, err := tr.DiscoverCodexDescendants(root.ThreadUUID())
+	if err != nil {
+		t.Fatalf("DiscoverCodexDescendants: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("DiscoverCodexDescendants returned %d, want 1 (missing file skipped)", len(got))
+	}
+	if got[0].CodexRollout.ThreadUUID != "kept" {
+		t.Errorf("kept file = %q, want kept", got[0].CodexRollout.ThreadUUID)
+	}
+}
+
+func TestFileTracker_DiscoverCodexDescendants_FiltersNonAgentRollouts(t *testing.T) {
+	f := newCodexFixture(t)
+	root := f.AddRoot("R").WithSessionMeta("/", "m")
+	// A row in the DB says child is a subagent (edge exists), but the
+	// rollout file's session_meta declares thread_source=user with no
+	// agent_* fields — i.e. the rollout itself isn't a real subagent.
+	// DiscoverCodexDescendants should refuse this row.
+	suspect := f.AddSubagent("R", "suspect", codextestSubagentOpts("", "")).
+		WithRawLine(`{"type":"session_meta","payload":{"id":"suspect","thread_source":"user"}}`)
+	_ = suspect
+
+	tr := NewFileTracker(root.Path())
+	tr.InitFromBackendState(nil)
+
+	got, err := tr.DiscoverCodexDescendants(root.ThreadUUID())
+	if err != nil {
+		t.Fatalf("DiscoverCodexDescendants: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("DiscoverCodexDescendants = %v, want empty (suspect filtered by IsUserSession check)", got)
+	}
+}
+
+func TestFileTracker_DiscoverCodexDescendants_NewDescendantAppears_PickedUpOnNextCall(t *testing.T) {
+	f := newCodexFixture(t)
+	root := f.AddRoot("R").WithSessionMeta("/", "m")
+
+	tr := NewFileTracker(root.Path())
+	tr.InitFromBackendState(nil)
+
+	first, err := tr.DiscoverCodexDescendants(root.ThreadUUID())
+	if err != nil {
+		t.Fatalf("first call: %v", err)
+	}
+	if len(first) != 0 {
+		t.Fatalf("first call returned %d, want 0", len(first))
+	}
+
+	// Simulate a subagent spawning between sync cycles.
+	f.AddSubagent("R", "late", codextestSubagentOpts("l", "L")).WithSessionMeta("/", "m")
+
+	second, err := tr.DiscoverCodexDescendants(root.ThreadUUID())
+	if err != nil {
+		t.Fatalf("second call: %v", err)
+	}
+	if len(second) != 1 {
+		t.Errorf("second call returned %d, want 1 (new descendant)", len(second))
+	}
+	if second[0].CodexRollout.ThreadUUID != "late" {
+		t.Errorf("new file = %q, want late", second[0].CodexRollout.ThreadUUID)
 	}
 }
