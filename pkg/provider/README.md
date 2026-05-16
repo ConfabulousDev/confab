@@ -2,15 +2,16 @@
 
 Provider-specific local behavior for the tools Confab integrates with (currently Claude Code and Codex). Each provider is a concrete type that owns its paths, hook parsing, session discovery, and transcript metadata extraction.
 
-This package does **not** define a generic provider interface, a normalized hook model, or a normalized transcript shape. Provider-specific concerns stay in provider-specific code.
+The package defines a `Provider` interface and a `HookInput` interface (Phase 1 of the abstraction work — see CF-394). Both concrete provider types satisfy `Provider`; hook-input adapters in `hookinput.go` satisfy `HookInput`. Most call sites still use the concrete types directly today; CF-396 and CF-397 migrate them to the interface.
 
 ## Files
 
 | File | Role |
 |------|------|
-| `provider.go` | `NameClaudeCode = "claude-code"`, `NameCodex = "codex"`, and `Normalize(name)` for canonical provider names |
-| `claude.go` | `ClaudeCode` — Claude Code paths, hook parsing, transcript path validation, parent process detection |
-| `codex.go` | `Codex` — Codex paths, rollout scanning, hook parsing/installation, transcript path validation, first-user-message extraction |
+| `provider.go` | `Provider` and `HookInput` interfaces, provider name constants (`NameClaudeCode`, `NameCodex`), the registry (`Get(name)`), and `NormalizeName(name)` |
+| `hookinput.go` | `claudeHookInputAdapter` and `codexHookInputAdapter` — wrap the typed structs in `pkg/types` so they satisfy `HookInput`. Required because the structs' existing exported `SessionID` field collides with a `SessionID()` method |
+| `claude.go` | `ClaudeCode` — Claude Code paths, hook parsing, transcript path validation, parent process detection, and the `Provider` interface methods (`Name`, `ParseSessionHook`, `WalkUpToRoot`, `ShouldSpawnForInput`, `InstallHooks`, `UninstallHooks`, `IsHooksInstalled`) |
+| `codex.go` | `Codex` — Codex paths, rollout scanning, hook parsing/installation, transcript path validation, first-user-message extraction, and the `Provider` interface methods (`Name`, `ParseSessionHook`, `ShouldSpawnForInput`, `IsHooksInstalled`). `InstallHooks`/`UninstallHooks`/`WalkUpToRoot` already exist in their concrete form |
 | `codex_state.go` | Codex local SQLite reader: `StateDBPath()`, `WalkUpToRoot(threadUUID)`, `ListSubtree(rootUUID)`. Used by the hook handler, sync tracker, and `confab save` to discover subagent rollouts and route them to the top-most root |
 
 ## Provider surfaces
@@ -39,10 +40,29 @@ Codex fires `Stop` at every agent/turn boundary, including root rollout stops wh
 - `confab hook session-end --provider codex` is rejected with an explicit error pointing users at their `~/.codex/config.toml`.
 - Local state DB (`codex_state.go`): reads Codex's `~/.codex/state_*.sqlite` (read-only, highest numeric suffix wins; `CONFAB_CODEX_STATE_DB` overrides). `WalkUpToRoot(threadUUID)` walks the `thread_spawn_edges` chain to the top-most root with a 5×50ms retry budget for the spawn-vs-edge race (and a `thread_source='user'` fast-path that skips retries for known roots). `ListSubtree(rootUUID)` returns every descendant via a recursive CTE. All paths degrade gracefully when the DB is unavailable — callers see `(threadUUID, "", nil)` for `WalkUpToRoot` and a nil slice for `ListSubtree`.
 
+## `Provider` interface (Phase 1)
+
+Methods every provider must implement:
+
+- `Name() string` — canonical name (one of `NameClaudeCode`, `NameCodex`).
+- `StateDir() (string, error)` — local state directory.
+- `FindParentPID() int`, `IsProcess(pid int) bool` — parent-process detection.
+- `ParseSessionHook(io.Reader) (HookInput, error)` — read a SessionStart hook payload and return the provider-agnostic view. The concrete typed result is recoverable from the adapter's `Inner()` method (currently unexported; CF-396 adds an exported escape hatch when callers need it).
+- `InstallHooks() (string, error)` / `UninstallHooks() (string, error)` / `IsHooksInstalled() (bool, error)` — install/check the full hook set the provider requires (Claude: 4 bundles; Codex: SessionStart only).
+- `WalkUpToRoot(sessionID string) (rootID, rootPath string, error)` — Codex walks `thread_spawn_edges`; Claude is identity with empty `rootPath`.
+- `ShouldSpawnForInput(in HookInput) bool` — Codex returns false for subagent rollouts; Claude always returns true.
+
+Methods deferred to Phase 3 (CF-397) — `AnnotateChunk`, `DiscoverDescendants`, `InitTranscript`. They reference `pkg/sync` types, which would create a circular import. Phase 3 resolves the cycle when it consolidates the engine.go provider branches.
+
+## `Get(name)` and the registry
+
+`Get(name)` returns the registered `Provider` for a canonical name (empty string defaults to `claude-code`). `NormalizeName(name)` is the same lookup but returns the canonical name string. The registry is a package-level read-only map populated at init time — to add a new provider, add its instance to the map and implement the interface.
+
 ## Invariants
 
 - `NameClaudeCode` and `NameCodex` are the canonical wire values. Backend session uniqueness is `(user_id, provider, external_id)`.
-- `Normalize(name)` returns `claude-code` for empty input (legacy default) and rejects unknown providers.
+- `NormalizeName(name)` returns `claude-code` for empty input (legacy default) and rejects unknown providers.
+- `ClaudeStateDirEnv` is duplicated between `pkg/config/paths.go` and `pkg/provider/claude.go` to break a circular import. The two MUST stay in sync; reviewers should catch any drift.
 - `ClaudeCode` preserves existing Claude Code behavior, including `CONFAB_CLAUDE_DIR`.
 - Claude hook parsing returns `types.ClaudeHookInput`; Codex hook parsing returns `types.CodexHookInput`. There is no generic normalized hook payload.
 - `Codex.ExtractFirstUserMessageFromLines` only considers `event_msg.user_message` — the first `response_item.message[role=user]` line in a Codex rollout contains an `<environment_context>` wrapper, not the user's prompt, and must be skipped.
@@ -51,7 +71,7 @@ Codex fires `Stop` at every agent/turn boundary, including root rollout stops wh
 - `Codex.InstallHooks` is idempotent and never strips unmanaged Codex config sections.
 - `Codex.WalkUpToRoot` is the single point that converts a firing thread UUID to its top-most root. All Codex daemon spawning and `confab save` invocations route through it, so subagent rollouts always upload under the root's session — never as orphan sessions.
 - `Codex.WalkUpToRoot` never returns the empty string for the root UUID; on any failure mode (no DB, schema mismatch, edge-race exhausted) it returns the input thread UUID so callers can keep moving.
-- Parent PID detection is provider-specific (`ClaudeCode.FindParentPID`, `Codex.FindParentPID`) and not part of a generic provider interface; both providers share the package-level `getProcCmdline` / `getParentPID` helpers in `claude.go`.
+- Parent PID detection is part of the `Provider` interface (`FindParentPID`, `IsProcess`); the bodies remain provider-specific (different process-name patterns) and share the package-level `getProcCmdline` / `getParentPID` helpers in `claude.go`.
 - `Codex.InstallHooks` installs only `SessionStart`. Daemon shutdown is driven by parent-PID liveness, never by Codex `Stop`.
 
 ## Used By

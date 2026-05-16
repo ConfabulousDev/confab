@@ -367,3 +367,148 @@ func writeCodexRollout(t *testing.T, dir, id, metaFields string) {
 		t.Fatalf("failed to write rollout: %v", err)
 	}
 }
+
+func TestCodexName(t *testing.T) {
+	if got := (Codex{}).Name(); got != NameCodex {
+		t.Fatalf("Name() = %q, want %q", got, NameCodex)
+	}
+}
+
+func TestCodexParseSessionHook(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv(CodexStateDirEnv, tmpDir)
+
+	sessionsDir := filepath.Join(tmpDir, "sessions", "2026", "05", "15")
+	if err := os.MkdirAll(sessionsDir, 0700); err != nil {
+		t.Fatalf("failed to create sessions dir: %v", err)
+	}
+	id := "abcd1234-abcd-1234-abcd-1234abcd1234"
+	rolloutPath := filepath.Join(sessionsDir, "rollout-2026-05-15T10-00-00-"+id+".jsonl")
+	if err := os.WriteFile(rolloutPath, []byte(`{"type":"session_meta","payload":{"id":"`+id+`","thread_source":"user","cwd":"/work"}}`+"\n"), 0600); err != nil {
+		t.Fatalf("failed to write rollout: %v", err)
+	}
+
+	payload := `{"session_id":"` + id + `","transcript_path":"` + rolloutPath + `","cwd":"/work/here","hook_event_name":"session_start"}`
+
+	in, err := (Codex{}).ParseSessionHook(strings.NewReader(payload))
+	if err != nil {
+		t.Fatalf("ParseSessionHook() error = %v", err)
+	}
+	if got := in.SessionID(); got != id {
+		t.Errorf("SessionID() = %q", got)
+	}
+	if got := in.TranscriptPath(); got != rolloutPath {
+		t.Errorf("TranscriptPath() = %q", got)
+	}
+	if got := in.CWD(); got != "/work/here" {
+		t.Errorf("CWD() = %q", got)
+	}
+	if got := in.HookEventName(); got != "session_start" {
+		t.Errorf("HookEventName() = %q", got)
+	}
+
+	adapter, ok := in.(codexHookInputAdapter)
+	if !ok {
+		t.Fatalf("ParseSessionHook returned %T, want codexHookInputAdapter", in)
+	}
+	if adapter.Inner() == nil {
+		t.Fatal("adapter.Inner() returned nil")
+	}
+}
+
+func TestCodexShouldSpawnForInput(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv(CodexStateDirEnv, tmpDir)
+
+	sessionsDir := filepath.Join(tmpDir, "sessions", "2026", "05", "15")
+	if err := os.MkdirAll(sessionsDir, 0700); err != nil {
+		t.Fatalf("failed to create sessions dir: %v", err)
+	}
+
+	userID := "11111111-1111-1111-1111-111111111111"
+	subagentID := "22222222-2222-2222-2222-222222222222"
+	writeCodexRollout(t, sessionsDir, userID, `"thread_source":"user","cwd":"/work/user"`)
+	writeCodexRollout(t, sessionsDir, subagentID, `"thread_source":"subagent","cwd":"/work/agent","agent_role":"reviewer"`)
+
+	userPath := filepath.Join(sessionsDir, "rollout-2026-05-12T18-06-53-"+userID+".jsonl")
+	subagentPath := filepath.Join(sessionsDir, "rollout-2026-05-12T18-06-53-"+subagentID+".jsonl")
+	missingPath := filepath.Join(sessionsDir, "rollout-2026-05-12T18-06-53-99999999-9999-9999-9999-999999999999.jsonl")
+
+	tests := []struct {
+		name           string
+		transcriptPath string
+		want           bool
+	}{
+		{"user session", userPath, true},
+		{"subagent rollout", subagentPath, false},
+		// File-not-yet-written race: permissive (true). Daemon will
+		// re-validate on first sync cycle.
+		{"missing rollout file (spawn race)", missingPath, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			in := codexHookInputAdapter{inner: &types.CodexHookInput{
+				SessionID:      "abcd1234-abcd-1234-abcd-1234abcd1234",
+				TranscriptPath: tt.transcriptPath,
+			}}
+			if got := (Codex{}).ShouldSpawnForInput(in); got != tt.want {
+				t.Fatalf("ShouldSpawnForInput(%s) = %v, want %v", tt.name, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCodexIsHooksInstalled(t *testing.T) {
+	const confabCommand = "/usr/local/bin/confab hook session-start --provider codex"
+	const otherCommand = "/usr/bin/some-other-tool"
+
+	confabHooksTOML := `[features]
+hooks = true
+
+[[hooks.SessionStart]]
+matcher = "startup|resume|clear"
+[[hooks.SessionStart.hooks]]
+type = "command"
+command = "` + confabCommand + `"
+statusMessage = "Starting Confab sync"
+`
+
+	otherHooksTOML := `[features]
+hooks = true
+
+[[hooks.SessionStart]]
+matcher = "startup"
+[[hooks.SessionStart.hooks]]
+type = "command"
+command = "` + otherCommand + `"
+`
+
+	tests := []struct {
+		name    string
+		content string // "" means file is absent
+		want    bool
+	}{
+		{"missing config file", "", false},
+		{"empty config", "# just a comment\n", false},
+		{"confab hooks installed", confabHooksTOML, true},
+		{"non-confab SessionStart hook", otherHooksTOML, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			t.Setenv(CodexStateDirEnv, tmpDir)
+			if tt.content != "" {
+				if err := os.WriteFile(filepath.Join(tmpDir, "config.toml"), []byte(tt.content), 0600); err != nil {
+					t.Fatalf("failed to write config: %v", err)
+				}
+			}
+			got, err := (Codex{}).IsHooksInstalled()
+			if err != nil {
+				t.Fatalf("IsHooksInstalled() error = %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("IsHooksInstalled() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

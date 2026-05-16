@@ -14,11 +14,101 @@ import (
 
 	"github.com/ConfabulousDev/confab/pkg/logger"
 	"github.com/ConfabulousDev/confab/pkg/types"
+	toml "github.com/pelletier/go-toml/v2"
 )
 
 const CodexStateDirEnv = "CONFAB_CODEX_DIR"
 
 type Codex struct{}
+
+var _ Provider = Codex{}
+
+// Name returns the canonical Codex provider name.
+func (Codex) Name() string { return NameCodex }
+
+// ParseSessionHook reads a Codex SessionStart hook payload and returns
+// the provider-agnostic view. The typed payload is recoverable via the
+// adapter's Inner() method.
+func (p Codex) ParseSessionHook(r io.Reader) (HookInput, error) {
+	in, err := p.ReadSessionHookInput(r)
+	if err != nil {
+		return nil, err
+	}
+	return codexHookInputAdapter{inner: in}, nil
+}
+
+// ShouldSpawnForInput inspects the rollout file's session_meta to
+// decide whether the firing hook represents a user-initiated rollout
+// (true) or a subagent (false).
+func (p Codex) ShouldSpawnForInput(in HookInput) bool {
+	info, err := p.ReadSessionInfo(in.TranscriptPath())
+	if err != nil {
+		// TODO: Codex SessionStart can fire before Codex finishes writing
+		// the rollout file (~5–50ms race on a fresh session), so
+		// ReadSessionInfo returns os.IsNotExist and we can't yet tell
+		// user from subagent. Symmetric to the spawn-vs-edge race in
+		// WalkUpToRoot — ideally we'd retry with a short backoff. Current
+		// behavior errs toward over-spawning rather than missing a user
+		// session; the daemon's per-cycle DiscoverCodexDescendants
+		// catches the rest.
+		return true
+	}
+	return info.IsUserSession()
+}
+
+// codexHooksConfig is the minimal TOML schema for IsHooksInstalled.
+// We only inspect [[hooks.SessionStart]].hooks entries to decide
+// whether at least one confab command is registered.
+type codexHooksConfig struct {
+	Hooks struct {
+		SessionStart []struct {
+			Hooks []struct {
+				Type    string `toml:"type"`
+				Command string `toml:"command"`
+			} `toml:"hooks"`
+		} `toml:"SessionStart"`
+	} `toml:"hooks"`
+}
+
+// IsHooksInstalled parses ~/.codex/config.toml and returns true iff a
+// confab command is registered under [[hooks.SessionStart]].
+func (p Codex) IsHooksInstalled() (bool, error) {
+	configPath, err := p.ConfigPath()
+	if err != nil {
+		return false, err
+	}
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("failed to read Codex config: %w", err)
+	}
+	var cfg codexHooksConfig
+	if err := toml.Unmarshal(data, &cfg); err != nil {
+		return false, fmt.Errorf("failed to parse Codex config: %w", err)
+	}
+	for _, group := range cfg.Hooks.SessionStart {
+		for _, h := range group.Hooks {
+			if h.Type == "command" && isConfabCodexCommand(h.Command) {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
+// isConfabCodexCommand reports whether a Codex hook command line invokes
+// the confab binary. The first token is the executable; we check its
+// base name. This mirrors pkg/config.isConfabCommand but lives here so
+// pkg/provider stays independent of pkg/config.
+func isConfabCodexCommand(command string) bool {
+	parts := strings.Fields(command)
+	if len(parts) == 0 {
+		return false
+	}
+	return filepath.Base(parts[0]) == "confab"
+}
 
 // FindParentPID walks up the process tree to find the Codex process.
 // Mirrors ClaudeCode.FindParentPID for daemon parent-liveness monitoring.
