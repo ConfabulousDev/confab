@@ -128,6 +128,21 @@ func (t *FileTracker) InitFromBackendState(backendFiles map[string]FileState) {
 	}
 }
 
+// SetCodexRollout assigns Codex rollout metadata to this tracked file, used
+// by provider.Codex.InitTranscript via the provider.TranscriptRegistrar
+// interface. Separated from direct field assignment so the engine and
+// providers don't need to share struct internals.
+func (f *TrackedFile) SetCodexRollout(meta *provider.CodexRolloutMetadata) {
+	f.CodexRollout = meta
+}
+
+// RegisterCodexRollout is the provider.DescendantRegistrar entry point:
+// thin wrapper around AddCodexRollout that drops the *TrackedFile return
+// (kept on AddCodexRollout for in-package callers that want it).
+func (t *FileTracker) RegisterCodexRollout(path, fileName string, isRoot bool, meta provider.CodexRolloutMetadata) {
+	t.AddCodexRollout(path, fileName, isRoot, meta)
+}
+
 // GetTrackedFiles returns all currently tracked files
 func (t *FileTracker) GetTrackedFiles() []*TrackedFile {
 	result := make([]*TrackedFile, 0, len(t.files))
@@ -454,70 +469,3 @@ func (t *FileTracker) AddCodexRollout(path, fileName string, isRoot bool, meta C
 	return tracked
 }
 
-// DiscoverCodexDescendants queries the local Codex SQLite state DB for
-// every descendant of rootThreadUUID, verifies each rollout file exists
-// on disk and looks like an actual subagent (per ValidateRolloutPath +
-// !IsUserSession check on its session_meta), and adds the verified ones
-// to the tracker as `file_type=agent` entries.
-//
-// Returns only newly-added files; ones already in the tracker are skipped.
-// This makes the function safe to call every SyncAll cycle — it acts as
-// an incremental discovery step rather than a full rebuild.
-//
-// Gracefully degrades when the state DB is missing or its schema doesn't
-// match (returns nil, nil). Per-descendant verification failures are
-// logged at warn level and the offending row is skipped — the rest of
-// the subtree still goes through.
-func (t *FileTracker) DiscoverCodexDescendants(rootThreadUUID string) ([]*TrackedFile, error) {
-	rows, err := provider.Codex{}.ListSubtree(rootThreadUUID)
-	if err != nil {
-		return nil, err
-	}
-	var newFiles []*TrackedFile
-	for _, row := range rows {
-		fileName := filepath.Base(row.RolloutPath)
-		if t.IsTracked(fileName) {
-			continue
-		}
-		// Verify the rollout file actually exists and lives under Codex's
-		// sessions tree — refuse to upload a descendant pointed at a path
-		// that doesn't pass our validation.
-		if err := (provider.Codex{}).ValidateRolloutPath(row.RolloutPath); err != nil {
-			logger.Warn("Codex descendant %s: invalid rollout path %q: %v",
-				row.ThreadUUID, row.RolloutPath, err)
-			continue
-		}
-		info, err := (provider.Codex{}).ReadSessionInfo(row.RolloutPath)
-		if err != nil {
-			logger.Warn("Codex descendant %s: failed to read session_meta: %v",
-				row.ThreadUUID, err)
-			continue
-		}
-		// The DB says this is a descendant edge, but only trust the row
-		// if the rollout itself confirms it's a subagent (thread_source
-		// != "user" or any agent_* field set). Symmetric to provider.IsUserSession.
-		if info.IsUserSession() {
-			logger.Warn("Codex descendant %s: session_meta says user-session, skipping",
-				row.ThreadUUID)
-			continue
-		}
-		// SQLite's `threads.source` mirrors the rollout's polymorphic shape
-		// (a 167-char JSON object for subagents in recent Codex versions),
-		// so use the rollout-side flattened discriminator to stay under the
-		// backend's 64-char `source` cap.
-		meta := CodexRolloutMetadata{
-			ThreadUUID:       row.ThreadUUID,
-			ParentThreadUUID: row.ParentThreadUUID,
-			RolloutPath:      row.RolloutPath,
-			CWD:              row.CWD,
-			Model:            row.Model,
-			Source:           info.Source,
-			ThreadSource:     row.ThreadSource,
-			AgentPath:        row.AgentPath,
-			AgentRole:        row.AgentRole,
-			AgentNickname:    row.AgentNickname,
-		}
-		newFiles = append(newFiles, t.AddCodexRollout(row.RolloutPath, fileName, false, meta))
-	}
-	return newFiles, nil
-}

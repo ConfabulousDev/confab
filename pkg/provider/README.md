@@ -2,17 +2,18 @@
 
 Provider-specific local behavior for the tools Confab integrates with (currently Claude Code and Codex). Each provider is a concrete type that owns its paths, hook parsing, session discovery, and transcript metadata extraction.
 
-The package defines a `Provider` interface and a `HookInput` interface (Phase 1 + 2 of the abstraction work — see CF-394). Both concrete provider types satisfy `Provider`; hook-input adapters in `hookinput.go` satisfy `HookInput`. As of CF-396 (Phase 2), all of `cmd/` dispatches through the interface; CF-397 (Phase 3) is still pending for the `pkg/sync` engine branches.
+The package defines a `Provider` interface and a `HookInput` interface (Phase 1 + 2 of the abstraction work — see CF-394). Both concrete provider types satisfy `Provider`; hook-input adapters in `hookinput.go` satisfy `HookInput`. As of CF-397 (Phase 3), `pkg/sync/engine.go` also dispatches sync-loop behavior (root metadata, descendant discovery, chunk annotation) through the interface; the engine has no provider-name branches.
 
 ## Files
 
 | File | Role |
 |------|------|
-| `provider.go` | `Provider` and `HookInput` interfaces, provider name constants (`NameClaudeCode`, `NameCodex`), the registry (`Get(name)`), and `NormalizeName(name)` |
+| `provider.go` | `Provider` and `HookInput` interfaces, sync-loop interfaces (`TranscriptRegistrar`, `DescendantRegistrar`, `ChunkView`), `SummaryLink` / `AnnotationResult` types, provider name constants (`NameClaudeCode`, `NameCodex`), the registry (`Get(name)`), and `NormalizeName(name)` |
+| `codex_rollout.go` | `CodexRolloutMetadata` — wire-format metadata transmitted on the first chunk of every Codex rollout. Lives here (not pkg/sync) so the Codex implementation can construct one without a cycle; pkg/sync aliases it. |
 | `hookinput.go` | `claudeHookInputAdapter` and `codexHookInputAdapter` — wrap the typed structs in `pkg/types` so they satisfy `HookInput`. Required because the structs' existing exported `SessionID` field collides with a `SessionID()` method |
-| `claude.go` | `ClaudeCode` — paths, transcript validation, parent-process detection, and the `Provider` methods. Hook install/uninstall delegates to `pkg/hookconfig`; skill install delegates to `pkg/config` |
-| `codex.go` | `Codex` — paths, rollout scanning, transcript validation, first-user-message extraction, and the `Provider` methods. Hook install/uninstall delegates to `pkg/hookconfig` |
-| `codex_state.go` | Codex local SQLite reader: `StateDBPath()`, `WalkUpToRoot(threadUUID)`, `ListSubtree(rootUUID)`. Used by the hook handler, sync tracker, and `confab save` to discover subagent rollouts and route them to the top-most root |
+| `claude.go` | `ClaudeCode` — paths, transcript validation, parent-process detection, and the `Provider` methods. Sync-loop methods are no-ops except `AnnotateChunk`, which extracts summary + first user message + summary links from transcript chunks. Hook install/uninstall delegates to `pkg/hookconfig`; skill install delegates to `pkg/config` |
+| `codex.go` | `Codex` — paths, rollout scanning, transcript validation, first-user-message extraction, and the `Provider` methods. `InitTranscript` attaches root rollout metadata from session_meta; `DiscoverDescendants` walks the SQLite subtree; `AnnotateChunk` attaches codex_rollout on FirstLine==1 and extracts first_user_message once per session. Hook install/uninstall delegates to `pkg/hookconfig` |
+| `codex_state.go` | Codex local SQLite reader: `StateDBPath()`, `WalkUpToRoot(threadUUID)`, `ListSubtree(rootUUID)`. Used by the hook handler, `confab save`, and `Codex.DiscoverDescendants` to discover subagent rollouts and route them to the top-most root |
 
 ## Provider surfaces
 
@@ -57,8 +58,9 @@ Methods every provider must implement:
 - `WalkUpToRoot(sessionID string) (rootID, rootPath string, error)` — Codex walks `thread_spawn_edges`; Claude is identity with empty `rootPath`.
 - `ShouldSpawnForInput(in HookInput) bool` — Codex returns false for subagent rollouts and for unreadable rollout files; Claude always returns true. `os.IsNotExist` is treated as a race-tolerance "spawn anyway" case.
 - `WriteHookResponse(w, suppressOutput, systemMessage) error` — write the provider-specific hook response JSON (`ClaudeHookResponse` vs `CodexHookResponse`).
-
-Methods deferred to Phase 3 (CF-397) — `AnnotateChunk`, `DiscoverDescendants`, `InitTranscript`. They reference `pkg/sync` types, which would create a circular import. Phase 3 resolves the cycle when it consolidates the engine.go provider branches.
+- `InitTranscript(target TranscriptRegistrar, transcriptPath, externalID string) error` — called from `sync.Engine.Init` after the tracker is initialized. Codex attaches root rollout metadata via `target.SetCodexRollout`; Claude is a no-op. Implementations never surface read failures as errors — they log warn and fall through.
+- `DiscoverDescendants(reg DescendantRegistrar, externalID string) error` — called once per `SyncAll` cycle, before the BFS loop. Codex walks the SQLite subtree and calls `reg.RegisterCodexRollout` per verified descendant. Claude is a no-op (its agents are discovered transitively from transcript content inside `tracker.DiscoverNewFiles`). Must be idempotent across calls.
+- `AnnotateChunk(c ChunkView, sentFirstUserMessage bool, redact func(string) string) AnnotationResult` — called for every chunk before upload. Providers attach chunk-level metadata via setters on `c`; summary links go in the returned `AnnotationResult.SummaryLinks` so the engine drives the HTTP. The `redact` closure is nil-safe and lets providers stay decoupled from `pkg/redactor`.
 
 ## `Get(name)` and the registry
 
@@ -79,7 +81,9 @@ Methods deferred to Phase 3 (CF-397) — `AnnotateChunk`, `DiscoverDescendants`,
 - `Codex.WalkUpToRoot` never returns the empty string for the root UUID; on any failure mode (no DB, schema mismatch, edge-race exhausted) it returns the input thread UUID so callers can keep moving.
 - Parent PID detection is part of the `Provider` interface (`FindParentPID`, `IsProcess`); the bodies remain provider-specific (different process-name patterns) and share the package-level `getProcCmdline` / `getParentPID` helpers in `claude.go`.
 - `Codex.InstallHooks` installs only `SessionStart`. Daemon shutdown is driven by parent-PID liveness, never by Codex `Stop`.
+- `CodexRolloutMetadata` JSON tags are wire-format pins. Existing rows in the backend's `codex_rollouts` table were written against these tags; renaming any field is a backwards-incompatible change. Adding new optional fields (with `omitempty`) is safe.
+- Sync-loop providers (`InitTranscript`, `DiscoverDescendants`, `AnnotateChunk`) are called from a single goroutine inside the engine's sync loop. Implementations may mutate the passed `TranscriptRegistrar` / `DescendantRegistrar` / `ChunkView` without locking; the engine does not call them concurrently for the same engine instance.
 
 ## Used By
 
-`cmd/`, `pkg/discovery/`, `pkg/hookconfig/` (provider provides the file paths; hookconfig does the file editing), `pkg/sync/` (Codex first-user-message extraction is called from the sync engine's transcript-metadata path).
+`cmd/`, `pkg/discovery/`, `pkg/hookconfig/` (provider provides the file paths; hookconfig does the file editing), `pkg/sync/` (the engine dispatches root metadata, descendant discovery, and chunk annotation through the `Provider` interface).
