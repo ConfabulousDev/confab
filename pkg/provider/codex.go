@@ -59,6 +59,126 @@ func (p Codex) ShouldSpawnForInput(in HookInput) bool {
 // InstallSkills is a no-op for Codex (no skill files shipped).
 func (Codex) InstallSkills() error { return nil }
 
+// InitTranscript reads the root rollout's session_meta and attaches the
+// resulting CodexRolloutMetadata to the transcript file so the very first
+// uploaded chunk carries codex_rollout metadata. On read failure (missing
+// or malformed rollout file) logs at warn level and still attaches the
+// bare-minimum metadata (ThreadUUID + RolloutPath) so the backend can
+// upsert a row; CWD/Model/etc. stay empty. Matches pre-CF-397 behavior.
+// Never returns an error — failure modes are recoverable.
+func (p Codex) InitTranscript(target TranscriptRegistrar, transcriptPath, externalID string) error {
+	info, err := p.ReadSessionInfo(transcriptPath)
+	if err != nil {
+		logger.Warn("Codex root session_meta read failed: %v", err)
+		// Fall through with zero CodexSessionInfo so the partial metadata
+		// still goes out. Backend treats missing fields as "unknown".
+	}
+	target.SetCodexRollout(&CodexRolloutMetadata{
+		ThreadUUID:    externalID,
+		RolloutPath:   transcriptPath,
+		CWD:           info.CWD,
+		Model:         info.Model,
+		Source:        info.Source,
+		ThreadSource:  info.ThreadSource,
+		AgentPath:     info.AgentPath,
+		AgentRole:     info.AgentRole,
+		AgentNickname: info.AgentNickname,
+		// ParentThreadUUID stays "" for the root.
+	})
+	return nil
+}
+
+// DiscoverDescendants queries the local Codex SQLite state DB for every
+// descendant of rootThreadUUID, verifies each rollout file exists and looks
+// like an actual subagent (ValidateRolloutPath + !IsUserSession check on
+// session_meta), and registers verified ones via reg.RegisterCodexRollout.
+//
+// Idempotent across calls (skips already-tracked filenames). Degrades
+// gracefully when the state DB is missing or its schema doesn't match —
+// ListSubtree returns (nil, nil) and we return nil. Per-descendant
+// verification failures log at warn level and skip the row.
+func (p Codex) DiscoverDescendants(reg DescendantRegistrar, rootThreadUUID string) error {
+	rows, err := p.ListSubtree(rootThreadUUID)
+	if err != nil {
+		return err
+	}
+	for _, row := range rows {
+		fileName := filepath.Base(row.RolloutPath)
+		if reg.IsTracked(fileName) {
+			continue
+		}
+		if err := p.ValidateRolloutPath(row.RolloutPath); err != nil {
+			logger.Warn("Codex descendant %s: invalid rollout path %q: %v",
+				row.ThreadUUID, row.RolloutPath, err)
+			continue
+		}
+		info, err := p.ReadSessionInfo(row.RolloutPath)
+		if err != nil {
+			logger.Warn("Codex descendant %s: failed to read session_meta: %v",
+				row.ThreadUUID, err)
+			continue
+		}
+		// The DB says this is a descendant, but only trust the row if the
+		// rollout itself confirms it's a subagent. Symmetric to provider.IsUserSession.
+		if info.IsUserSession() {
+			logger.Warn("Codex descendant %s: session_meta says user-session, skipping",
+				row.ThreadUUID)
+			continue
+		}
+		// SQLite's `threads.source` mirrors the rollout's polymorphic shape
+		// (a 167-char JSON object in recent Codex versions). Use the
+		// rollout-side flattened discriminator to stay under the backend's
+		// 64-char `source` cap.
+		meta := CodexRolloutMetadata{
+			ThreadUUID:       row.ThreadUUID,
+			ParentThreadUUID: row.ParentThreadUUID,
+			RolloutPath:      row.RolloutPath,
+			CWD:              row.CWD,
+			Model:            row.Model,
+			Source:           info.Source,
+			ThreadSource:     row.ThreadSource,
+			AgentPath:        row.AgentPath,
+			AgentRole:        row.AgentRole,
+			AgentNickname:    row.AgentNickname,
+		}
+		reg.RegisterCodexRollout(row.RolloutPath, fileName, false, meta)
+		logger.Info("Discovered Codex descendant: thread=%s path=%s",
+			row.ThreadUUID, row.RolloutPath)
+	}
+	return nil
+}
+
+// AnnotateChunk attaches Codex-specific chunk metadata. Two concerns are
+// handled independently:
+//
+//   - first_user_message: extracted from the root transcript's chunks
+//     (Codex emits the user prompt once at the start). Gated by
+//     c.FileType() == "transcript" + !sentFirstUserMessage. The closure
+//     `redact` (nil-safe) is applied before attaching.
+//
+//   - codex_rollout: per-rollout metadata so the backend can upsert the
+//     `codex_rollouts` row. Emitted on the FIRST chunk of any Codex rollout
+//     (root or descendant) — detected via c.FirstLine() == 1. No
+//     persistent state flag is needed; retries preserve FirstLine == 1.
+//     Backend upsert is idempotent.
+func (p Codex) AnnotateChunk(c ChunkView, sentFirstUserMessage bool, redact func(string) string) AnnotationResult {
+	var result AnnotationResult
+	if !sentFirstUserMessage && c.FileType() == "transcript" {
+		msg := p.ExtractFirstUserMessageFromLines(c.Lines())
+		if msg != "" {
+			if redact != nil {
+				msg = redact(msg)
+			}
+			c.SetFirstUserMessage(msg)
+			result.IncludedFirstUserMessage = true
+		}
+	}
+	if roll := c.FileCodexRollout(); roll != nil && c.FirstLine() == 1 {
+		c.SetCodexRolloutMetadata(roll)
+	}
+	return result
+}
+
 // WriteHookResponse writes a CodexHookResponse to w.
 func (Codex) WriteHookResponse(w io.Writer, suppressOutput bool, systemMessage string) error {
 	return json.NewEncoder(w).Encode(types.CodexHookResponse{

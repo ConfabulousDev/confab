@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/ConfabulousDev/confab/pkg/config"
+	"github.com/ConfabulousDev/confab/pkg/discovery"
 	"github.com/ConfabulousDev/confab/pkg/hookconfig"
 	"github.com/ConfabulousDev/confab/pkg/logger"
 	"github.com/ConfabulousDev/confab/pkg/types"
@@ -97,6 +98,49 @@ func (ClaudeCode) WriteHookResponse(w io.Writer, suppressOutput bool, systemMess
 		SuppressOutput: suppressOutput,
 		SystemMessage:  systemMessage,
 	})
+}
+
+// InitTranscript is a no-op for Claude Code — there is no root rollout
+// metadata to attach (Codex-only concern).
+func (ClaudeCode) InitTranscript(TranscriptRegistrar, string, string) error { return nil }
+
+// DiscoverDescendants is a no-op for Claude Code. Claude's agent files are
+// discovered transitively from transcript content (agent IDs embedded in
+// JSONL messages) inside tracker.DiscoverNewFiles — no external state DB
+// lookup is required.
+func (ClaudeCode) DiscoverDescendants(DescendantRegistrar, string) error { return nil }
+
+// AnnotateChunk extracts the local summary, first user message, and
+// summary-link records from a Claude Code transcript chunk. Summary links
+// are returned via AnnotationResult.SummaryLinks so the engine can perform
+// the backend HTTP after AnnotateChunk returns — keeping the provider
+// side-effect-free.
+//
+// Non-transcript files are a no-op (Claude extracts only from transcripts).
+//
+// Claude does not gate first-user-message extraction on a "first time"
+// flag — the discovery helper handles dedup internally and the engine
+// historically does not flip sentFirstUserMessage for Claude. The returned
+// IncludedFirstUserMessage stays false so the engine's flag is untouched.
+func (ClaudeCode) AnnotateChunk(c ChunkView, sentFirstUserMessage bool, redact func(string) string) AnnotationResult {
+	if c.FileType() != "transcript" {
+		return AnnotationResult{}
+	}
+	extracted := discovery.ExtractMetadataFromLines(c.Lines())
+	summary := extracted.Summary
+	firstUserMessage := extracted.FirstUserMessage
+	if redact != nil {
+		summary = redact(summary)
+		firstUserMessage = redact(firstUserMessage)
+	}
+	c.SetSummary(summary)
+	c.SetFirstUserMessage(firstUserMessage)
+
+	links := make([]SummaryLink, len(extracted.SummaryLinks))
+	for i, l := range extracted.SummaryLinks {
+		links[i] = SummaryLink{Summary: l.Summary, LeafUUID: l.LeafUUID}
+	}
+	return AnnotationResult{SummaryLinks: links}
 }
 
 // IsHooksInstalled reports whether all four Confab hook bundles for

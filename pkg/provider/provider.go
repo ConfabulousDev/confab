@@ -22,6 +22,52 @@ type HookInput interface {
 	ParentPID() int
 }
 
+// TranscriptRegistrar is the minimal surface InitTranscript sees on the
+// root transcript's TrackedFile. *sync.TrackedFile satisfies it structurally
+// via SetCodexRollout. Lives here (not pkg/sync) to avoid an import cycle.
+type TranscriptRegistrar interface {
+	SetCodexRollout(*CodexRolloutMetadata)
+}
+
+// DescendantRegistrar is the surface DiscoverDescendants uses to register
+// newly-discovered sidechain files. *sync.FileTracker satisfies it via
+// IsTracked + RegisterCodexRollout.
+type DescendantRegistrar interface {
+	IsTracked(fileName string) bool
+	RegisterCodexRollout(path, fileName string, isRoot bool, meta CodexRolloutMetadata)
+}
+
+// ChunkView is the structural view of a chunk + its source file that
+// AnnotateChunk reads from and writes back into. pkg/sync's chunkView
+// adapter satisfies it. Setters mutate the underlying chunk's metadata in
+// place; accessors return read-only snapshots.
+type ChunkView interface {
+	FileType() string
+	FirstLine() int
+	Lines() []string
+	FileCodexRollout() *CodexRolloutMetadata
+	SetCodexRolloutMetadata(*CodexRolloutMetadata)
+	SetSummary(string)
+	SetFirstUserMessage(string)
+}
+
+// SummaryLink describes a parent-session summary link extracted from a
+// Claude transcript chunk. The engine HTTPs them after AnnotateChunk
+// returns; the provider remains side-effect-free.
+type SummaryLink struct {
+	Summary  string
+	LeafUUID string
+}
+
+// AnnotationResult is the structured return from AnnotateChunk.
+// IncludedFirstUserMessage tells the engine whether to flip its
+// sentFirstUserMessage flag. SummaryLinks (Claude only) tells the engine
+// which parent summaries to link via the backend.
+type AnnotationResult struct {
+	IncludedFirstUserMessage bool
+	SummaryLinks             []SummaryLink
+}
+
 // Provider abstracts per-tool local behavior. Adding a new provider means
 // implementing this interface and registering the instance.
 type Provider interface {
@@ -56,6 +102,30 @@ type Provider interface {
 	// shape is provider-specific but the (continue, suppressOutput,
 	// systemMessage) tuple is shared.
 	WriteHookResponse(w io.Writer, suppressOutput bool, systemMessage string) error
+
+	// InitTranscript is called from sync.Engine.Init AFTER the backend has
+	// returned the initial sync state and the transcript file has been
+	// registered in the tracker. Codex reads session_meta and attaches
+	// codex_rollout metadata to the root transcript so the first chunk
+	// uploaded carries it. Claude is a no-op. The engine logs+continues on
+	// error; implementations may return one for true I/O failures.
+	InitTranscript(target TranscriptRegistrar, transcriptPath, externalID string) error
+
+	// DiscoverDescendants is called once per SyncAll cycle, BEFORE the BFS
+	// loop. Providers with an external discovery model (Codex: SQLite
+	// subtree walk) register newly-discovered sidechain files via reg.
+	// Must be idempotent across calls (skip already-tracked filenames).
+	// Claude is a no-op (its agents are discovered transitively from
+	// transcript content, handled in tracker.DiscoverNewFiles).
+	DiscoverDescendants(reg DescendantRegistrar, externalID string) error
+
+	// AnnotateChunk is called for every chunk read from a tracked file,
+	// BEFORE upload. Providers attach provider-specific chunk metadata
+	// (codex_rollout, first_user_message, summary). The redact closure is
+	// nil-safe; providers must guard `if redact != nil { ... }` before
+	// applying. Engine inspects the returned AnnotationResult to flip its
+	// sentFirstUserMessage flag and dispatch any extracted summary links.
+	AnnotateChunk(c ChunkView, sentFirstUserMessage bool, redact func(string) string) AnnotationResult
 }
 
 var registry = map[string]Provider{

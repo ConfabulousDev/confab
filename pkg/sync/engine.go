@@ -9,13 +9,19 @@ import (
 	"time"
 
 	"github.com/ConfabulousDev/confab/pkg/config"
-	"github.com/ConfabulousDev/confab/pkg/discovery"
 	"github.com/ConfabulousDev/confab/pkg/git"
 	"github.com/ConfabulousDev/confab/pkg/http"
 	"github.com/ConfabulousDev/confab/pkg/logger"
 	"github.com/ConfabulousDev/confab/pkg/provider"
 	"github.com/ConfabulousDev/confab/pkg/redactor"
 	"github.com/ConfabulousDev/confab/pkg/types"
+)
+
+// Compile-time assertions that the tracker types satisfy the provider
+// interfaces. Catches API drift at build time rather than at test time.
+var (
+	_ provider.TranscriptRegistrar = (*TrackedFile)(nil)
+	_ provider.DescendantRegistrar = (*FileTracker)(nil)
 )
 
 // Engine is the core sync engine used by both daemon and manual save.
@@ -25,13 +31,17 @@ type Engine struct {
 	redactor             *redactor.Redactor
 	tracker              *FileTracker
 	sessionID            string // Backend session ID (set after Init)
-	providerName         string
+	provider             provider.Provider
 	externalID           string
 	transcriptPath       string
 	cwd                  string
 	initialized          bool
 	sentFirstUserMessage bool
 }
+
+// setProviderForTest substitutes the engine's resolved Provider with a stub.
+// Test-only seam — production code resolves via provider.Get inside New().
+func (e *Engine) setProviderForTest(p provider.Provider) { e.provider = p }
 
 // Backend is the sync transport used by Engine. The HTTP client implements this
 // for provider-aware backend sync.
@@ -68,13 +78,16 @@ func New(uploadCfg *config.UploadConfig, engineCfg EngineConfig) (*Engine, error
 		}
 	}
 
-	tracker := NewFileTracker(engineCfg.TranscriptPath)
+	p, err := provider.Get(engineCfg.Provider)
+	if err != nil {
+		return nil, fmt.Errorf("invalid provider %q: %w", engineCfg.Provider, err)
+	}
 
 	return &Engine{
 		backend:        client,
 		redactor:       r,
-		tracker:        tracker,
-		providerName:   normalizeEngineProvider(engineCfg.Provider),
+		tracker:        NewFileTracker(engineCfg.TranscriptPath),
+		provider:       p,
 		externalID:     engineCfg.ExternalID,
 		transcriptPath: engineCfg.TranscriptPath,
 		cwd:            engineCfg.CWD,
@@ -88,25 +101,67 @@ func NewWithClient(client *Client, r *redactor.Redactor, engineCfg EngineConfig)
 }
 
 // NewWithBackend creates an engine with a preconfigured backend.
+// Test-facing; an invalid Provider name falls back to ClaudeCode to keep
+// historical behavior (default provider when unspecified) and avoid a
+// second error path for callers that don't care.
 func NewWithBackend(backend Backend, r *redactor.Redactor, engineCfg EngineConfig) *Engine {
-	tracker := NewFileTracker(engineCfg.TranscriptPath)
-
+	p, err := provider.Get(engineCfg.Provider)
+	if err != nil {
+		p = provider.ClaudeCode{}
+	}
 	return &Engine{
 		backend:        backend,
 		redactor:       r,
-		tracker:        tracker,
-		providerName:   normalizeEngineProvider(engineCfg.Provider),
+		tracker:        NewFileTracker(engineCfg.TranscriptPath),
+		provider:       p,
 		externalID:     engineCfg.ExternalID,
 		transcriptPath: engineCfg.TranscriptPath,
 		cwd:            engineCfg.CWD,
 	}
 }
 
-func normalizeEngineProvider(providerName string) string {
-	if providerName == "" {
-		return provider.NameClaudeCode
+// redactFn returns the engine's redactor as a nil-safe closure so providers
+// can apply redaction without importing pkg/redactor. Returns nil when no
+// redactor is configured; AnnotateChunk implementations guard accordingly.
+func (e *Engine) redactFn() func(string) string {
+	if e.redactor == nil {
+		return nil
 	}
-	return providerName
+	return e.redactor.Redact
+}
+
+// chunkView is the in-package adapter that satisfies provider.ChunkView,
+// wrapping the *Chunk + *TrackedFile pair the engine has in hand. Setters
+// mutate the underlying chunk's metadata (allocating it lazily); accessors
+// expose chunk + file fields the provider needs.
+type chunkView struct {
+	chunk *Chunk
+	file  *TrackedFile
+}
+
+var _ provider.ChunkView = (*chunkView)(nil)
+
+func (cv *chunkView) FileType() string { return cv.chunk.FileType }
+func (cv *chunkView) FirstLine() int   { return cv.chunk.FirstLine }
+func (cv *chunkView) Lines() []string  { return cv.chunk.Lines }
+
+func (cv *chunkView) FileCodexRollout() *provider.CodexRolloutMetadata {
+	if cv.file == nil {
+		return nil
+	}
+	return cv.file.CodexRollout
+}
+
+func (cv *chunkView) SetCodexRolloutMetadata(m *provider.CodexRolloutMetadata) {
+	ensureChunkMetadata(cv.chunk).CodexRollout = m
+}
+
+func (cv *chunkView) SetSummary(s string) {
+	ensureChunkMetadata(cv.chunk).Summary = s
+}
+
+func (cv *chunkView) SetFirstUserMessage(s string) {
+	ensureChunkMetadata(cv.chunk).FirstUserMessage = s
 }
 
 // Init initializes the sync session with the backend.
@@ -137,7 +192,7 @@ func (e *Engine) Init() error {
 		Username: username,
 	}
 
-	resp, err := e.backend.Init(e.providerName, e.externalID, e.transcriptPath, metadata)
+	resp, err := e.backend.Init(e.provider.Name(), e.externalID, e.transcriptPath, metadata)
 	if err != nil {
 		return err
 	}
@@ -152,28 +207,13 @@ func (e *Engine) Init() error {
 	}
 	e.tracker.InitFromBackendState(backendState)
 
-	// For Codex, the root rollout itself is a "rollout" that needs its own
-	// codex_rollouts row populated server-side. Attach metadata to the
-	// tracker's transcript file so the first-chunk upload carries it.
-	// Descendants get their metadata attached during DiscoverCodexDescendants.
-	if e.providerName == provider.NameCodex {
-		if transcript := e.tracker.GetTranscriptFile(); transcript != nil {
-			info, infoErr := provider.Codex{}.ReadSessionInfo(e.transcriptPath)
-			if infoErr != nil {
-				logger.Warn("Codex root session_meta read failed: %v", infoErr)
-			}
-			transcript.CodexRollout = &CodexRolloutMetadata{
-				ThreadUUID:    e.externalID,
-				RolloutPath:   e.transcriptPath,
-				CWD:           info.CWD,
-				Model:         info.Model,
-				Source:        info.Source,
-				ThreadSource:  info.ThreadSource,
-				AgentPath:     info.AgentPath,
-				AgentRole:     info.AgentRole,
-				AgentNickname: info.AgentNickname,
-				// ParentThreadUUID stays "" for a root.
-			}
+	// Provider-owned root-transcript metadata attachment. Claude is a
+	// no-op; Codex reads session_meta and attaches root rollout metadata
+	// so the first chunk uploaded carries it. Descendants get their
+	// metadata attached during provider.DiscoverDescendants.
+	if transcript := e.tracker.GetTranscriptFile(); transcript != nil {
+		if err := e.provider.InitTranscript(transcript, e.transcriptPath, e.externalID); err != nil {
+			logger.Warn("provider InitTranscript failed: %v", err)
 		}
 	}
 
@@ -217,23 +257,14 @@ func (e *Engine) SyncAll() (int, error) {
 	totalChunks := 0
 	var firstErr error
 
-	// For Codex, query the local SQLite state DB once per cycle for every
-	// descendant of the root thread. New descendants are added as agent
-	// files in the tracker so the BFS loop below uploads them as sidechain
-	// files under the root's backend session. This is the symmetric
-	// discovery counterpart to Claude's per-iteration agent-ID extraction
-	// (which doesn't apply to Codex — Codex rolls don't reference children
-	// via transcript content).
-	if e.providerName == provider.NameCodex {
-		newDescendants, err := e.tracker.DiscoverCodexDescendants(e.externalID)
-		if err != nil {
-			logger.Warn("Codex descendant discovery failed: %v", err)
-		} else {
-			for _, f := range newDescendants {
-				logger.Info("Discovered Codex descendant: thread=%s path=%s",
-					f.CodexRollout.ThreadUUID, f.Path)
-			}
-		}
+	// Provider-owned descendant discovery. Claude is a no-op (its agents
+	// are discovered transitively from transcript content inside
+	// tracker.DiscoverNewFiles). Codex queries the local SQLite state DB
+	// for every descendant of the root thread and registers them as agent
+	// files. The BFS loop below uploads them as sidechain files under the
+	// root's backend session.
+	if err := e.provider.DiscoverDescendants(e.tracker, e.externalID); err != nil {
+		logger.Warn("provider DiscoverDescendants failed: %v", err)
 	}
 
 	// Start with all currently tracked files
@@ -271,20 +302,18 @@ func (e *Engine) SyncAll() (int, error) {
 					newAgentIDs = append(newAgentIDs, chunk.AgentIDs...)
 				}
 
-				// Provider-owned chunk metadata.
-				//
-				// For Codex, the helper runs on EVERY rollout chunk (root or
-				// descendant) so codex_rollout metadata can be attached to the
-				// first chunk of each rollout. The first-user-message extraction
-				// inside the helper is internally gated to transcript chunks.
-				//
-				// For Claude, only the transcript file gets metadata extracted
-				// (summary linking + first user message), as today.
-				includedFirstUserMessage := false
-				if e.providerName == provider.NameCodex {
-					includedFirstUserMessage = e.addCodexTranscriptMetadata(chunk, file)
-				} else if file.Type == "transcript" {
-					e.addClaudeTranscriptMetadata(chunk)
+				// Provider-owned chunk metadata. AnnotateChunk runs on every
+				// chunk regardless of file type; each provider internally
+				// gates its extraction (Codex first_user_message gated on
+				// transcript, codex_rollout gated on FirstLine==1; Claude
+				// extracts only from transcript files).
+				annotation := e.provider.AnnotateChunk(
+					&chunkView{chunk: chunk, file: file},
+					e.sentFirstUserMessage,
+					e.redactFn(),
+				)
+				for _, link := range annotation.SummaryLinks {
+					e.linkSummaryToPreviousSession(link.Summary, link.LeafUUID)
 				}
 
 				// Upload chunk
@@ -314,7 +343,7 @@ func (e *Engine) SyncAll() (int, error) {
 				}
 
 				// Update tracking state
-				if includedFirstUserMessage {
+				if annotation.IncludedFirstUserMessage {
 					e.sentFirstUserMessage = true
 				}
 				e.tracker.UpdateAfterSync(file, lastLine, chunk.NewOffset)
@@ -338,63 +367,6 @@ func (e *Engine) SyncAll() (int, error) {
 	}
 
 	return totalChunks, firstErr
-}
-
-// addCodexTranscriptMetadata attaches provider-owned chunk metadata for a
-// Codex chunk. Two concerns are handled here, both gated independently:
-//
-//   - first_user_message: extracted from the root transcript's chunks
-//     (Codex emits the user prompt once at the start of the session). Gated
-//     by chunk.FileType == "transcript" + e.sentFirstUserMessage. Returns
-//     true on this code path so the caller can flip sentFirstUserMessage
-//     after upload succeeds.
-//
-//   - codex_rollout: per-rollout metadata that lets the backend upsert into
-//     `codex_rollouts`. Emitted on the FIRST chunk of any Codex rollout
-//     (root or descendant) — detected via chunk.FirstLine == 1. No
-//     persistent state flag is needed; if a chunk-with-meta fails and is
-//     retried, FirstLine is still 1 and the meta rides along again.
-//     Backend upsert is idempotent.
-func (e *Engine) addCodexTranscriptMetadata(chunk *Chunk, file *TrackedFile) bool {
-	sentFirst := false
-	if !e.sentFirstUserMessage && chunk.FileType == "transcript" {
-		firstUserMessage := provider.Codex{}.ExtractFirstUserMessageFromLines(chunk.Lines)
-		if firstUserMessage != "" {
-			if e.redactor != nil {
-				firstUserMessage = e.redactor.Redact(firstUserMessage)
-			}
-			ensureChunkMetadata(chunk).FirstUserMessage = firstUserMessage
-			sentFirst = true
-		}
-	}
-	if file != nil && file.CodexRollout != nil && chunk.FirstLine == 1 {
-		ensureChunkMetadata(chunk).CodexRollout = file.CodexRollout
-	}
-	return sentFirst
-}
-
-// addClaudeTranscriptMetadata extracts the local summary and first user
-// message from a Claude Code transcript chunk, and triggers session linking
-// for any summaries with leafUuid.
-func (e *Engine) addClaudeTranscriptMetadata(chunk *Chunk) {
-	result := discovery.ExtractMetadataFromLines(chunk.Lines)
-	meta := ensureChunkMetadata(chunk)
-
-	// Apply redaction to metadata — extraction runs on raw lines, so secrets
-	// in summaries/first messages must be redacted before upload.
-	summary := result.Summary
-	firstUserMessage := result.FirstUserMessage
-	if e.redactor != nil {
-		summary = e.redactor.Redact(summary)
-		firstUserMessage = e.redactor.Redact(firstUserMessage)
-	}
-	meta.Summary = summary
-	meta.FirstUserMessage = firstUserMessage
-
-	// Trigger session linking for summaries with leafUuid.
-	for _, link := range result.SummaryLinks {
-		e.linkSummaryToPreviousSession(link.Summary, link.LeafUUID)
-	}
 }
 
 // ensureChunkMetadata returns chunk.Metadata, allocating it if nil.
@@ -450,7 +422,7 @@ func (e *Engine) Reset() {
 // received data but we didn't get a response (e.g., timeout).
 func (e *Engine) refreshStateFromBackend() error {
 	// Call Init without metadata - we just want to refresh file states
-	resp, err := e.backend.Init(e.providerName, e.externalID, e.transcriptPath, nil)
+	resp, err := e.backend.Init(e.provider.Name(), e.externalID, e.transcriptPath, nil)
 	if err != nil {
 		return err
 	}

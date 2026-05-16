@@ -74,27 +74,11 @@ type ChunkMetadata struct {
 }
 
 // CodexRolloutMetadata is the per-rollout metadata transmitted on the FIRST
-// chunk of a Codex rollout (root or descendant). The backend upserts it
-// into the `codex_rollouts` table keyed by ThreadUUID. Omitted on chunks
-// where chunk.FirstLine != 1, so the backend handler treats absence as
-// "no metadata to record this round."
-//
-// Codex-only; the backend rejects this field on non-codex sessions with 400.
-type CodexRolloutMetadata struct {
-	ThreadUUID       string `json:"thread_uuid"`
-	ParentThreadUUID string `json:"parent_thread_uuid,omitempty"` // "" for roots
-	RolloutPath      string `json:"rollout_path"`
-	CWD              string `json:"cwd,omitempty"`
-	Model            string `json:"model,omitempty"`
-	// Source is the flattened discriminator extracted by flattenCodexSource
-	// in pkg/provider/codex.go — a short string like "cli" or "subagent".
-	// The backend's `codex_rollouts.source` column caps this at 64 chars.
-	Source        string `json:"source,omitempty"`
-	ThreadSource  string `json:"thread_source,omitempty"`
-	AgentPath     string `json:"agent_path,omitempty"`
-	AgentRole     string `json:"agent_role,omitempty"`
-	AgentNickname string `json:"agent_nickname,omitempty"`
-}
+// chunk of a Codex rollout. The canonical definition lives in pkg/provider
+// so the Codex implementation can construct one without an import cycle;
+// pkg/sync re-exports it here as an alias so existing call sites that
+// reference sync.CodexRolloutMetadata keep working. Wire format unchanged.
+type CodexRolloutMetadata = provider.CodexRolloutMetadata
 
 // ChunkResponse is the response for POST /api/v1/sync/chunk
 type ChunkResponse struct {
@@ -115,11 +99,10 @@ type EventResponse struct {
 }
 
 // Init initializes or resumes a sync session
-// Returns the session ID and current sync state for all files
+// Returns the session ID and current sync state for all files. The
+// providerName must be a canonical provider name (callers via Engine.Init
+// pass e.provider.Name(), which is always non-empty).
 func (c *Client) Init(providerName, externalID, transcriptPath string, metadata *InitMetadata) (*InitResponse, error) {
-	if providerName == "" {
-		providerName = provider.NameClaudeCode
-	}
 	req := InitRequest{
 		Provider:       providerName,
 		ExternalID:     externalID,

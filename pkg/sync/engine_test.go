@@ -530,7 +530,7 @@ func TestEngine_SyncAll_WithCodexFirstUserMessage(t *testing.T) {
 		mustNewClient(t, server.URL, tmpDir),
 		nil,
 		EngineConfig{
-			Provider:       provider.NameCodex,
+			Provider:       (provider.Codex{}).Name(),
 			ExternalID:     "codex-metadata-test",
 			TranscriptPath: transcriptPath,
 			CWD:            tmpDir,
@@ -1599,7 +1599,7 @@ func codexEngineSetup(t *testing.T, mock *mockBackend) (*codextest.Fixture, *Eng
 		mustNewClient(t, server.URL, tmpDir),
 		nil,
 		EngineConfig{
-			Provider:       provider.NameCodex,
+			Provider:       (provider.Codex{}).Name(),
 			ExternalID:     root.ThreadUUID(),
 			TranscriptPath: root.Path(),
 			CWD:            "/workdir",

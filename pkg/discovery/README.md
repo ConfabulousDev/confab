@@ -9,7 +9,6 @@ Session discovery, metadata extraction, agent ID parsing, and hook input reading
 | `sessions.go` | `ScanAllSessions`, `FindSessionByID` — find sessions in `~/.claude/projects/` |
 | `extract.go` | `ExtractSessionMetadata`, `ExtractMetadataFromLines`, `SanitizeText` — extract summaries and first user messages from transcripts |
 | `files.go` | `ExtractAgentIDsFromMessage`, `IsValidAgentID` — find agent IDs in transcript entries |
-| `hook.go` | `ReadHookInputFrom` — compatibility wrapper for Claude session hook parsing |
 
 ## Key Types
 

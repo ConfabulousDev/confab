@@ -1,20 +1,20 @@
 # pkg/sync
 
-Sync engine that orchestrates incremental transcript uploads to the backend. Handles file tracking, chunking, agent discovery, metadata extraction, and summary linking.
+Sync engine that orchestrates incremental transcript uploads to the backend. Handles file tracking, chunking, agent discovery, and chunk upload. Provider-specific behavior (metadata extraction, descendant discovery, root metadata attachment) lives entirely in `pkg/provider`; the engine dispatches through the `provider.Provider` interface (see CF-397).
 
 ## Files
 
 | File | Role |
 |------|------|
-| `engine.go` | `Engine` — orchestrates init, sync loop, agent discovery (BFS), metadata extraction |
-| `client.go` | `Client` — HTTP API methods for init, chunk upload, events, summary updates, GitHub linking |
-| `tracker.go` | `FileTracker` — tracks file state, reads chunks with byte-offset seeking, discovers agent files |
+| `engine.go` | `Engine` — orchestrates init, sync loop, agent discovery (BFS); dispatches provider behavior via `InitTranscript`/`DiscoverDescendants`/`AnnotateChunk`. Includes the `chunkView` adapter that satisfies `provider.ChunkView` |
+| `client.go` | `Client` — HTTP API methods for init, chunk upload, events, summary updates, GitHub linking. Aliases `provider.CodexRolloutMetadata` as `sync.CodexRolloutMetadata` |
+| `tracker.go` | `FileTracker` — tracks file state, reads chunks with byte-offset seeking, discovers agent files (Claude transitive discovery). Implements `provider.TranscriptRegistrar` (via `*TrackedFile.SetCodexRollout`) and `provider.DescendantRegistrar` (via `*FileTracker.RegisterCodexRollout`) so providers can register Codex rollouts |
 | `summary_link.go` | Links child session summaries to parent sessions via `leafUuid` |
 
 ## Three Components
 
 ### Engine (orchestrator)
-`Engine.Init()` registers the session with the backend, receiving the current sync state (last synced line per file). For Codex, `Init` additionally attaches `CodexRolloutMetadata` to the root rollout's `TrackedFile` so the very first chunk uploaded carries `codex_rollout` metadata. `Engine.SyncAll()` performs a BFS traversal: for each tracked file, it checks for changes, reads a chunk, extracts metadata, uploads, and discovers new agent files. New agent files are added to the queue for the next iteration. For Codex sessions, `SyncAll` runs a per-cycle SQLite walk (`tracker.DiscoverCodexDescendants`) at the top of the loop to pick up new subagent rollouts; descendants are uploaded as `file_type=agent` sidechain files under the root's backend session.
+`Engine.Init()` registers the session with the backend, receiving the current sync state (last synced line per file), then calls `provider.InitTranscript(transcript, ...)` so the provider can attach root-level metadata (Codex attaches `codex_rollout`; Claude is a no-op). `Engine.SyncAll()` performs a BFS traversal: it first calls `provider.DiscoverDescendants(tracker, externalID)` once per cycle (Codex walks the SQLite subtree; Claude is a no-op), then for each tracked file checks for changes, reads a chunk, dispatches `provider.AnnotateChunk(chunkView, sentFirst, redact)`, uploads, and discovers new agent files via `tracker.DiscoverNewFiles` (Claude's transitive content-driven discovery). Codex descendants are registered as `file_type=agent` sidechain files under the root's backend session.
 
 ### Client (API)
 Thin wrapper around `pkg/http.Client` that marshals/unmarshals request types for the sync API endpoints: `/api/v1/sync/init`, `/api/v1/sync/chunk`, `/api/v1/sync/event`, and session-specific endpoints for summaries and GitHub links.
@@ -54,11 +54,11 @@ SyncAll() loop:
 
 **Adding a new API endpoint:** Add request/response types in `client.go`, add a method on `Client`, call it from the engine or command layer.
 
-**Adding new metadata extraction:** Modify `addTranscriptMetadata` (or its per-provider helper `addClaudeTranscriptMetadata` / `addCodexTranscriptMetadata`) where `ChunkMetadata` is built. Metadata is extracted from **raw lines before redaction**, then the extracted values are redacted separately before upload. Provider-specific extractors live in `pkg/provider`.
+**Adding new metadata extraction:** Modify the appropriate provider's `AnnotateChunk` in `pkg/provider/{claude,codex}.go`. Metadata is extracted from **raw lines before redaction**, then the extracted values are redacted via the closure passed to `AnnotateChunk` before being attached to the chunk via the `ChunkView` setters.
 
-**Tracking a new file type:** Add discovery logic in `DiscoverNewFiles()`. Set the file type in `TrackedFile.Type`. The rest of the pipeline (read, chunk, upload) is file-type agnostic.
+**Tracking a new file type:** Add discovery logic in `DiscoverNewFiles()` (for content-driven discovery) or in the provider's `DiscoverDescendants` (for external-state discovery). Set the file type in `TrackedFile.Type`. The rest of the pipeline (read, chunk, upload) is file-type agnostic.
 
-**Codex subagent discovery:** Codex doesn't reference subagents via transcript content (unlike Claude's agent IDs), so the tracker has a dedicated `DiscoverCodexDescendants(rootThreadUUID)` method that queries the local Codex SQLite state DB (`pkg/provider.Codex.ListSubtree`). The engine calls it once per `SyncAll` cycle for Codex sessions; newly-discovered subagent rollouts are registered as `file_type=agent` with their `CodexRollout` metadata pre-populated so the next chunk upload carries the `codex_rollout` payload.
+**Adding a new provider:** Implement `provider.Provider` (including the three sync-loop methods `InitTranscript`, `DiscoverDescendants`, `AnnotateChunk`) and register it in `pkg/provider/provider.go`'s registry. Zero changes required in `pkg/sync/engine.go` — the engine dispatches everything through the interface.
 
 ## Invariants
 
@@ -70,7 +70,8 @@ SyncAll() loop:
 - **Metadata is extracted before redaction, then redacted.** Summaries and first user messages need the original text for meaningful extraction, but must be redacted before upload.
 - **Byte offsets must be maintained accurately.** `ReadChunk` returns `NewOffset` which is the byte position after the last line read. `UpdateAfterSync` stores this for the next read. Incorrect offsets cause duplicate or missing lines.
 - **Directory scan in `DiscoverNewFiles` catches agents from already-synced lines.** After a daemon restart, agent IDs from previously-synced lines are lost from memory. The directory scan recovers them.
-- **`codex_rollout` metadata rides on first chunks only.** The engine emits `ChunkMetadata.CodexRollout` whenever `chunk.FirstLine == 1` for a Codex rollout (root or descendant). On retry after a failed upload, `FirstLine` remains 1 so the metadata is automatically resent — the backend upsert is idempotent. `InitFromBackendState` preserves `TrackedFile.CodexRollout` across `refreshStateFromBackend` so retries don't lose the payload.
+- **`codex_rollout` metadata rides on first chunks only.** `provider.Codex.AnnotateChunk` attaches `ChunkMetadata.CodexRollout` whenever `c.FirstLine() == 1` and the tracked file carries a `CodexRollout`. On retry after a failed upload, `FirstLine` remains 1 so the metadata is automatically resent — the backend upsert is idempotent. `InitFromBackendState` preserves `TrackedFile.CodexRollout` across `refreshStateFromBackend` so retries don't lose the payload.
+- **The engine has no provider-name branches.** `TestEngine_NoProviderNameLiterals` in `engine_dispatch_test.go` scans `engine.go` for `NameCodex` / `NameClaudeCode` literals and fails CI if either appears. New provider-specific behavior must live in `pkg/provider`, not the engine.
 
 ## Design Decisions
 

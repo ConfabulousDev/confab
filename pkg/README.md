@@ -28,8 +28,9 @@ cmd/  (uses all packages)
  ├── daemon ──── sync ──┬── http ──── config, logger
  │                      ├── redactor ── config
  │                      ├── discovery ── config, logger
- │                      ├── provider ── hookconfig ── config, logger
- │                      │                └── types, logger
+ │                      ├── provider ──┬── hookconfig ── config, logger
+ │                      │              │                 └── types, logger
+ │                      │              └── discovery (AnnotateChunk extracts Claude summary/first-user-message)
  │                      ├── git
  │                      └── config
  │
