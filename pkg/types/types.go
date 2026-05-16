@@ -65,6 +65,7 @@ type CodexHookInput struct {
 	Model          string `json:"model,omitempty"`
 	Source         string `json:"source,omitempty"`
 	TurnID         string `json:"turn_id,omitempty"`
+	ParentPID      int    `json:"parent_pid,omitempty"` // Codex process ID (set by confab, not Codex)
 }
 
 // CodexHookResponse is the JSON response sent back to Codex hooks.

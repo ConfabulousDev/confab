@@ -419,25 +419,6 @@ func TestSessionEndFromReader(t *testing.T) {
 	})
 }
 
-func TestCodexSessionEndFromReader(t *testing.T) {
-	t.Run("stop hook accepts null transcript path", func(t *testing.T) {
-		setupCodexSyncTestEnv(t)
-
-		inputJSON := `{"session_id":"bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb","transcript_path":null,"hook_event_name":"Stop"}`
-		if err := codexSessionEndFromReader(strings.NewReader(inputJSON)); err != nil {
-			t.Fatalf("codexSessionEndFromReader failed: %v", err)
-		}
-	})
-
-	t.Run("invalid JSON fails soft", func(t *testing.T) {
-		setupCodexSyncTestEnv(t)
-
-		if err := codexSessionEndFromReader(strings.NewReader("not valid json")); err != nil {
-			t.Fatalf("codexSessionEndFromReader should fail soft: %v", err)
-		}
-	})
-}
-
 func TestRunDaemon(t *testing.T) {
 	t.Run("invalid JSON", func(t *testing.T) {
 		err := runDaemon("not valid json")

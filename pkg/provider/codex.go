@@ -12,12 +12,43 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/ConfabulousDev/confab/pkg/logger"
 	"github.com/ConfabulousDev/confab/pkg/types"
 )
 
 const CodexStateDirEnv = "CONFAB_CODEX_DIR"
 
 type Codex struct{}
+
+// FindParentPID walks up the process tree to find the Codex process.
+// Mirrors ClaudeCode.FindParentPID for daemon parent-liveness monitoring.
+func (p Codex) FindParentPID() int {
+	parentPID := os.Getppid()
+	if p.IsProcess(parentPID) {
+		return parentPID
+	}
+
+	grandparentPID := getParentPID(parentPID)
+	if grandparentPID > 0 && p.IsProcess(grandparentPID) {
+		return grandparentPID
+	}
+
+	logger.Warn("Could not find Codex in process tree, disabling parent PID monitoring")
+	return 0
+}
+
+// IsProcess checks if the given PID is a Codex process.
+func (p Codex) IsProcess(pid int) bool {
+	cmd := getProcCmdline(pid)
+	return p.MatchesProcess(cmd)
+}
+
+var codexProcessPattern = regexp.MustCompile(`(?i)\bcodex\b`)
+
+// MatchesProcess checks if a command string matches a Codex invocation.
+func (Codex) MatchesProcess(cmd string) bool {
+	return codexProcessPattern.MatchString(cmd)
+}
 
 type CodexSessionInfo struct {
 	SessionID   string
@@ -471,8 +502,7 @@ func ensureCodexHooksConfig(config, configPath, binaryPath string) string {
 	config = removeManagedBlock(config, confabCodexHooksStart, confabCodexHooksEnd)
 	config = ensureCodexHooksFeature(config)
 	sessionStartGroupIndex := countCodexHookMatcherGroups(config, "SessionStart")
-	stopGroupIndex := countCodexHookMatcherGroups(config, "Stop")
-	return appendTOMLBlock(config, confabCodexHooksStart+"\n"+codexHooksTOML(configPath, binaryPath, sessionStartGroupIndex, stopGroupIndex)+confabCodexHooksEnd+"\n")
+	return appendTOMLBlock(config, confabCodexHooksStart+"\n"+codexHooksTOML(configPath, binaryPath, sessionStartGroupIndex)+confabCodexHooksEnd+"\n")
 }
 
 func ensureCodexHooksFeature(config string) string {
@@ -541,15 +571,17 @@ func countCodexHookMatcherGroups(config, eventName string) int {
 	return len(re.FindAllStringIndex(config, -1))
 }
 
-func codexHooksTOML(configPath, binaryPath string, sessionStartGroupIndex, stopGroupIndex int) string {
+// codexHooksTOML emits the managed Codex hook block. We install only
+// SessionStart — Codex fires Stop at every agent/turn boundary (including
+// root rollout stops while the interactive session is still alive), so a Stop
+// hook would prematurely kill the root sync daemon. Daemon shutdown is driven
+// by parent-process liveness instead (see Codex.FindParentPID).
+func codexHooksTOML(configPath, binaryPath string, sessionStartGroupIndex int) string {
 	escapedBinaryPath := strings.ReplaceAll(binaryPath, `\`, `\\`)
 	escapedBinaryPath = strings.ReplaceAll(escapedBinaryPath, `"`, `\"`)
 	sessionStartCommand := binaryPath + " hook session-start --provider codex"
-	sessionEndCommand := binaryPath + " hook session-end --provider codex"
 	sessionStartHash := codexTrustedHookHash("session_start", "startup|resume|clear", sessionStartCommand, "Starting Confab sync")
-	sessionEndHash := codexTrustedHookHash("stop", "", sessionEndCommand, "Stopping Confab sync")
 	sessionStartKey := tomlQuoteString(fmt.Sprintf("%s:session_start:%d:0", configPath, sessionStartGroupIndex))
-	sessionEndKey := tomlQuoteString(fmt.Sprintf("%s:stop:%d:0", configPath, stopGroupIndex))
 	return fmt.Sprintf(`[[hooks.SessionStart]]
 matcher = "startup|resume|clear"
 [[hooks.SessionStart.hooks]]
@@ -557,18 +589,9 @@ type = "command"
 command = "%s hook session-start --provider codex"
 statusMessage = "Starting Confab sync"
 
-[[hooks.Stop]]
-[[hooks.Stop.hooks]]
-type = "command"
-command = "%s hook session-end --provider codex"
-statusMessage = "Stopping Confab sync"
-
 [hooks.state.%s]
 trusted_hash = "%s"
-
-[hooks.state.%s]
-trusted_hash = "%s"
-`, escapedBinaryPath, escapedBinaryPath, sessionStartKey, sessionStartHash, sessionEndKey, sessionEndHash)
+`, escapedBinaryPath, sessionStartKey, sessionStartHash)
 }
 
 type codexHookTrustIdentity struct {

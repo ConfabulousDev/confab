@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/klauspost/compress/zstd"
+	"github.com/ConfabulousDev/confab/pkg/provider"
 	"github.com/ConfabulousDev/confab/pkg/sync"
 )
 
@@ -1704,74 +1705,88 @@ func TestDaemonSIGTERMFinalSync(t *testing.T) {
 }
 
 // TestDaemonParentProcessExit tests that daemon shuts down when parent process exits.
-// This handles cases where Claude Code crashes or is killed without firing SessionEnd hook.
+// This handles cases where the parent CLI (Claude Code or Codex) crashes or is
+// killed without firing a session-end signal. The parent-exit branch in the
+// daemon loop is provider-agnostic; this test pins that invariant.
 func TestDaemonParentProcessExit(t *testing.T) {
-	mock := newMockBackend(t)
-	server := httptest.NewServer(mock)
-	defer server.Close()
-
-	tmpDir, transcriptPath := setupTestEnv(t, server.URL)
-
-	// Create transcript
-	os.WriteFile(transcriptPath, []byte(`{"type":"system","line":1}`+"\n"), 0644)
-
-	// Start a subprocess that we can kill to simulate parent exit.
-	// We use "sleep" as a simple long-running process.
-	sleepCmd := exec.Command("sleep", "60")
-	if err := sleepCmd.Start(); err != nil {
-		t.Fatalf("Failed to start sleep process: %v", err)
+	providers := []struct {
+		name         string
+		providerName string
+	}{
+		{"claude-code", provider.NameClaudeCode},
+		{"codex", provider.NameCodex},
 	}
-	parentPID := sleepCmd.Process.Pid
+	for _, tc := range providers {
+		t.Run(tc.name, func(t *testing.T) {
+			mock := newMockBackend(t)
+			server := httptest.NewServer(mock)
+			defer server.Close()
 
-	// Ensure we clean up the sleep process
-	defer func() {
-		sleepCmd.Process.Kill()
-		sleepCmd.Wait()
-	}()
+			tmpDir, transcriptPath := setupTestEnv(t, server.URL)
 
-	d := New(Config{
-		ExternalID:         "parent-exit-test",
-		TranscriptPath:     transcriptPath,
-		CWD:                tmpDir,
-		ParentPID:          parentPID, // Monitor the sleep process
-		SyncInterval:       100 * time.Millisecond,
-		SyncIntervalJitter: 0,
-	})
+			// Create transcript
+			os.WriteFile(transcriptPath, []byte(`{"type":"system","line":1}`+"\n"), 0644)
 
-	ctx := context.Background()
+			// Start a subprocess that we can kill to simulate parent exit.
+			// We use "sleep" as a simple long-running process.
+			sleepCmd := exec.Command("sleep", "60")
+			if err := sleepCmd.Start(); err != nil {
+				t.Fatalf("Failed to start sleep process: %v", err)
+			}
+			parentPID := sleepCmd.Process.Pid
 
-	errCh := make(chan error, 1)
-	startTime := time.Now()
-	go func() {
-		errCh <- d.Run(ctx)
-	}()
+			// Ensure we clean up the sleep process
+			defer func() {
+				sleepCmd.Process.Kill()
+				sleepCmd.Wait()
+			}()
 
-	// Wait for daemon to start and perform initial sync
-	time.Sleep(200 * time.Millisecond)
+			d := New(Config{
+				Provider:           tc.providerName,
+				ExternalID:         "parent-exit-test-" + tc.name,
+				TranscriptPath:     transcriptPath,
+				CWD:                tmpDir,
+				ParentPID:          parentPID, // Monitor the sleep process
+				SyncInterval:       100 * time.Millisecond,
+				SyncIntervalJitter: 0,
+			})
 
-	// Verify daemon is running and syncing
-	if len(mock.getInitRequests()) == 0 {
-		t.Fatal("Expected daemon to initialize before parent kill")
-	}
+			ctx := context.Background()
 
-	// Kill the "parent" process
-	if err := sleepCmd.Process.Kill(); err != nil {
-		t.Fatalf("Failed to kill sleep process: %v", err)
-	}
-	sleepCmd.Wait() // Reap the zombie
+			errCh := make(chan error, 1)
+			startTime := time.Now()
+			go func() {
+				errCh <- d.Run(ctx)
+			}()
 
-	// Daemon should detect parent exit and shut down within a few sync intervals
-	select {
-	case <-errCh:
-		elapsed := time.Since(startTime)
-		t.Logf("Parent exit test: daemon shut down in %.1fs after parent killed", elapsed.Seconds())
-	case <-time.After(5 * time.Second):
-		t.Fatal("Daemon did not exit after parent process was killed")
-	}
+			// Wait for daemon to start and perform initial sync
+			time.Sleep(200 * time.Millisecond)
 
-	// Verify final sync occurred (shutdown should trigger it)
-	if len(mock.getChunkRequests()) == 0 {
-		t.Error("Expected at least one chunk upload (initial or final sync)")
+			// Verify daemon is running and syncing
+			if len(mock.getInitRequests()) == 0 {
+				t.Fatal("Expected daemon to initialize before parent kill")
+			}
+
+			// Kill the "parent" process
+			if err := sleepCmd.Process.Kill(); err != nil {
+				t.Fatalf("Failed to kill sleep process: %v", err)
+			}
+			sleepCmd.Wait() // Reap the zombie
+
+			// Daemon should detect parent exit and shut down within a few sync intervals
+			select {
+			case <-errCh:
+				elapsed := time.Since(startTime)
+				t.Logf("Parent exit test (%s): daemon shut down in %.1fs after parent killed", tc.name, elapsed.Seconds())
+			case <-time.After(5 * time.Second):
+				t.Fatal("Daemon did not exit after parent process was killed")
+			}
+
+			// Verify final sync occurred (shutdown should trigger it)
+			if len(mock.getChunkRequests()) == 0 {
+				t.Error("Expected at least one chunk upload (initial or final sync)")
+			}
+		})
 	}
 }
 

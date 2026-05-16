@@ -79,15 +79,23 @@ trust_level = "trusted"
 		confabCodexHooksStart,
 		"[[hooks.SessionStart]]",
 		"command = \"/usr/local/bin/confab hook session-start --provider codex\"",
-		"[[hooks.Stop]]",
-		"command = \"/usr/local/bin/confab hook session-end --provider codex\"",
 		`[hooks.state."/Users/test/.codex/config.toml:session_start:0:0"]`,
-		`[hooks.state."/Users/test/.codex/config.toml:stop:0:0"]`,
 		`trusted_hash = "sha256:`,
 		confabCodexHooksEnd,
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("expected generated config to contain %q\n%s", want, got)
+		}
+	}
+	// Codex fires Stop at agent/turn boundaries, so we must not install a
+	// Stop hook that would prematurely kill the root daemon.
+	for _, notWant := range []string{
+		"[[hooks.Stop]]",
+		"hook session-end --provider codex",
+		`[hooks.state."/Users/test/.codex/config.toml:stop:0:0"]`,
+	} {
+		if strings.Contains(got, notWant) {
+			t.Fatalf("expected managed block to omit %q\n%s", notWant, got)
 		}
 	}
 }
@@ -115,29 +123,14 @@ matcher = "startup"
 [[hooks.SessionStart.hooks]]
 type = "command"
 command = "/usr/bin/other start"
-
-[[hooks.Stop]]
-[[hooks.Stop.hooks]]
-type = "command"
-command = "/usr/bin/other stop"
 `
 
 	got := ensureCodexHooksConfig(input, "/Users/test/.codex/config.toml", "/usr/local/bin/confab")
-	for _, want := range []string{
-		`[hooks.state."/Users/test/.codex/config.toml:session_start:1:0"]`,
-		`[hooks.state."/Users/test/.codex/config.toml:stop:1:0"]`,
-	} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("expected generated config to contain %q\n%s", want, got)
-		}
+	if want := `[hooks.state."/Users/test/.codex/config.toml:session_start:1:0"]`; !strings.Contains(got, want) {
+		t.Fatalf("expected generated config to contain %q\n%s", want, got)
 	}
-	for _, notWant := range []string{
-		`[hooks.state."/Users/test/.codex/config.toml:session_start:0:0"]`,
-		`[hooks.state."/Users/test/.codex/config.toml:stop:0:0"]`,
-	} {
-		if strings.Contains(got, notWant) {
-			t.Fatalf("generated config contains stale positional trust key %q\n%s", notWant, got)
-		}
+	if notWant := `[hooks.state."/Users/test/.codex/config.toml:session_start:0:0"]`; strings.Contains(got, notWant) {
+		t.Fatalf("generated config contains stale positional trust key %q\n%s", notWant, got)
 	}
 }
 
@@ -151,20 +144,10 @@ func TestCodexTrustedHookHashMatchesKnownCodexHashes(t *testing.T) {
 	if want := "sha256:d1f33ff2cf043a857782a0bb0661ae66a4d05446ae116f0774b7b5629af0a987"; startHash != want {
 		t.Fatalf("session-start trusted hash = %q, want %q", startHash, want)
 	}
-
-	stopHash := codexTrustedHookHash(
-		"stop",
-		"",
-		"/Users/jackie/.local/bin/confab hook session-end --provider codex",
-		"Stopping Confab sync",
-	)
-	if want := "sha256:f9058d7f2c0414b4f14b1d55a14f855dc4b610a3a9064e43eff7a0508fb83fb1"; stopHash != want {
-		t.Fatalf("stop trusted hash = %q, want %q", stopHash, want)
-	}
 }
 
 func TestCodexHooksTOMLEscapesTrustStateKey(t *testing.T) {
-	got := codexHooksTOML(`/tmp/codex "quoted"/config.toml`, `/tmp/confab`, 0, 0)
+	got := codexHooksTOML(`/tmp/codex "quoted"/config.toml`, `/tmp/confab`, 0)
 	if !strings.Contains(got, `[hooks.state."/tmp/codex \"quoted\"/config.toml:session_start:0:0"]`) {
 		t.Fatalf("expected quoted session-start trust key, got:\n%s", got)
 	}
@@ -340,6 +323,37 @@ func TestFlattenCodexSource(t *testing.T) {
 			got := flattenCodexSource([]byte(tc.in))
 			if got != tc.want {
 				t.Errorf("flattenCodexSource(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestCodexMatchesProcess(t *testing.T) {
+	p := Codex{}
+	tests := []struct {
+		name    string
+		cmd     string
+		matches bool
+	}{
+		{"bare binary", "codex", true},
+		{"absolute path", "/usr/local/bin/codex", true},
+		{"with args", "codex --foo bar", true},
+		{"mixed case", "Codex", true},
+		{"node wrapper", "node /opt/codex/bin/codex.js", true},
+		{"word boundary path", "/usr/local/bin/codex-cli", true},
+
+		{"substring only", "xcoder", false},
+		{"vscode", "/Applications/Visual Studio Code.app/Contents/MacOS/Code", false},
+		{"precodex", "precodex", false},
+		{"codexsmith", "/usr/bin/codexsmith", false},
+		{"embedded substring", "mycodexapp", false},
+		{"empty", "", false},
+		{"unrelated", "/bin/bash", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := p.MatchesProcess(tt.cmd); got != tt.matches {
+				t.Fatalf("MatchesProcess(%q) = %v, want %v", tt.cmd, got, tt.matches)
 			}
 		})
 	}

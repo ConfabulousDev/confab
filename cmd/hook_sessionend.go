@@ -21,14 +21,19 @@ This command is called by the SessionEnd hook configured in
 a final sync and shut down gracefully.
 
 When called from a hook, it reads session info from stdin and
-signals the daemon to stop.`,
+signals the daemon to stop.
+
+This command is not supported for Codex. Codex fires Stop at every
+agent/turn boundary, so a Stop-driven shutdown would prematurely kill
+the root sync daemon. Codex daemons shut down via parent-process
+liveness instead (see Codex.FindParentPID).`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		providerName, err := provider.NormalizeName(hookProviderName)
 		if err != nil {
 			return err
 		}
 		if providerName == provider.NameCodex {
-			return codexSessionEndFromHook()
+			return fmt.Errorf("session-end is not used for codex; daemons shut down via parent-process liveness. Remove any [[hooks.Stop]] entry that invokes this command from ~/.codex/config.toml")
 		}
 		return sessionEndFromHook()
 	},
@@ -73,30 +78,3 @@ func sessionEndFromReader(r io.Reader) error {
 	return nil
 }
 
-func codexSessionEndFromHook() error {
-	return codexSessionEndFromReader(os.Stdin)
-}
-
-func codexSessionEndFromReader(r io.Reader) error {
-	logger.Info("Stopping Codex sync daemon (hook mode)")
-
-	defer func() { writeCodexHookResponse(os.Stdout, false, "") }()
-
-	fmt.Fprintln(os.Stderr, "=== Confab: Stopping Codex Sync Daemon ===")
-	fmt.Fprintln(os.Stderr)
-
-	hookInput, err := provider.Codex{}.ReadHookInput(r)
-	if err != nil {
-		logger.ErrorPrint("Error reading Codex hook input: %v", err)
-		return nil
-	}
-
-	if err := daemon.StopDaemonForProvider(provider.NameCodex, hookInput.SessionID, nil); err != nil {
-		logger.Warn("Could not stop Codex daemon: %v", err)
-		fmt.Fprintf(os.Stderr, "Note: %v\n", err)
-	} else {
-		fmt.Fprintln(os.Stderr, "Codex daemon signaled to stop (final sync in background)")
-	}
-
-	return nil
-}

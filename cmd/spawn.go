@@ -18,6 +18,11 @@ import (
 var spawnDaemonFunc = spawnDaemonImpl
 var spawnCodexDaemonFunc = spawnCodexDaemonImpl
 
+// codexFindParentPIDFunc resolves the Codex parent PID for daemon liveness.
+// Overridable in tests so they can assert wiring without depending on the
+// real process tree.
+var codexFindParentPIDFunc = func() int { return provider.Codex{}.FindParentPID() }
+
 type daemonLaunchInput struct {
 	Provider       string `json:"provider"`
 	ExternalID     string `json:"external_id"`
@@ -82,6 +87,11 @@ func maybeSpawnCodexDaemon(hookInput *types.CodexHookInput) (spawned bool, err e
 		logger.Info("Codex daemon already running: pid=%d", existingState.PID)
 		return false, nil
 	}
+
+	// Find Codex's PID by walking up the process tree. Codex has no usable
+	// SessionEnd signal (Stop fires at every turn boundary), so daemon
+	// shutdown relies entirely on parent-PID liveness.
+	hookInput.ParentPID = codexFindParentPIDFunc()
 
 	if err := spawnCodexDaemonFunc(hookInput); err != nil {
 		return false, fmt.Errorf("failed to spawn Codex daemon: %w", err)
@@ -152,6 +162,7 @@ func spawnCodexDaemonImpl(hookInput *types.CodexHookInput) error {
 		ExternalID:     hookInput.SessionID,
 		TranscriptPath: hookInput.TranscriptPath,
 		CWD:            hookInput.CWD,
+		ParentPID:      hookInput.ParentPID,
 	}
 	launchJSON, err := json.Marshal(launch)
 	if err != nil {
@@ -168,7 +179,7 @@ func spawnCodexDaemonImpl(hookInput *types.CodexHookInput) error {
 		return fmt.Errorf("failed to start daemon: %w", err)
 	}
 
-	state := daemon.NewStateForProvider(provider.NameCodex, hookInput.SessionID, hookInput.TranscriptPath, hookInput.CWD, 0)
+	state := daemon.NewStateForProvider(provider.NameCodex, hookInput.SessionID, hookInput.TranscriptPath, hookInput.CWD, hookInput.ParentPID)
 	state.PID = cmd.Process.Pid
 	if err := state.Save(); err != nil {
 		logger.Warn("Failed to save initial Codex state: %v", err)

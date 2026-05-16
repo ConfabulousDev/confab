@@ -344,6 +344,69 @@ func TestMaybeSpawnCodexDaemon(t *testing.T) {
 			t.Fatal("expected spawned=false when transcript path is missing")
 		}
 	})
+
+	t.Run("populates parent PID from Codex provider", func(t *testing.T) {
+		tmpDir := setupCodexSyncTestEnv(t)
+
+		origFind := codexFindParentPIDFunc
+		defer func() { codexFindParentPIDFunc = origFind }()
+		codexFindParentPIDFunc = func() int { return 4242 }
+
+		var captured *types.CodexHookInput
+		spawnCodexDaemonFunc = func(hookInput *types.CodexHookInput) error {
+			captured = hookInput
+			return nil
+		}
+
+		sessionID := "77777777-7777-7777-7777-777777777777"
+		rolloutPath := writeCodexTestRollout(t, tmpDir, sessionID, `"thread_source":"user","cwd":"/work/user"`)
+
+		_, err := maybeSpawnCodexDaemon(&types.CodexHookInput{
+			SessionID:      sessionID,
+			TranscriptPath: rolloutPath,
+			CWD:            "/work/user",
+		})
+		if err != nil {
+			t.Fatalf("maybeSpawnCodexDaemon failed: %v", err)
+		}
+		if captured == nil {
+			t.Fatal("expected spawnCodexDaemonFunc to be called")
+		}
+		if captured.ParentPID != 4242 {
+			t.Errorf("ParentPID = %d, want 4242 (stubbed FindParentPID result)", captured.ParentPID)
+		}
+	})
+
+	t.Run("skips parent PID lookup for subagent rollout", func(t *testing.T) {
+		tmpDir := setupCodexSyncTestEnv(t)
+
+		origFind := codexFindParentPIDFunc
+		defer func() { codexFindParentPIDFunc = origFind }()
+		codexFindParentPIDFunc = func() int {
+			t.Fatal("FindParentPID must not be called for subagent rollouts")
+			return 0
+		}
+
+		spawnCodexDaemonFunc = func(hookInput *types.CodexHookInput) error {
+			t.Fatal("should not spawn for subagent rollout")
+			return nil
+		}
+
+		sessionID := "88888888-8888-8888-8888-888888888888"
+		rolloutPath := writeCodexTestRollout(t, tmpDir, sessionID, `"thread_source":"subagent","cwd":"/work/agent","agent_role":"reviewer"`)
+
+		spawned, err := maybeSpawnCodexDaemon(&types.CodexHookInput{
+			SessionID:      sessionID,
+			TranscriptPath: rolloutPath,
+			CWD:            "/work/agent",
+		})
+		if err != nil {
+			t.Fatalf("maybeSpawnCodexDaemon failed: %v", err)
+		}
+		if spawned {
+			t.Fatal("expected spawned=false for subagent rollout")
+		}
+	})
 }
 
 func TestSpawnDaemonWritesState(t *testing.T) {

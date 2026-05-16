@@ -24,9 +24,19 @@ This package does **not** define a generic provider interface, a normalized hook
 - Paths: `StateDir` (override via `CONFAB_CODEX_DIR`), `SessionsDir`, `ConfigPath`.
 - Rollout discovery: `SessionIDFromRolloutPath`, `ScanSessions`, `FindSessionByID` (user sessions only), `FindRolloutByID` (any rollout — used by `confab save` to accept subagent UUIDs), `ReadSessionInfo`, internal `walkRollouts` helper.
 - Filtering: `CodexSessionInfo.IsUserSession()` excludes subagents/memory rollouts by `thread_source` and `agent_*` metadata.
-- Hooks: `ReadHookInput`, `ReadSessionHookInput`, `InstallHooks`/`UninstallHooks` for `~/.codex/config.toml` (preserves user config, makes backups, idempotent, enables `features.hooks = true`, removes deprecated `features.codex_hooks`).
+- Hooks: `ReadHookInput`, `ReadSessionHookInput`, `InstallHooks`/`UninstallHooks` for `~/.codex/config.toml` (preserves user config, makes backups, idempotent, enables `features.hooks = true`, removes deprecated `features.codex_hooks`). Only `SessionStart` is installed — see [Codex daemon shutdown](#codex-daemon-shutdown).
+- Parent detection: `FindParentPID`, `IsProcess`, `MatchesProcess` (regex `(?i)\bcodex\b`) for daemon parent-liveness monitoring, mirroring `ClaudeCode`.
 - Transcript metadata: `ExtractFirstUserMessageFromLines` reads the first `event_msg.user_message` from rollout lines, trims whitespace, and truncates to `types.MaxFirstUserMessageLength` on a UTF-8 boundary.
 - Path validation: `ValidateRolloutPath` requires an absolute path under `SessionsDir` matching `rollout-<timestamp>-<uuid>.jsonl`.
+
+### Codex daemon shutdown
+
+Codex fires `Stop` at every agent/turn boundary, including root rollout stops while the interactive Codex session is still alive. Wiring `confab hook session-end` to `[[hooks.Stop]]` would therefore kill the root sync daemon prematurely. Instead:
+
+- `Codex.InstallHooks` writes only `[[hooks.SessionStart]]` into the managed block.
+- `cmd/spawn.go` stores `Codex.FindParentPID()` on the daemon at spawn time.
+- The daemon's main loop (`pkg/daemon/daemon.go`) monitors that PID and shuts down when the interactive Codex process exits — same mechanism Claude Code uses.
+- `confab hook session-end --provider codex` is rejected with an explicit error pointing users at their `~/.codex/config.toml`.
 - Local state DB (`codex_state.go`): reads Codex's `~/.codex/state_*.sqlite` (read-only, highest numeric suffix wins; `CONFAB_CODEX_STATE_DB` overrides). `WalkUpToRoot(threadUUID)` walks the `thread_spawn_edges` chain to the top-most root with a 5×50ms retry budget for the spawn-vs-edge race (and a `thread_source='user'` fast-path that skips retries for known roots). `ListSubtree(rootUUID)` returns every descendant via a recursive CTE. All paths degrade gracefully when the DB is unavailable — callers see `(threadUUID, "", nil)` for `WalkUpToRoot` and a nil slice for `ListSubtree`.
 
 ## Invariants
@@ -41,7 +51,8 @@ This package does **not** define a generic provider interface, a normalized hook
 - `Codex.InstallHooks` is idempotent and never strips unmanaged Codex config sections.
 - `Codex.WalkUpToRoot` is the single point that converts a firing thread UUID to its top-most root. All Codex daemon spawning and `confab save` invocations route through it, so subagent rollouts always upload under the root's session — never as orphan sessions.
 - `Codex.WalkUpToRoot` never returns the empty string for the root UUID; on any failure mode (no DB, schema mismatch, edge-race exhausted) it returns the input thread UUID so callers can keep moving.
-- Parent PID detection is Claude-specific and not part of a generic provider interface.
+- Parent PID detection is provider-specific (`ClaudeCode.FindParentPID`, `Codex.FindParentPID`) and not part of a generic provider interface; both providers share the package-level `getProcCmdline` / `getParentPID` helpers in `claude.go`.
+- `Codex.InstallHooks` installs only `SessionStart`. Daemon shutdown is driven by parent-PID liveness, never by Codex `Stop`.
 
 ## Used By
 
