@@ -76,6 +76,6 @@ Tests cover hook installation/uninstallation, atomic updates under concurrency, 
 
 ## Dependencies
 
-**Uses:** `pkg/logger` (logging), `pkg/provider` (path constants)
+**Uses:** `pkg/logger` (logging). `paths.go` deliberately does not import `pkg/provider` even though it owns parallel constants — `pkg/provider` now imports `pkg/config` (for `ClaudeCode.InstallHooks` etc.), so the inverse import would cycle. The duplicated `ClaudeStateDirEnv` constant must stay in sync between the two packages.
 
 **Used by:** `cmd/` (setup, login, hooks, status), `pkg/daemon/` (state dir), `pkg/discovery/` (paths), `pkg/http/` (upload config), `pkg/redactor/` (redaction patterns), `pkg/sync/` (upload config)

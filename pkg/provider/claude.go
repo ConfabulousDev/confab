@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/ConfabulousDev/confab/pkg/config"
 	"github.com/ConfabulousDev/confab/pkg/logger"
 	"github.com/ConfabulousDev/confab/pkg/types"
 )
@@ -19,6 +20,87 @@ const ClaudeStateDirEnv = "CONFAB_CLAUDE_DIR"
 
 // ClaudeCode contains Claude Code-specific local behavior.
 type ClaudeCode struct{}
+
+var _ Provider = ClaudeCode{}
+
+// Name returns the canonical Claude Code provider name.
+func (ClaudeCode) Name() string { return NameClaudeCode }
+
+// ParseSessionHook reads a Claude SessionStart hook payload and returns
+// the provider-agnostic view. The typed payload is recoverable via the
+// adapter's Inner() method.
+func (p ClaudeCode) ParseSessionHook(r io.Reader) (HookInput, error) {
+	in, err := p.ReadSessionHookInput(r)
+	if err != nil {
+		return nil, err
+	}
+	return claudeHookInputAdapter{inner: in}, nil
+}
+
+// WalkUpToRoot is the identity walk for Claude Code: there is no thread
+// tree, so the firing session is always its own root and rootPath is "".
+func (ClaudeCode) WalkUpToRoot(sessionID string) (string, string, error) {
+	return sessionID, "", nil
+}
+
+// ShouldSpawnForInput is unconditional for Claude Code.
+func (ClaudeCode) ShouldSpawnForInput(HookInput) bool { return true }
+
+// InstallHooks installs all four Confab hook bundles (sync, PreToolUse,
+// PostToolUse, UserPromptSubmit). Returns the settings.json path.
+func (p ClaudeCode) InstallHooks() (string, error) {
+	installers := []func() error{
+		config.InstallSyncHooks,
+		config.InstallPreToolUseHooks,
+		config.InstallPostToolUseHooks,
+		config.InstallUserPromptSubmitHook,
+	}
+	for _, install := range installers {
+		if err := install(); err != nil {
+			return "", err
+		}
+	}
+	return p.SettingsPath()
+}
+
+// UninstallHooks removes all four Confab hook bundles. Returns the
+// settings.json path even if no hooks were present.
+func (p ClaudeCode) UninstallHooks() (string, error) {
+	uninstallers := []func() error{
+		config.UninstallSyncHooks,
+		config.UninstallPreToolUseHooks,
+		config.UninstallPostToolUseHooks,
+		config.UninstallUserPromptSubmitHook,
+	}
+	for _, uninstall := range uninstallers {
+		if err := uninstall(); err != nil {
+			return "", err
+		}
+	}
+	return p.SettingsPath()
+}
+
+// IsHooksInstalled reports whether all four Confab hook bundles for
+// Claude Code are installed. Mirrors InstallHooks: true only when every
+// bundle is present.
+func (ClaudeCode) IsHooksInstalled() (bool, error) {
+	checks := []func() (bool, error){
+		config.IsSyncHooksInstalled,
+		config.IsPreToolUseHooksInstalled,
+		config.IsPostToolUseHooksInstalled,
+		config.IsUserPromptSubmitHookInstalled,
+	}
+	for _, check := range checks {
+		ok, err := check()
+		if err != nil {
+			return false, err
+		}
+		if !ok {
+			return false, nil
+		}
+	}
+	return true, nil
+}
 
 // StateDir returns the Claude state directory.
 // Defaults to ~/.claude but can be overridden with CONFAB_CLAUDE_DIR.
