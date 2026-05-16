@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,6 +15,24 @@ import (
 	"github.com/ConfabulousDev/confab/pkg/provider"
 	"github.com/ConfabulousDev/confab/pkg/types"
 )
+
+// runCodexSessionStart wraps the unified sessionStartFromReader with the
+// Codex provider selected and a throwaway response writer. Tests don't
+// inspect the hook response.
+func runCodexSessionStart(t *testing.T, in []byte) error {
+	t.Helper()
+	return runCodexSessionStartRaw(t, in)
+}
+
+// runCodexSessionStartRaw accepts the raw payload bytes (callers that
+// build the JSON ad-hoc).
+func runCodexSessionStartRaw(t *testing.T, in []byte) error {
+	t.Helper()
+	orig := hookProviderName
+	hookProviderName = provider.NameCodex
+	defer func() { hookProviderName = orig }()
+	return sessionStartFromReader(bytes.NewReader(in), io.Discard)
+}
 
 // codexHookInputJSON builds a Codex SessionStart hook payload for sessionID
 // pointing at rolloutPath. cwd is fixed; tests don't care about it.
@@ -47,28 +66,28 @@ func setupCodexHookEnv(t *testing.T) (*codextest.Fixture, string) {
 }
 
 func TestCodexHook_FiringSessionIsRoot_SpawnsDaemonForItself(t *testing.T) {
-	origSpawn := spawnCodexDaemonFunc
-	defer func() { spawnCodexDaemonFunc = origSpawn }()
+	origSpawn := spawnDaemonFunc
+	defer func() { spawnDaemonFunc = origSpawn }()
 
 	fixture, _ := setupCodexHookEnv(t)
 	root := fixture.AddRoot("root-aaa")
 	rootID := root.ThreadUUID()
 
-	var captured *types.CodexHookInput
-	spawnCodexDaemonFunc = func(h *types.CodexHookInput) error {
-		captured = h
+	var captured *daemonLaunchInput
+	spawnDaemonFunc = func(launch *daemonLaunchInput) error {
+		captured = launch
 		return nil
 	}
 
 	in := codexHookInputJSON(t, rootID, root.Path())
-	if err := codexSessionStartFromReader(bytes.NewReader(in)); err != nil {
+	if err := runCodexSessionStart(t, in); err != nil {
 		t.Fatalf("hook: %v", err)
 	}
 	if captured == nil {
 		t.Fatal("expected spawn to be called for a root")
 	}
-	if captured.SessionID != rootID {
-		t.Errorf("session = %q, want root %q", captured.SessionID, rootID)
+	if captured.ExternalID != rootID {
+		t.Errorf("session = %q, want root %q", captured.ExternalID, rootID)
 	}
 	if captured.TranscriptPath != root.Path() {
 		t.Errorf("transcript = %q, want %q", captured.TranscriptPath, root.Path())
@@ -76,29 +95,29 @@ func TestCodexHook_FiringSessionIsRoot_SpawnsDaemonForItself(t *testing.T) {
 }
 
 func TestCodexHook_FiringSessionIsDirectChild_WalksUpToRoot_SpawnsDaemonForRoot(t *testing.T) {
-	origSpawn := spawnCodexDaemonFunc
-	defer func() { spawnCodexDaemonFunc = origSpawn }()
+	origSpawn := spawnDaemonFunc
+	defer func() { spawnDaemonFunc = origSpawn }()
 
 	fixture, _ := setupCodexHookEnv(t)
 	root := fixture.AddRoot("root-bbb")
 	child := fixture.AddSubagent(root.ThreadUUID(), "child-bbb",
 		codextest.SubagentOpts{AgentRole: "worker"})
 
-	var captured *types.CodexHookInput
-	spawnCodexDaemonFunc = func(h *types.CodexHookInput) error {
-		captured = h
+	var captured *daemonLaunchInput
+	spawnDaemonFunc = func(launch *daemonLaunchInput) error {
+		captured = launch
 		return nil
 	}
 
 	in := codexHookInputJSON(t, child.ThreadUUID(), child.Path())
-	if err := codexSessionStartFromReader(bytes.NewReader(in)); err != nil {
+	if err := runCodexSessionStart(t, in); err != nil {
 		t.Fatalf("hook: %v", err)
 	}
 	if captured == nil {
 		t.Fatal("expected spawn to be called")
 	}
-	if captured.SessionID != root.ThreadUUID() {
-		t.Errorf("daemon spawned for %q, want root %q", captured.SessionID, root.ThreadUUID())
+	if captured.ExternalID != root.ThreadUUID() {
+		t.Errorf("daemon spawned for %q, want root %q", captured.ExternalID, root.ThreadUUID())
 	}
 	if captured.TranscriptPath != root.Path() {
 		t.Errorf("transcript path not rewritten: got %q, want %q",
@@ -107,8 +126,8 @@ func TestCodexHook_FiringSessionIsDirectChild_WalksUpToRoot_SpawnsDaemonForRoot(
 }
 
 func TestCodexHook_FiringSessionIsGrandchild_WalksUpToTopMostRoot(t *testing.T) {
-	origSpawn := spawnCodexDaemonFunc
-	defer func() { spawnCodexDaemonFunc = origSpawn }()
+	origSpawn := spawnDaemonFunc
+	defer func() { spawnDaemonFunc = origSpawn }()
 
 	fixture, _ := setupCodexHookEnv(t)
 	root := fixture.AddRoot("root-ccc")
@@ -117,22 +136,22 @@ func TestCodexHook_FiringSessionIsGrandchild_WalksUpToTopMostRoot(t *testing.T) 
 	grand := fixture.AddSubagent(child.ThreadUUID(), "grand-ccc",
 		codextest.SubagentOpts{AgentRole: "leaf"})
 
-	var captured *types.CodexHookInput
-	spawnCodexDaemonFunc = func(h *types.CodexHookInput) error {
-		captured = h
+	var captured *daemonLaunchInput
+	spawnDaemonFunc = func(launch *daemonLaunchInput) error {
+		captured = launch
 		return nil
 	}
 
 	in := codexHookInputJSON(t, grand.ThreadUUID(), grand.Path())
-	if err := codexSessionStartFromReader(bytes.NewReader(in)); err != nil {
+	if err := runCodexSessionStart(t, in); err != nil {
 		t.Fatalf("hook: %v", err)
 	}
 	if captured == nil {
 		t.Fatal("expected spawn to be called")
 	}
-	if captured.SessionID != root.ThreadUUID() {
+	if captured.ExternalID != root.ThreadUUID() {
 		t.Errorf("daemon spawned for %q, want top-most root %q",
-			captured.SessionID, root.ThreadUUID())
+			captured.ExternalID, root.ThreadUUID())
 	}
 	if captured.TranscriptPath != root.Path() {
 		t.Errorf("transcript path = %q, want top-most root %q",
@@ -141,8 +160,8 @@ func TestCodexHook_FiringSessionIsGrandchild_WalksUpToTopMostRoot(t *testing.T) 
 }
 
 func TestCodexHook_RootDaemonAlreadyRunning_HookExitsWithoutSpawning(t *testing.T) {
-	origSpawn := spawnCodexDaemonFunc
-	defer func() { spawnCodexDaemonFunc = origSpawn }()
+	origSpawn := spawnDaemonFunc
+	defer func() { spawnDaemonFunc = origSpawn }()
 
 	fixture, _ := setupCodexHookEnv(t)
 	root := fixture.AddRoot("root-ddd")
@@ -157,13 +176,13 @@ func TestCodexHook_RootDaemonAlreadyRunning_HookExitsWithoutSpawning(t *testing.
 	}
 
 	var spawnCalled bool
-	spawnCodexDaemonFunc = func(h *types.CodexHookInput) error {
+	spawnDaemonFunc = func(launch *daemonLaunchInput) error {
 		spawnCalled = true
 		return nil
 	}
 
 	in := codexHookInputJSON(t, child.ThreadUUID(), child.Path())
-	if err := codexSessionStartFromReader(bytes.NewReader(in)); err != nil {
+	if err := runCodexSessionStart(t, in); err != nil {
 		t.Fatalf("hook: %v", err)
 	}
 	if spawnCalled {
@@ -172,8 +191,8 @@ func TestCodexHook_RootDaemonAlreadyRunning_HookExitsWithoutSpawning(t *testing.
 }
 
 func TestCodexHook_DaemonStateExistsButDaemonDead_CleansStaleStateAndSpawns(t *testing.T) {
-	origSpawn := spawnCodexDaemonFunc
-	defer func() { spawnCodexDaemonFunc = origSpawn }()
+	origSpawn := spawnDaemonFunc
+	defer func() { spawnDaemonFunc = origSpawn }()
 
 	fixture, _ := setupCodexHookEnv(t)
 	root := fixture.AddRoot("root-eee")
@@ -186,27 +205,27 @@ func TestCodexHook_DaemonStateExistsButDaemonDead_CleansStaleStateAndSpawns(t *t
 		t.Fatalf("save stale state: %v", err)
 	}
 
-	var captured *types.CodexHookInput
-	spawnCodexDaemonFunc = func(h *types.CodexHookInput) error {
-		captured = h
+	var captured *daemonLaunchInput
+	spawnDaemonFunc = func(launch *daemonLaunchInput) error {
+		captured = launch
 		return nil
 	}
 
 	in := codexHookInputJSON(t, root.ThreadUUID(), root.Path())
-	if err := codexSessionStartFromReader(bytes.NewReader(in)); err != nil {
+	if err := runCodexSessionStart(t, in); err != nil {
 		t.Fatalf("hook: %v", err)
 	}
 	if captured == nil {
 		t.Fatal("expected spawn when previous daemon is dead")
 	}
-	if captured.SessionID != root.ThreadUUID() {
-		t.Errorf("session = %q, want %q", captured.SessionID, root.ThreadUUID())
+	if captured.ExternalID != root.ThreadUUID() {
+		t.Errorf("session = %q, want %q", captured.ExternalID, root.ThreadUUID())
 	}
 }
 
 func TestCodexHook_EdgeRaceWithRetry_EdgeAppearsMidWait_RoutesCorrectly(t *testing.T) {
-	origSpawn := spawnCodexDaemonFunc
-	defer func() { spawnCodexDaemonFunc = origSpawn }()
+	origSpawn := spawnDaemonFunc
+	defer func() { spawnDaemonFunc = origSpawn }()
 
 	// Keep the delay short and the retry budget generous enough for loaded CI
 	// runners. The test still proves that the first no-edge lookup retries.
@@ -221,28 +240,28 @@ func TestCodexHook_EdgeRaceWithRetry_EdgeAppearsMidWait_RoutesCorrectly(t *testi
 	child := fixture.AddSubagentNoEdge(t, "child-fff", subOpts)
 	fixture.InsertEdgeLater(root.ThreadUUID(), child.ThreadUUID(), 10*time.Millisecond)
 
-	var captured *types.CodexHookInput
-	spawnCodexDaemonFunc = func(h *types.CodexHookInput) error {
-		captured = h
+	var captured *daemonLaunchInput
+	spawnDaemonFunc = func(launch *daemonLaunchInput) error {
+		captured = launch
 		return nil
 	}
 
 	in := codexHookInputJSON(t, child.ThreadUUID(), child.Path())
-	if err := codexSessionStartFromReader(bytes.NewReader(in)); err != nil {
+	if err := runCodexSessionStart(t, in); err != nil {
 		t.Fatalf("hook: %v", err)
 	}
 	if captured == nil {
 		t.Fatal("expected spawn after retry")
 	}
-	if captured.SessionID != root.ThreadUUID() {
+	if captured.ExternalID != root.ThreadUUID() {
 		t.Errorf("session = %q, want root %q after edge race resolved",
-			captured.SessionID, root.ThreadUUID())
+			captured.ExternalID, root.ThreadUUID())
 	}
 }
 
 func TestCodexHook_EdgeRaceExhausted_TreatsFiringSessionAsRoot(t *testing.T) {
-	origSpawn := spawnCodexDaemonFunc
-	defer func() { spawnCodexDaemonFunc = origSpawn }()
+	origSpawn := spawnDaemonFunc
+	defer func() { spawnDaemonFunc = origSpawn }()
 
 	provider.SetWalkUpRetryForTest(2, 5*time.Millisecond)
 	defer provider.ResetWalkUpRetryForTest()
@@ -252,22 +271,22 @@ func TestCodexHook_EdgeRaceExhausted_TreatsFiringSessionAsRoot(t *testing.T) {
 	orphan := fixture.AddSubagentNoEdge(t, "orphan-ggg",
 		codextest.SubagentOpts{AgentRole: "orphan", ThreadSource: "agent"})
 
-	var captured *types.CodexHookInput
-	spawnCodexDaemonFunc = func(h *types.CodexHookInput) error {
-		captured = h
+	var captured *daemonLaunchInput
+	spawnDaemonFunc = func(launch *daemonLaunchInput) error {
+		captured = launch
 		return nil
 	}
 
 	in := codexHookInputJSON(t, orphan.ThreadUUID(), orphan.Path())
-	if err := codexSessionStartFromReader(bytes.NewReader(in)); err != nil {
+	if err := runCodexSessionStart(t, in); err != nil {
 		t.Fatalf("hook: %v", err)
 	}
 	if captured == nil {
 		t.Fatal("expected spawn even when retries exhaust")
 	}
-	if captured.SessionID != orphan.ThreadUUID() {
+	if captured.ExternalID != orphan.ThreadUUID() {
 		t.Errorf("session = %q, want firing thread %q (treated as root after retry exhaustion)",
-			captured.SessionID, orphan.ThreadUUID())
+			captured.ExternalID, orphan.ThreadUUID())
 	}
 	if captured.TranscriptPath != orphan.Path() {
 		t.Errorf("transcript = %q, want %q", captured.TranscriptPath, orphan.Path())
@@ -275,8 +294,8 @@ func TestCodexHook_EdgeRaceExhausted_TreatsFiringSessionAsRoot(t *testing.T) {
 }
 
 func TestCodexHook_StateDBAbsent_DegradesToFiringSessionAsRoot(t *testing.T) {
-	origSpawn := spawnCodexDaemonFunc
-	defer func() { spawnCodexDaemonFunc = origSpawn }()
+	origSpawn := spawnDaemonFunc
+	defer func() { spawnDaemonFunc = origSpawn }()
 
 	// No fixture — point the provider at a directory with no state_*.sqlite.
 	tmpHome := t.TempDir()
@@ -302,9 +321,9 @@ func TestCodexHook_StateDBAbsent_DegradesToFiringSessionAsRoot(t *testing.T) {
 		t.Fatalf("write rollout: %v", err)
 	}
 
-	var captured *types.CodexHookInput
-	spawnCodexDaemonFunc = func(h *types.CodexHookInput) error {
-		captured = h
+	var captured *daemonLaunchInput
+	spawnDaemonFunc = func(launch *daemonLaunchInput) error {
+		captured = launch
 		return nil
 	}
 
@@ -312,15 +331,15 @@ func TestCodexHook_StateDBAbsent_DegradesToFiringSessionAsRoot(t *testing.T) {
 	// rollout file is empty → ReadSessionInfo returns the default (IsUserSession==true);
 	// daemon spawn proceeds. With no state DB present, WalkUpToRoot degrades to
 	// "firing session is its own root".
-	if err := codexSessionStartFromReader(bytes.NewReader(
-		codexHookInputJSON(t, sessionID, rolloutPath))); err != nil {
+	if err := runCodexSessionStartRaw(t,
+		codexHookInputJSON(t, sessionID, rolloutPath)); err != nil {
 		t.Fatalf("hook: %v", err)
 	}
 	if captured == nil {
 		t.Fatal("expected spawn even with no state DB")
 	}
-	if captured.SessionID != sessionID {
-		t.Errorf("session = %q, want firing UUID %q", captured.SessionID, sessionID)
+	if captured.ExternalID != sessionID {
+		t.Errorf("session = %q, want firing UUID %q", captured.ExternalID, sessionID)
 	}
 }
 
@@ -328,9 +347,34 @@ func TestCodexHook_StateDBAbsent_DegradesToFiringSessionAsRoot(t *testing.T) {
 // the resolved root's daemon is already running. We don't assert on the
 // response body (the Codex hook is fire-and-forget), only that no panic
 // or hang occurs.
+// TestCodexHook_DoesNotInstallClaudeSkills guards against a regression
+// where Codex SessionStart routed through the unified handler would
+// silently call RunAnnouncements() and write ~/.claude/skills/{til,retro}/
+// for Codex-only users.
+func TestCodexHook_DoesNotInstallClaudeSkills(t *testing.T) {
+	origSpawn := spawnDaemonFunc
+	defer func() { spawnDaemonFunc = origSpawn }()
+	spawnDaemonFunc = func(launch *daemonLaunchInput) error { return nil }
+
+	fixture, tmpHome := setupCodexHookEnv(t)
+	root := fixture.AddRoot("root-no-skills")
+
+	in := codexHookInputJSON(t, root.ThreadUUID(), root.Path())
+	if err := runCodexSessionStart(t, in); err != nil {
+		t.Fatalf("hook: %v", err)
+	}
+
+	for _, skill := range []string{"til", "retro"} {
+		path := filepath.Join(tmpHome, ".claude", "skills", skill)
+		if _, err := os.Stat(path); err == nil {
+			t.Errorf("Codex SessionStart leaked Claude skill into %s", path)
+		}
+	}
+}
+
 func TestCodexHook_RespondsWithoutPanic_WhenNoSpawn(t *testing.T) {
-	origSpawn := spawnCodexDaemonFunc
-	defer func() { spawnCodexDaemonFunc = origSpawn }()
+	origSpawn := spawnDaemonFunc
+	defer func() { spawnDaemonFunc = origSpawn }()
 
 	fixture, _ := setupCodexHookEnv(t)
 	root := fixture.AddRoot("root-hhh")
@@ -342,13 +386,13 @@ func TestCodexHook_RespondsWithoutPanic_WhenNoSpawn(t *testing.T) {
 		t.Fatalf("save state: %v", err)
 	}
 
-	spawnCodexDaemonFunc = func(h *types.CodexHookInput) error {
+	spawnDaemonFunc = func(launch *daemonLaunchInput) error {
 		t.Fatal("should not spawn when daemon already running")
 		return nil
 	}
 
 	in := codexHookInputJSON(t, root.ThreadUUID(), root.Path())
-	if err := codexSessionStartFromReader(bytes.NewReader(in)); err != nil {
+	if err := runCodexSessionStart(t, in); err != nil {
 		t.Fatalf("hook: %v", err)
 	}
 	// Sanity: hook input was valid (no malformed-path errors swallowed).

@@ -8,14 +8,14 @@ CLI command layer built on [Cobra](https://github.com/spf13/cobra). Each file de
 |------|------|
 | `root.go` | Root command, persistent pre/post hooks, logger init |
 | `hook.go` | Parent command for hook handlers (`confab hook <type>`) |
-| `hook_sessionstart.go` | `session-start` hook: spawns sync daemon |
-| `hook_sessionend.go` | `session-end` hook: stops sync daemon |
+| `hook_sessionstart.go` | `session-start` hook: spawns sync daemon. Provider-agnostic — selects via `--provider` flag and routes through `provider.Provider`. |
+| `hook_sessionend.go` | `session-end` hook: stops sync daemon (Claude only; Codex shutdown is parent-PID driven and explicitly rejects this command) |
 | `hook_pretooluse.go` | `pre-tool-use` hook: injects Confab links into git commits and PRs |
 | `hook_posttooluse.go` | `post-tool-use` hook: links GitHub artifacts to Confab sessions |
 | `hook_userpromptsubmit.go` | `user-prompt-submit` hook: ensures daemon is running |
-| `hooks.go` | `confab hooks add/remove` — install/uninstall hooks in Claude Code settings |
+| `hooks.go` | `confab hooks add/remove --provider <name>` — install/uninstall hooks for the selected provider via `p.InstallHooks()` |
 | `sync.go` | `confab sync start/stop/status` — daemon management |
-| `spawn.go` | Daemon spawning utilities, Claude PID detection |
+| `spawn.go` | Generic `maybeSpawnDaemon(p, *daemonLaunchInput)` — single dispatch for Claude and Codex daemon spawn. `daemonLaunchInput` is the canonical wire format between the hook and the freshly-spawned daemon process. |
 | `login.go` | Device code auth flow and API key login |
 | `logout.go` | Clear stored credentials |
 | `setup.go` | One-command setup: auth + hooks |
@@ -88,12 +88,11 @@ confab
 
 This is a cross-cutting change spanning multiple packages:
 
-1. **`cmd/hook_<name>.go`** — Create hook handler. Read JSON from stdin, do work, write `ClaudeHookResponse` JSON to stdout
-2. **`pkg/config/config.go`** — Add `Install<Name>Hook()`, `Uninstall<Name>Hook()`, `Is<Name>HookInstalled()`
-3. **`cmd/hooks.go`** — Add install/uninstall calls in `hooksAddCmd` and `hooksRemoveCmd`
-4. **`cmd/status.go`** — Add status check for the new hook
-5. **`cmd/setup.go`** — Add to the setup flow
-6. **`cmd/hook.go`** — Register the new hook command under `hookCmd`
+1. **`cmd/hook_<name>.go`** — Create hook handler. Read JSON from stdin via `p.ParseSessionHook(r)`, do work, write the response via `p.WriteHookResponse(w, ...)`.
+2. **`pkg/hookconfig/{claude,codex}.go`** — Add `Install<Name>Hook()`, `Uninstall<Name>Hook()`, `Is<Name>HookInstalled()`. Wire them into the provider's `InstallHooks` / `UninstallHooks` / `IsHooksInstalled` in `pkg/provider/{claude,codex}.go`.
+3. **`cmd/hooks.go`** — No change needed; `p.InstallHooks()` covers it.
+4. **`cmd/status.go`** — No change needed; `p.IsHooksInstalled()` covers it.
+5. **`cmd/hook.go`** — Register the new hook command under `hookCmd`.
 
 ### Adding a new skill
 
@@ -110,7 +109,7 @@ This is a cross-cutting change spanning multiple packages:
 - **Tar extraction in `update.go` has size and path limits.** Extracted files are bounded to prevent zip-bomb attacks, and paths are validated to prevent directory traversal.
 - **Hook commands must read JSON from stdin and complete quickly.** Claude Code blocks waiting for hook responses. Long-running work must be delegated (e.g., daemon spawn).
 - **Hook commands must not write to stdout except for `ClaudeHookResponse` JSON.** Claude Code parses stdout as the hook response. Use stderr for status messages.
-- **All Claude hooks use `pkg/types.ClaudeHookInput`.** Parsed via the Claude provider; session hooks also validate `transcript_path`.
+- **Hook commands parse stdin via `p.ParseSessionHook(r)`.** Returns the provider-agnostic `provider.HookInput` view. Session hooks also validate `transcript_path`.
 - **Hook handlers must always output valid JSON**, even on error. An error should produce a response with `continue: true` rather than crashing with no output.
 - **Commands use `RunE` (not `Run`)** to return errors. Cobra handles error display.
 
@@ -120,11 +119,13 @@ This is a cross-cutting change spanning multiple packages:
 
 **`hook.go` dispatches vs. separate binaries.** All hooks go through a single `confab hook <type>` command rather than separate binaries. This simplifies installation (one binary) and hook management (consistent command pattern).
 
-**`spawn.go` uses `os.StartProcess` with `Setpgid`.** The daemon must outlive the hook command. `Setpgid: true` creates a new process group so the daemon isn't killed when the hook exits. `exec.Command` with `Start()` would work too, but `os.StartProcess` gives more control over the process attributes.
+**`spawn.go` uses `exec.Command` with `Setpgid`.** The daemon must outlive the hook command. `Setpgid: true` creates a new process group so the daemon isn't killed when the hook exits.
 
-**`maybeSpawnDaemon` is called from both `session-start` and `user-prompt-submit`.** The `user-prompt-submit` hook handles the "teleport" case where Claude Code resumes a session without firing `SessionStart`. If the daemon isn't running, it spawns one.
+**`maybeSpawnDaemon(p, *daemonLaunchInput)` is generic over the provider.** Both `session-start` and `user-prompt-submit` call it. The function asks the provider's `ShouldSpawnForInput` gate, checks for an already-running daemon via `daemon.LoadStateForProvider`, fills in `ParentPID` via `p.FindParentPID()`, and spawns. The `launchAsHookInput` internal adapter bridges the `HookInput` interface signature to the mutable `daemonLaunchInput` so `WalkUpToRoot` rewrites can land on the spawn-side struct.
 
-**Codex SessionStart rewrites firing UUID to top-most root.** Codex fires SessionStart for every spawned subagent rollout, not just user sessions. `codexSessionStartFromReader` calls `provider.Codex{}.WalkUpToRoot(hookInput.SessionID)` before spawning the daemon, so every subagent SessionStart that lands in an already-running root tree becomes a no-op via the existing state-file dedup. `confab save --provider codex <subagent-uuid>` performs the same walk-up so manual saves of any UUID in a tree always sync the whole tree.
+**SessionStart routes every firing through `p.WalkUpToRoot`.** Identity for Claude; thread-edge walk for Codex. For Codex, every subagent SessionStart that lands in an already-running root tree becomes a no-op via state-file dedup. `confab save --provider codex <subagent-uuid>` performs the same walk-up so manual saves of any UUID in a tree always sync the whole tree.
+
+**Announcements (`/til`, `/retro` skill auto-install) only run for Claude.** They write to `~/.claude/skills/` and surface Claude-only slash commands; running them on Codex SessionStart would silently install Claude config files for users who never installed Claude Code.
 
 **Testable function pattern.** Hook handlers extract core logic into functions that take `io.Reader`/`io.Writer` parameters (e.g., `sessionStartFromReader(r io.Reader, w io.Writer)`). Tests call these directly without needing stdin/stdout. Some functions use overridable function variables (e.g., `spawnDaemonFunc`) for test injection.
 

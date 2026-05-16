@@ -1,6 +1,8 @@
 package provider
 
 import (
+	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -124,6 +126,43 @@ func mkdirAll(path string) error {
 	return os.MkdirAll(path, 0700)
 }
 
+func TestClaudeCodeWriteHookResponse(t *testing.T) {
+	var buf bytes.Buffer
+	if err := (ClaudeCode{}).WriteHookResponse(&buf, true, "hello"); err != nil {
+		t.Fatalf("WriteHookResponse() error = %v", err)
+	}
+	var got types.ClaudeHookResponse
+	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+		t.Fatalf("response not valid JSON: %v", err)
+	}
+	if !got.Continue {
+		t.Error("Continue = false, want true")
+	}
+	if !got.SuppressOutput {
+		t.Error("SuppressOutput = false, want true")
+	}
+	if got.SystemMessage != "hello" {
+		t.Errorf("SystemMessage = %q, want %q", got.SystemMessage, "hello")
+	}
+}
+
+func TestClaudeCodeInstallSkills(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv(ClaudeStateDirEnv, tmpDir)
+
+	if err := (ClaudeCode{}).InstallSkills(); err != nil {
+		t.Fatalf("InstallSkills() error = %v", err)
+	}
+	// At least one skill file must have been written under the skills dir.
+	entries, err := os.ReadDir(filepath.Join(tmpDir, "skills"))
+	if err != nil {
+		t.Fatalf("skills dir missing: %v", err)
+	}
+	if len(entries) == 0 {
+		t.Fatal("InstallSkills() wrote no skill files")
+	}
+}
+
 func TestClaudeCodeName(t *testing.T) {
 	if got := (ClaudeCode{}).Name(); got != NameClaudeCode {
 		t.Fatalf("Name() = %q, want %q", got, NameClaudeCode)
@@ -185,14 +224,10 @@ func TestClaudeCodeParseSessionHook(t *testing.T) {
 		t.Errorf("HookEventName() = %q", got)
 	}
 
-	// Adapter must expose typed inner struct for callers that need
-	// hook-specific fields (e.g., Prompt for UserPromptSubmit).
-	adapter, ok := in.(claudeHookInputAdapter)
-	if !ok {
+	// Adapter type assertion confirms ParseSessionHook returned the
+	// expected wrapper.
+	if _, ok := in.(claudeHookInputAdapter); !ok {
 		t.Fatalf("ParseSessionHook returned %T, want claudeHookInputAdapter", in)
-	}
-	if adapter.Inner() == nil {
-		t.Fatal("adapter.Inner() returned nil")
 	}
 }
 

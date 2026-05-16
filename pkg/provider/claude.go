@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/ConfabulousDev/confab/pkg/config"
+	"github.com/ConfabulousDev/confab/pkg/hookconfig"
 	"github.com/ConfabulousDev/confab/pkg/logger"
 	"github.com/ConfabulousDev/confab/pkg/types"
 )
@@ -27,8 +29,7 @@ var _ Provider = ClaudeCode{}
 func (ClaudeCode) Name() string { return NameClaudeCode }
 
 // ParseSessionHook reads a Claude SessionStart hook payload and returns
-// the provider-agnostic view. The typed payload is recoverable via the
-// adapter's Inner() method.
+// the provider-agnostic view.
 func (p ClaudeCode) ParseSessionHook(r io.Reader) (HookInput, error) {
 	in, err := p.ReadSessionHookInput(r)
 	if err != nil {
@@ -50,10 +51,10 @@ func (ClaudeCode) ShouldSpawnForInput(HookInput) bool { return true }
 // PostToolUse, UserPromptSubmit). Returns the settings.json path.
 func (p ClaudeCode) InstallHooks() (string, error) {
 	installers := []func() error{
-		config.InstallSyncHooks,
-		config.InstallPreToolUseHooks,
-		config.InstallPostToolUseHooks,
-		config.InstallUserPromptSubmitHook,
+		hookconfig.InstallSyncHooks,
+		hookconfig.InstallPreToolUseHooks,
+		hookconfig.InstallPostToolUseHooks,
+		hookconfig.InstallUserPromptSubmitHook,
 	}
 	for _, install := range installers {
 		if err := install(); err != nil {
@@ -67,10 +68,10 @@ func (p ClaudeCode) InstallHooks() (string, error) {
 // settings.json path even if no hooks were present.
 func (p ClaudeCode) UninstallHooks() (string, error) {
 	uninstallers := []func() error{
-		config.UninstallSyncHooks,
-		config.UninstallPreToolUseHooks,
-		config.UninstallPostToolUseHooks,
-		config.UninstallUserPromptSubmitHook,
+		hookconfig.UninstallSyncHooks,
+		hookconfig.UninstallPreToolUseHooks,
+		hookconfig.UninstallPostToolUseHooks,
+		hookconfig.UninstallUserPromptSubmitHook,
 	}
 	for _, uninstall := range uninstallers {
 		if err := uninstall(); err != nil {
@@ -80,15 +81,33 @@ func (p ClaudeCode) UninstallHooks() (string, error) {
 	return p.SettingsPath()
 }
 
+// InstallSkills installs the Claude Code skills shipped with confab
+// (/til and /retro).
+func (ClaudeCode) InstallSkills() error {
+	if err := config.InstallTilSkill(); err != nil {
+		return err
+	}
+	return config.InstallRetroSkill()
+}
+
+// WriteHookResponse writes a ClaudeHookResponse to w.
+func (ClaudeCode) WriteHookResponse(w io.Writer, suppressOutput bool, systemMessage string) error {
+	return json.NewEncoder(w).Encode(types.ClaudeHookResponse{
+		Continue:       true,
+		SuppressOutput: suppressOutput,
+		SystemMessage:  systemMessage,
+	})
+}
+
 // IsHooksInstalled reports whether all four Confab hook bundles for
 // Claude Code are installed. Mirrors InstallHooks: true only when every
 // bundle is present.
 func (ClaudeCode) IsHooksInstalled() (bool, error) {
 	checks := []func() (bool, error){
-		config.IsSyncHooksInstalled,
-		config.IsPreToolUseHooksInstalled,
-		config.IsPostToolUseHooksInstalled,
-		config.IsUserPromptSubmitHookInstalled,
+		hookconfig.IsSyncHooksInstalled,
+		hookconfig.IsPreToolUseHooksInstalled,
+		hookconfig.IsPostToolUseHooksInstalled,
+		hookconfig.IsUserPromptSubmitHookInstalled,
 	}
 	for _, check := range checks {
 		ok, err := check()

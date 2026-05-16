@@ -21,20 +21,20 @@ func TestMaybeSpawnDaemon(t *testing.T) {
 		tmpDir := setupSyncTestEnv(t)
 
 		var spawnCalled bool
-		var spawnedInput *types.ClaudeHookInput
-		spawnDaemonFunc = func(hookInput *types.ClaudeHookInput) error {
+		var spawnedInput *daemonLaunchInput
+		spawnDaemonFunc = func(launch *daemonLaunchInput) error {
 			spawnCalled = true
-			spawnedInput = hookInput
+			spawnedInput = launch
 			return nil
 		}
 
-		hookInput := &types.ClaudeHookInput{
-			SessionID:      "new-session-1234-1234-1234-123456789abc",
+		launch := &daemonLaunchInput{
+			ExternalID:     "new-session-1234-1234-1234-123456789abc",
 			TranscriptPath: filepath.Join(tmpDir, "transcript.jsonl"),
 			CWD:            tmpDir,
 		}
 
-		spawned, err := maybeSpawnDaemon(provider.ClaudeCode{}, hookInput)
+		spawned, err := maybeSpawnDaemon(provider.ClaudeCode{}, launch)
 		if err != nil {
 			t.Fatalf("maybeSpawnDaemon failed: %v", err)
 		}
@@ -45,8 +45,8 @@ func TestMaybeSpawnDaemon(t *testing.T) {
 		if !spawnCalled {
 			t.Error("expected spawnDaemonFunc to be called")
 		}
-		if spawnedInput.SessionID != hookInput.SessionID {
-			t.Errorf("expected session_id %q, got %q", hookInput.SessionID, spawnedInput.SessionID)
+		if spawnedInput.ExternalID != launch.ExternalID {
+			t.Errorf("expected external_id %q, got %q", launch.ExternalID, spawnedInput.ExternalID)
 		}
 	})
 
@@ -54,7 +54,7 @@ func TestMaybeSpawnDaemon(t *testing.T) {
 		tmpDir := setupSyncTestEnv(t)
 
 		var spawnCalled bool
-		spawnDaemonFunc = func(hookInput *types.ClaudeHookInput) error {
+		spawnDaemonFunc = func(launch *daemonLaunchInput) error {
 			spawnCalled = true
 			return nil
 		}
@@ -64,13 +64,13 @@ func TestMaybeSpawnDaemon(t *testing.T) {
 		// Create existing daemon state with current PID (appears running)
 		createFakeDaemonState(t, tmpDir, sessionID, os.Getpid())
 
-		hookInput := &types.ClaudeHookInput{
-			SessionID:      sessionID,
+		launch := &daemonLaunchInput{
+			ExternalID:     sessionID,
 			TranscriptPath: filepath.Join(tmpDir, "transcript.jsonl"),
 			CWD:            tmpDir,
 		}
 
-		spawned, err := maybeSpawnDaemon(provider.ClaudeCode{}, hookInput)
+		spawned, err := maybeSpawnDaemon(provider.ClaudeCode{}, launch)
 		if err != nil {
 			t.Fatalf("maybeSpawnDaemon failed: %v", err)
 		}
@@ -87,7 +87,7 @@ func TestMaybeSpawnDaemon(t *testing.T) {
 		tmpDir := setupSyncTestEnv(t)
 
 		var spawnCalled bool
-		spawnDaemonFunc = func(hookInput *types.ClaudeHookInput) error {
+		spawnDaemonFunc = func(launch *daemonLaunchInput) error {
 			spawnCalled = true
 			return nil
 		}
@@ -97,13 +97,13 @@ func TestMaybeSpawnDaemon(t *testing.T) {
 		// Create stale state (non-existent PID)
 		createFakeDaemonState(t, tmpDir, sessionID, 0)
 
-		hookInput := &types.ClaudeHookInput{
-			SessionID:      sessionID,
+		launch := &daemonLaunchInput{
+			ExternalID:     sessionID,
 			TranscriptPath: filepath.Join(tmpDir, "transcript.jsonl"),
 			CWD:            tmpDir,
 		}
 
-		spawned, err := maybeSpawnDaemon(provider.ClaudeCode{}, hookInput)
+		spawned, err := maybeSpawnDaemon(provider.ClaudeCode{}, launch)
 		if err != nil {
 			t.Fatalf("maybeSpawnDaemon failed: %v", err)
 		}
@@ -119,51 +119,52 @@ func TestMaybeSpawnDaemon(t *testing.T) {
 	t.Run("sets parent PID from Claude provider", func(t *testing.T) {
 		setupSyncTestEnv(t)
 
-		var capturedInput *types.ClaudeHookInput
-		spawnDaemonFunc = func(hookInput *types.ClaudeHookInput) error {
-			capturedInput = hookInput
+		var captured *daemonLaunchInput
+		spawnDaemonFunc = func(launch *daemonLaunchInput) error {
+			captured = launch
 			return nil
 		}
 
-		hookInput := &types.ClaudeHookInput{
-			SessionID:      "parent-pid-test-1234-1234-123456789abc",
+		launch := &daemonLaunchInput{
+			ExternalID:     "parent-pid-test-1234-1234-123456789abc",
 			TranscriptPath: "/tmp/transcript.jsonl",
 			CWD:            "/tmp",
 			ParentPID:      0, // Initially unset
 		}
 
-		_, err := maybeSpawnDaemon(provider.ClaudeCode{}, hookInput)
+		_, err := maybeSpawnDaemon(provider.ClaudeCode{}, launch)
 		if err != nil {
 			t.Fatalf("maybeSpawnDaemon failed: %v", err)
 		}
 
 		// ParentPID should be set by maybeSpawnDaemon via the Claude provider.
 		// It might be 0 if Claude isn't the parent, but the field should be populated
-		if capturedInput == nil {
+		if captured == nil {
 			t.Fatal("expected spawnDaemonFunc to be called")
 		}
-		// We can't easily test the exact value since it depends on process tree,
-		// but we verify the hookInput was passed through
-		if capturedInput.SessionID != hookInput.SessionID {
-			t.Errorf("expected session_id to be passed through")
+		if captured.ExternalID != launch.ExternalID {
+			t.Errorf("expected external_id to be passed through")
+		}
+		if captured.Provider != provider.NameClaudeCode {
+			t.Errorf("expected Provider=%q on captured launch, got %q", provider.NameClaudeCode, captured.Provider)
 		}
 	})
 
 	t.Run("fails when transcript_path is missing", func(t *testing.T) {
 		setupSyncTestEnv(t)
 
-		spawnDaemonFunc = func(hookInput *types.ClaudeHookInput) error {
+		spawnDaemonFunc = func(launch *daemonLaunchInput) error {
 			t.Error("should not call spawnDaemonFunc when transcript_path is missing")
 			return nil
 		}
 
-		hookInput := &types.ClaudeHookInput{
-			SessionID:      "missing-path-1234-1234-123456789abc",
+		launch := &daemonLaunchInput{
+			ExternalID:     "missing-path-1234-1234-123456789abc",
 			TranscriptPath: "", // Missing!
 			CWD:            "/tmp",
 		}
 
-		spawned, err := maybeSpawnDaemon(provider.ClaudeCode{}, hookInput)
+		spawned, err := maybeSpawnDaemon(provider.ClaudeCode{}, launch)
 		if err == nil {
 			t.Error("expected error when transcript_path is missing")
 		}
@@ -173,76 +174,72 @@ func TestMaybeSpawnDaemon(t *testing.T) {
 	})
 }
 
-func TestMaybeSpawnCodexDaemon(t *testing.T) {
-	origSpawnCodexDaemon := spawnCodexDaemonFunc
-	defer func() { spawnCodexDaemonFunc = origSpawnCodexDaemon }()
+func TestMaybeSpawnDaemonCodex(t *testing.T) {
+	origSpawnDaemon := spawnDaemonFunc
+	defer func() { spawnDaemonFunc = origSpawnDaemon }()
 
 	t.Run("spawns daemon for user rollout", func(t *testing.T) {
 		tmpDir := setupCodexSyncTestEnv(t)
 
 		var spawnCalled bool
-		var spawnedInput *types.CodexHookInput
-		spawnCodexDaemonFunc = func(hookInput *types.CodexHookInput) error {
+		var spawnedInput *daemonLaunchInput
+		spawnDaemonFunc = func(launch *daemonLaunchInput) error {
 			spawnCalled = true
-			spawnedInput = hookInput
+			spawnedInput = launch
 			return nil
 		}
 
 		sessionID := "11111111-1111-1111-1111-111111111111"
 		rolloutPath := writeCodexTestRollout(t, tmpDir, sessionID, `"thread_source":"user","cwd":"/work/user"`)
 
-		spawned, err := maybeSpawnCodexDaemon(&types.CodexHookInput{
-			SessionID:      sessionID,
+		spawned, err := maybeSpawnDaemon(provider.Codex{}, &daemonLaunchInput{
+			ExternalID:     sessionID,
 			TranscriptPath: rolloutPath,
 			CWD:            "/work/user",
-			HookEventName:  "SessionStart",
 		})
 		if err != nil {
-			t.Fatalf("maybeSpawnCodexDaemon failed: %v", err)
+			t.Fatalf("maybeSpawnDaemon (Codex) failed: %v", err)
 		}
 		if !spawned {
 			t.Fatal("expected spawned=true for user rollout")
 		}
 		if !spawnCalled {
-			t.Fatal("expected spawnCodexDaemonFunc to be called")
+			t.Fatal("expected spawnDaemonFunc to be called")
 		}
-		if spawnedInput == nil || spawnedInput.SessionID != sessionID {
-			t.Fatalf("spawned input session = %v, want %s", spawnedInput, sessionID)
+		if spawnedInput == nil || spawnedInput.ExternalID != sessionID {
+			t.Fatalf("spawned input external_id = %v, want %s", spawnedInput, sessionID)
+		}
+		if spawnedInput.Provider != provider.NameCodex {
+			t.Errorf("expected Provider=%q, got %q", provider.NameCodex, spawnedInput.Provider)
 		}
 	})
 
-	t.Run("does not spawn for startup resume or clear when already running", func(t *testing.T) {
-		for _, source := range []string{"startup", "resume", "clear"} {
-			t.Run(source, func(t *testing.T) {
-				tmpDir := setupCodexSyncTestEnv(t)
+	t.Run("does not spawn when Codex daemon already running", func(t *testing.T) {
+		tmpDir := setupCodexSyncTestEnv(t)
 
-				spawnCodexDaemonFunc = func(hookInput *types.CodexHookInput) error {
-					t.Fatal("should not spawn when Codex daemon is already running")
-					return nil
-				}
+		spawnDaemonFunc = func(launch *daemonLaunchInput) error {
+			t.Fatal("should not spawn when Codex daemon is already running")
+			return nil
+		}
 
-				sessionID := "22222222-2222-2222-2222-222222222222"
-				rolloutPath := writeCodexTestRollout(t, tmpDir, sessionID, `"thread_source":"user","cwd":"/work/user"`)
-				state := daemon.NewStateForProvider(provider.NameCodex, sessionID, rolloutPath, "/work/user", 0)
-				state.PID = os.Getpid()
-				if err := state.Save(); err != nil {
-					t.Fatalf("failed to save state: %v", err)
-				}
+		sessionID := "22222222-2222-2222-2222-222222222222"
+		rolloutPath := writeCodexTestRollout(t, tmpDir, sessionID, `"thread_source":"user","cwd":"/work/user"`)
+		state := daemon.NewStateForProvider(provider.NameCodex, sessionID, rolloutPath, "/work/user", 0)
+		state.PID = os.Getpid()
+		if err := state.Save(); err != nil {
+			t.Fatalf("failed to save state: %v", err)
+		}
 
-				spawned, err := maybeSpawnCodexDaemon(&types.CodexHookInput{
-					SessionID:      sessionID,
-					TranscriptPath: rolloutPath,
-					CWD:            "/work/user",
-					HookEventName:  "SessionStart",
-					Source:         source,
-				})
-				if err != nil {
-					t.Fatalf("maybeSpawnCodexDaemon failed: %v", err)
-				}
-				if spawned {
-					t.Fatal("expected spawned=false when daemon is already running")
-				}
-			})
+		spawned, err := maybeSpawnDaemon(provider.Codex{}, &daemonLaunchInput{
+			ExternalID:     sessionID,
+			TranscriptPath: rolloutPath,
+			CWD:            "/work/user",
+		})
+		if err != nil {
+			t.Fatalf("maybeSpawnDaemon (Codex) failed: %v", err)
+		}
+		if spawned {
+			t.Fatal("expected spawned=false when daemon is already running")
 		}
 	})
 
@@ -250,7 +247,7 @@ func TestMaybeSpawnCodexDaemon(t *testing.T) {
 		tmpDir := setupCodexSyncTestEnv(t)
 
 		var spawnCalled bool
-		spawnCodexDaemonFunc = func(hookInput *types.CodexHookInput) error {
+		spawnDaemonFunc = func(launch *daemonLaunchInput) error {
 			spawnCalled = true
 			return nil
 		}
@@ -263,13 +260,13 @@ func TestMaybeSpawnCodexDaemon(t *testing.T) {
 			t.Fatalf("failed to save stale state: %v", err)
 		}
 
-		spawned, err := maybeSpawnCodexDaemon(&types.CodexHookInput{
-			SessionID:      sessionID,
+		spawned, err := maybeSpawnDaemon(provider.Codex{}, &daemonLaunchInput{
+			ExternalID:     sessionID,
 			TranscriptPath: rolloutPath,
 			CWD:            "/work/user",
 		})
 		if err != nil {
-			t.Fatalf("maybeSpawnCodexDaemon failed: %v", err)
+			t.Fatalf("maybeSpawnDaemon (Codex) failed: %v", err)
 		}
 		if !spawned || !spawnCalled {
 			t.Fatal("expected stale Codex state to allow respawn")
@@ -279,7 +276,7 @@ func TestMaybeSpawnCodexDaemon(t *testing.T) {
 	t.Run("skips subagent rollout", func(t *testing.T) {
 		tmpDir := setupCodexSyncTestEnv(t)
 
-		spawnCodexDaemonFunc = func(hookInput *types.CodexHookInput) error {
+		spawnDaemonFunc = func(launch *daemonLaunchInput) error {
 			t.Fatal("should not spawn for Codex subagent rollout")
 			return nil
 		}
@@ -287,13 +284,13 @@ func TestMaybeSpawnCodexDaemon(t *testing.T) {
 		sessionID := "44444444-4444-4444-4444-444444444444"
 		rolloutPath := writeCodexTestRollout(t, tmpDir, sessionID, `"thread_source":"subagent","cwd":"/work/agent","agent_role":"reviewer"`)
 
-		spawned, err := maybeSpawnCodexDaemon(&types.CodexHookInput{
-			SessionID:      sessionID,
+		spawned, err := maybeSpawnDaemon(provider.Codex{}, &daemonLaunchInput{
+			ExternalID:     sessionID,
 			TranscriptPath: rolloutPath,
 			CWD:            "/work/agent",
 		})
 		if err != nil {
-			t.Fatalf("maybeSpawnCodexDaemon failed: %v", err)
+			t.Fatalf("maybeSpawnDaemon (Codex) failed: %v", err)
 		}
 		if spawned {
 			t.Fatal("expected spawned=false for subagent rollout")
@@ -304,7 +301,7 @@ func TestMaybeSpawnCodexDaemon(t *testing.T) {
 		tmpDir := setupCodexSyncTestEnv(t)
 
 		var spawnCalled bool
-		spawnCodexDaemonFunc = func(hookInput *types.CodexHookInput) error {
+		spawnDaemonFunc = func(launch *daemonLaunchInput) error {
 			spawnCalled = true
 			return nil
 		}
@@ -312,13 +309,13 @@ func TestMaybeSpawnCodexDaemon(t *testing.T) {
 		sessionID := "55555555-5555-5555-5555-555555555555"
 		rolloutPath := codexTestRolloutPath(tmpDir, sessionID)
 
-		spawned, err := maybeSpawnCodexDaemon(&types.CodexHookInput{
-			SessionID:      sessionID,
+		spawned, err := maybeSpawnDaemon(provider.Codex{}, &daemonLaunchInput{
+			ExternalID:     sessionID,
 			TranscriptPath: rolloutPath,
 			CWD:            "/work/user",
 		})
 		if err != nil {
-			t.Fatalf("maybeSpawnCodexDaemon failed: %v", err)
+			t.Fatalf("maybeSpawnDaemon (Codex) failed: %v", err)
 		}
 		if !spawned || !spawnCalled {
 			t.Fatal("expected missing fresh rollout file to allow spawn")
@@ -328,83 +325,20 @@ func TestMaybeSpawnCodexDaemon(t *testing.T) {
 	t.Run("fails when transcript path is missing", func(t *testing.T) {
 		setupCodexSyncTestEnv(t)
 
-		spawnCodexDaemonFunc = func(hookInput *types.CodexHookInput) error {
+		spawnDaemonFunc = func(launch *daemonLaunchInput) error {
 			t.Fatal("should not spawn when transcript_path is missing")
 			return nil
 		}
 
-		spawned, err := maybeSpawnCodexDaemon(&types.CodexHookInput{
-			SessionID: "66666666-6666-6666-6666-666666666666",
-			CWD:       "/work/user",
+		spawned, err := maybeSpawnDaemon(provider.Codex{}, &daemonLaunchInput{
+			ExternalID: "66666666-6666-6666-6666-666666666666",
+			CWD:        "/work/user",
 		})
 		if err == nil {
 			t.Fatal("expected missing transcript path error")
 		}
 		if spawned {
 			t.Fatal("expected spawned=false when transcript path is missing")
-		}
-	})
-
-	t.Run("populates parent PID from Codex provider", func(t *testing.T) {
-		tmpDir := setupCodexSyncTestEnv(t)
-
-		origFind := codexFindParentPIDFunc
-		defer func() { codexFindParentPIDFunc = origFind }()
-		codexFindParentPIDFunc = func() int { return 4242 }
-
-		var captured *types.CodexHookInput
-		spawnCodexDaemonFunc = func(hookInput *types.CodexHookInput) error {
-			captured = hookInput
-			return nil
-		}
-
-		sessionID := "77777777-7777-7777-7777-777777777777"
-		rolloutPath := writeCodexTestRollout(t, tmpDir, sessionID, `"thread_source":"user","cwd":"/work/user"`)
-
-		_, err := maybeSpawnCodexDaemon(&types.CodexHookInput{
-			SessionID:      sessionID,
-			TranscriptPath: rolloutPath,
-			CWD:            "/work/user",
-		})
-		if err != nil {
-			t.Fatalf("maybeSpawnCodexDaemon failed: %v", err)
-		}
-		if captured == nil {
-			t.Fatal("expected spawnCodexDaemonFunc to be called")
-		}
-		if captured.ParentPID != 4242 {
-			t.Errorf("ParentPID = %d, want 4242 (stubbed FindParentPID result)", captured.ParentPID)
-		}
-	})
-
-	t.Run("skips parent PID lookup for subagent rollout", func(t *testing.T) {
-		tmpDir := setupCodexSyncTestEnv(t)
-
-		origFind := codexFindParentPIDFunc
-		defer func() { codexFindParentPIDFunc = origFind }()
-		codexFindParentPIDFunc = func() int {
-			t.Fatal("FindParentPID must not be called for subagent rollouts")
-			return 0
-		}
-
-		spawnCodexDaemonFunc = func(hookInput *types.CodexHookInput) error {
-			t.Fatal("should not spawn for subagent rollout")
-			return nil
-		}
-
-		sessionID := "88888888-8888-8888-8888-888888888888"
-		rolloutPath := writeCodexTestRollout(t, tmpDir, sessionID, `"thread_source":"subagent","cwd":"/work/agent","agent_role":"reviewer"`)
-
-		spawned, err := maybeSpawnCodexDaemon(&types.CodexHookInput{
-			SessionID:      sessionID,
-			TranscriptPath: rolloutPath,
-			CWD:            "/work/agent",
-		})
-		if err != nil {
-			t.Fatalf("maybeSpawnCodexDaemon failed: %v", err)
-		}
-		if spawned {
-			t.Fatal("expected spawned=false for subagent rollout")
 		}
 	})
 }
@@ -481,7 +415,7 @@ func TestUserPromptSubmitSpawnsDaemon(t *testing.T) {
 		tmpDir := setupSyncTestEnv(t)
 
 		var spawnCalled bool
-		spawnDaemonFunc = func(hookInput *types.ClaudeHookInput) error {
+		spawnDaemonFunc = func(launch *daemonLaunchInput) error {
 			spawnCalled = true
 			return nil
 		}
@@ -523,12 +457,12 @@ func TestUserPromptSubmitSpawnsDaemon(t *testing.T) {
 		tmpDir := setupSyncTestEnv(t)
 
 		var spawnCalled bool
-		spawnDaemonFunc = func(hookInput *types.ClaudeHookInput) error {
+		spawnDaemonFunc = func(launch *daemonLaunchInput) error {
 			spawnCalled = true
 			return nil
 		}
 
-		sessionID := "existing-session-1234-1234-123456789abc"
+		sessionID := "existing-session-1234-1234-1234-123456789abc"
 
 		// Create existing daemon state
 		createFakeDaemonState(t, tmpDir, sessionID, os.Getpid())
@@ -568,7 +502,7 @@ func TestUserPromptSubmitSpawnsDaemon(t *testing.T) {
 	t.Run("handles invalid JSON gracefully", func(t *testing.T) {
 		setupSyncTestEnv(t)
 
-		spawnDaemonFunc = func(hookInput *types.ClaudeHookInput) error {
+		spawnDaemonFunc = func(launch *daemonLaunchInput) error {
 			t.Error("should not spawn daemon on invalid input")
 			return nil
 		}

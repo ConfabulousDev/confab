@@ -1,6 +1,8 @@
 package provider
 
 import (
+	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -64,92 +66,6 @@ func TestCodexScanSessionsFiltersSubagents(t *testing.T) {
 	}
 	if sessions[0].CWD != "/work/user" {
 		t.Fatalf("CWD = %q", sessions[0].CWD)
-	}
-}
-
-func TestCodexEnsureHooksConfig(t *testing.T) {
-	input := `[projects."/repo"]
-trust_level = "trusted"
-`
-
-	got := ensureCodexHooksConfig(input, "/Users/test/.codex/config.toml", "/usr/local/bin/confab")
-	for _, want := range []string{
-		"[features]",
-		"hooks = true",
-		confabCodexHooksStart,
-		"[[hooks.SessionStart]]",
-		"command = \"/usr/local/bin/confab hook session-start --provider codex\"",
-		`[hooks.state."/Users/test/.codex/config.toml:session_start:0:0"]`,
-		`trusted_hash = "sha256:`,
-		confabCodexHooksEnd,
-	} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("expected generated config to contain %q\n%s", want, got)
-		}
-	}
-	// Codex fires Stop at agent/turn boundaries, so we must not install a
-	// Stop hook that would prematurely kill the root daemon.
-	for _, notWant := range []string{
-		"[[hooks.Stop]]",
-		"hook session-end --provider codex",
-		`[hooks.state."/Users/test/.codex/config.toml:stop:0:0"]`,
-	} {
-		if strings.Contains(got, notWant) {
-			t.Fatalf("expected managed block to omit %q\n%s", notWant, got)
-		}
-	}
-}
-
-func TestCodexEnsureHooksConfigIsIdempotent(t *testing.T) {
-	once := ensureCodexHooksConfig("[features]\ncodex_hooks = false\n", "/Users/test/.codex/config.toml", "/usr/local/bin/confab")
-	twice := ensureCodexHooksConfig(once, "/Users/test/.codex/config.toml", "/usr/local/bin/confab")
-	if once != twice {
-		t.Fatalf("expected idempotent config update\nonce:\n%s\n\ntwice:\n%s", once, twice)
-	}
-	if strings.Count(twice, confabCodexHooksStart) != 1 {
-		t.Fatalf("expected one managed block, got:\n%s", twice)
-	}
-	if strings.Contains(twice, "codex_hooks") {
-		t.Fatalf("expected deprecated feature flag to be removed:\n%s", twice)
-	}
-	if !strings.Contains(twice, "hooks = true") {
-		t.Fatalf("expected hooks feature flag to be enabled:\n%s", twice)
-	}
-}
-
-func TestCodexEnsureHooksConfigTrustKeysUseExistingHookPositions(t *testing.T) {
-	input := `[[hooks.SessionStart]]
-matcher = "startup"
-[[hooks.SessionStart.hooks]]
-type = "command"
-command = "/usr/bin/other start"
-`
-
-	got := ensureCodexHooksConfig(input, "/Users/test/.codex/config.toml", "/usr/local/bin/confab")
-	if want := `[hooks.state."/Users/test/.codex/config.toml:session_start:1:0"]`; !strings.Contains(got, want) {
-		t.Fatalf("expected generated config to contain %q\n%s", want, got)
-	}
-	if notWant := `[hooks.state."/Users/test/.codex/config.toml:session_start:0:0"]`; strings.Contains(got, notWant) {
-		t.Fatalf("generated config contains stale positional trust key %q\n%s", notWant, got)
-	}
-}
-
-func TestCodexTrustedHookHashMatchesKnownCodexHashes(t *testing.T) {
-	startHash := codexTrustedHookHash(
-		"session_start",
-		"startup|resume|clear",
-		"/Users/jackie/.local/bin/confab hook session-start --provider codex",
-		"Starting Confab sync",
-	)
-	if want := "sha256:d1f33ff2cf043a857782a0bb0661ae66a4d05446ae116f0774b7b5629af0a987"; startHash != want {
-		t.Fatalf("session-start trusted hash = %q, want %q", startHash, want)
-	}
-}
-
-func TestCodexHooksTOMLEscapesTrustStateKey(t *testing.T) {
-	got := codexHooksTOML(`/tmp/codex "quoted"/config.toml`, `/tmp/confab`, 0)
-	if !strings.Contains(got, `[hooks.state."/tmp/codex \"quoted\"/config.toml:session_start:0:0"]`) {
-		t.Fatalf("expected quoted session-start trust key, got:\n%s", got)
 	}
 }
 
@@ -368,6 +284,32 @@ func writeCodexRollout(t *testing.T, dir, id, metaFields string) {
 	}
 }
 
+func TestCodexWriteHookResponse(t *testing.T) {
+	var buf bytes.Buffer
+	if err := (Codex{}).WriteHookResponse(&buf, false, "starting"); err != nil {
+		t.Fatalf("WriteHookResponse() error = %v", err)
+	}
+	var got types.CodexHookResponse
+	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+		t.Fatalf("response not valid JSON: %v", err)
+	}
+	if !got.Continue {
+		t.Error("Continue = false, want true")
+	}
+	if got.SuppressOutput {
+		t.Error("SuppressOutput = true, want false")
+	}
+	if got.SystemMessage != "starting" {
+		t.Errorf("SystemMessage = %q, want %q", got.SystemMessage, "starting")
+	}
+}
+
+func TestCodexInstallSkillsIsNoOp(t *testing.T) {
+	if err := (Codex{}).InstallSkills(); err != nil {
+		t.Fatalf("Codex.InstallSkills() error = %v, want nil (no-op)", err)
+	}
+}
+
 func TestCodexName(t *testing.T) {
 	if got := (Codex{}).Name(); got != NameCodex {
 		t.Fatalf("Name() = %q, want %q", got, NameCodex)
@@ -407,12 +349,8 @@ func TestCodexParseSessionHook(t *testing.T) {
 		t.Errorf("HookEventName() = %q", got)
 	}
 
-	adapter, ok := in.(codexHookInputAdapter)
-	if !ok {
+	if _, ok := in.(codexHookInputAdapter); !ok {
 		t.Fatalf("ParseSessionHook returned %T, want codexHookInputAdapter", in)
-	}
-	if adapter.Inner() == nil {
-		t.Fatal("adapter.Inner() returned nil")
 	}
 }
 

@@ -37,9 +37,10 @@ Confab is a CLI tool that captures Claude Code session transcripts and uploads t
 - **pkg/sync/**: Sync engine with client, tracker, and file management (handles incremental uploads)
 - **pkg/discovery/**: Session discovery - scans `~/.claude/projects/` for transcript files
 - **pkg/redactor/**: JSON-aware redaction of sensitive data before upload
-- **pkg/config/**: Configuration, Claude Code hook management (`~/.claude/settings.json`), and skill management (`~/.claude/skills/`)
+- **pkg/config/**: Configuration (Confab + Claude `settings.json` plumbing) and skill management (`~/.claude/skills/`)
+- **pkg/hookconfig/**: Per-provider hook install/uninstall — edits Claude `~/.claude/settings.json` and Codex `~/.codex/config.toml`. `pkg/provider`'s `InstallHooks` / `UninstallHooks` delegate here.
 - **pkg/http/**: HTTP client with zstd compression, auth, and retry logic
-- **pkg/provider/**: Per-tool integration (Claude Code, Codex). `codex_state.go` reads Codex's local SQLite DB to walk subagent rollouts up to their root.
+- **pkg/provider/**: `Provider` interface + Claude Code / Codex implementations. `codex_state.go` reads Codex's local SQLite DB to walk subagent rollouts up to their root. All `cmd/` dispatch routes through this interface.
 - **pkg/codextest/**: Reusable Codex SQLite + sessions-tree fixture builder used by tests in `pkg/provider`, `pkg/sync`, `pkg/daemon`, and `cmd`.
 
 ## Backend

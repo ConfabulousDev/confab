@@ -1,12 +1,14 @@
 # pkg/config
 
-Configuration management for two separate config systems: Confab's own config and Claude Code's settings (hooks).
+Configuration management for two separate config systems: Confab's own config and Claude Code's settings file.
+
+Hook install/uninstall logic lives in `pkg/hookconfig`. This package owns the generic plumbing — atomic settings updates, settings struct, paths — and the Claude Code skill files.
 
 ## Files
 
 | File | Role |
 |------|------|
-| `config.go` | Claude Code settings management: read/write `~/.claude/settings.json`, hook install/uninstall |
+| `config.go` | `ClaudeSettings` struct + `AtomicUpdateSettings` (read/modify/write `~/.claude/settings.json` with mtime-based optimistic locking). Generic accessor helpers: `GetHooksMap`, `GetEventHooks`, `SetEventHooks`. Tool-name constants used by `pkg/hookconfig`. |
 | `upload.go` | Confab config: read/write `~/.confab/config.json`, validation, default redaction patterns |
 | `paths.go` | Path resolution with environment variable overrides |
 | `skill_til.go` | `/til` Claude Code skill: install/uninstall/ensure SKILL.md in `~/.claude/skills/til/` |
@@ -39,23 +41,13 @@ Managed by `skill_til.go`, `skill_retro.go` (and future `skill_*.go` files). Ski
 3. Update the setup flow in `cmd/setup.go` to prompt for / set the field
 
 ### Adding a new hook type
-This spans multiple packages. On the config side:
-
-1. Add `Install<Name>Hook()` in `config.go` using the shared helpers:
-   - `installHook(settings, hook, event, matcher, true)` — for hooks with a matcher (e.g., `"*"`, `"Bash"`)
-   - `installHook(settings, hook, event, "", false)` — for hooks without a matcher (e.g., `UserPromptSubmit`)
-2. Add `Uninstall<Name>Hook()` using `removeHooksFromEvent(settings, event, isConfabHookEntry)` — must also handle old command patterns via custom predicates if needed
-3. Add `Is<Name>HookInstalled()` using `hasHookWithCommand()` — for status checking
-4. Then update: `cmd/hooks.go` (install/uninstall calls), `cmd/status.go` (status check), `cmd/setup.go` (setup flow), `cmd/hook.go` (dispatch)
+Hook install/uninstall lives in `pkg/hookconfig` — see that package's README. The wiring into `cmd/` flows through `pkg/provider`'s `Provider` interface: `cmd/hooks.go` and `cmd/setup.go` call `p.InstallHooks()`, which delegates to `hookconfig` per provider.
 
 ## Invariants
 
 - **Settings writes must use `AtomicUpdateSettings()`.** This provides read-modify-write with mtime-based optimistic locking and exponential backoff retry (max 10 attempts). Never read + write separately — concurrent Claude Code sessions will clobber each other.
-- **Hook install must be idempotent.** If the hook already exists, update it in place. Never duplicate hooks.
-- **Hook uninstall must handle old command patterns.** Users may have hooks installed by older Confab versions with different command strings. Uninstall must find and remove these too.
 - **Config file permissions:** `0600` for `~/.confab/config.json` (contains API key), `0600` for `~/.claude/settings.json`.
 - **Directory permissions:** `0700` for `~/.confab/` and `~/.claude/` directories created by Confab. Restrictive permissions prevent other users on shared systems from reading config or API keys.
-- **Hook helpers (`installHook`, `removeHooksFromEvent`) return errors** instead of silently failing. Callers (the `Install*Hook`/`Uninstall*Hook` functions) propagate these errors up through `AtomicUpdateSettings`.
 - **`GetDefaultRedactionPatterns()` pattern order matters.** More specific patterns (e.g., `sk-ant-api03-...`) must come before general ones (e.g., field-name-based patterns) to avoid partial matches.
 
 ## Design Decisions
@@ -64,7 +56,6 @@ This spans multiple packages. On the config side:
 
 **Mtime-based optimistic locking instead of flock.** `AtomicUpdateSettings()` checks that the file's mtime hasn't changed between read and write. If it has, it retries with backoff. This is simpler than file locking, works cross-platform, and is sufficient for the infrequent writes that hooks installation involves.
 
-**Hook matchers vary by type.** `SessionStart`/`SessionEnd` use `"*"` (fire for all events). `PreToolUse`/`PostToolUse` use tool name arrays to target specific tools (e.g., `["Bash"]`, `["mcp__github"]`). `UserPromptSubmit` has no matcher (fires for all prompts). This matches Claude Code's hook specification.
 
 ## Testing
 
@@ -72,10 +63,10 @@ This spans multiple packages. On the config side:
 go test ./pkg/config/...
 ```
 
-Tests cover hook installation/uninstallation, atomic updates under concurrency, field preservation across round-trips, and config validation.
+Tests cover atomic settings updates under concurrency, field preservation across round-trips, and config validation. Hook install/uninstall tests live in `pkg/hookconfig`.
 
 ## Dependencies
 
-**Uses:** `pkg/logger` (logging). `paths.go` deliberately does not import `pkg/provider` even though it owns parallel constants — `pkg/provider` now imports `pkg/config` (for `ClaudeCode.InstallHooks` etc.), so the inverse import would cycle. The duplicated `ClaudeStateDirEnv` constant must stay in sync between the two packages.
+**Uses:** `pkg/logger` (logging). `paths.go` deliberately does not import `pkg/provider` even though it owns parallel constants — `pkg/provider` imports `pkg/hookconfig`, which imports `pkg/config`. The duplicated `ClaudeStateDirEnv` constant must stay in sync between the two packages.
 
-**Used by:** `cmd/` (setup, login, hooks, status), `pkg/daemon/` (state dir), `pkg/discovery/` (paths), `pkg/http/` (upload config), `pkg/redactor/` (redaction patterns), `pkg/sync/` (upload config)
+**Used by:** `cmd/` (setup, login, hooks, status), `pkg/daemon/` (state dir), `pkg/discovery/` (paths), `pkg/hookconfig/` (settings struct, atomic update, tool-name constants), `pkg/http/` (upload config), `pkg/provider/` (Claude paths, skills install), `pkg/redactor/` (redaction patterns), `pkg/sync/` (upload config)

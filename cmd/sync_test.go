@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,7 +10,6 @@ import (
 	"time"
 
 	"github.com/ConfabulousDev/confab/pkg/daemon"
-	"github.com/ConfabulousDev/confab/pkg/types"
 )
 
 // setupSyncTestEnv creates temp directories and sets env vars for sync tests.
@@ -131,10 +131,10 @@ func TestSessionStartFromReader(t *testing.T) {
 
 		// Track if spawn was called
 		var spawnCalled bool
-		var spawnedInput *types.ClaudeHookInput
-		spawnDaemonFunc = func(hookInput *types.ClaudeHookInput) error {
+		var spawnedInput *daemonLaunchInput
+		spawnDaemonFunc = func(launch *daemonLaunchInput) error {
 			spawnCalled = true
-			spawnedInput = hookInput
+			spawnedInput = launch
 			return nil
 		}
 
@@ -150,7 +150,7 @@ func TestSessionStartFromReader(t *testing.T) {
 		}
 		inputJSON, _ := json.Marshal(hookInput)
 
-		err := sessionStartFromReader(strings.NewReader(string(inputJSON)))
+		err := sessionStartFromReader(strings.NewReader(string(inputJSON)), io.Discard)
 		if err != nil {
 			t.Fatalf("sessionStartFromReader failed: %v", err)
 		}
@@ -160,7 +160,7 @@ func TestSessionStartFromReader(t *testing.T) {
 		}
 
 		// Verify the spawned input contains the session ID
-		if spawnedInput == nil || !strings.Contains(spawnedInput.SessionID, "test-session-12345678") {
+		if spawnedInput == nil || !strings.Contains(spawnedInput.ExternalID, "test-session-12345678") {
 			t.Errorf("spawned input should contain session ID")
 		}
 	})
@@ -170,7 +170,7 @@ func TestSessionStartFromReader(t *testing.T) {
 
 		// Track if spawn was called
 		var spawnCalled bool
-		spawnDaemonFunc = func(hookInput *types.ClaudeHookInput) error {
+		spawnDaemonFunc = func(launch *daemonLaunchInput) error {
 			spawnCalled = true
 			return nil
 		}
@@ -192,7 +192,7 @@ func TestSessionStartFromReader(t *testing.T) {
 		}
 		inputJSON, _ := json.Marshal(hookInput)
 
-		err := sessionStartFromReader(strings.NewReader(string(inputJSON)))
+		err := sessionStartFromReader(strings.NewReader(string(inputJSON)), io.Discard)
 		if err != nil {
 			t.Fatalf("sessionStartFromReader failed: %v", err)
 		}
@@ -205,13 +205,13 @@ func TestSessionStartFromReader(t *testing.T) {
 	t.Run("invalid JSON input", func(t *testing.T) {
 		setupSyncTestEnv(t)
 
-		spawnDaemonFunc = func(hookInput *types.ClaudeHookInput) error {
+		spawnDaemonFunc = func(launch *daemonLaunchInput) error {
 			t.Error("should not spawn daemon on invalid input")
 			return nil
 		}
 
 		// Invalid JSON should not cause panic, should return nil (hooks must not fail)
-		err := sessionStartFromReader(strings.NewReader("not valid json"))
+		err := sessionStartFromReader(strings.NewReader("not valid json"), io.Discard)
 		if err != nil {
 			t.Fatalf("sessionStartFromReader should not return error: %v", err)
 		}
@@ -220,7 +220,7 @@ func TestSessionStartFromReader(t *testing.T) {
 	t.Run("missing session_id", func(t *testing.T) {
 		setupSyncTestEnv(t)
 
-		spawnDaemonFunc = func(hookInput *types.ClaudeHookInput) error {
+		spawnDaemonFunc = func(launch *daemonLaunchInput) error {
 			t.Error("should not spawn daemon on missing session_id")
 			return nil
 		}
@@ -231,7 +231,7 @@ func TestSessionStartFromReader(t *testing.T) {
 		}
 		inputJSON, _ := json.Marshal(hookInput)
 
-		err := sessionStartFromReader(strings.NewReader(string(inputJSON)))
+		err := sessionStartFromReader(strings.NewReader(string(inputJSON)), io.Discard)
 		if err != nil {
 			t.Fatalf("sessionStartFromReader should not return error: %v", err)
 		}
@@ -239,14 +239,14 @@ func TestSessionStartFromReader(t *testing.T) {
 }
 
 func TestCodexSessionStartFromReader(t *testing.T) {
-	origSpawnCodexDaemon := spawnCodexDaemonFunc
-	defer func() { spawnCodexDaemonFunc = origSpawnCodexDaemon }()
+	origSpawnDaemon := spawnDaemonFunc
+	defer func() { spawnDaemonFunc = origSpawnDaemon }()
 
 	t.Run("valid user hook input spawns daemon", func(t *testing.T) {
 		tmpDir := setupCodexSyncTestEnv(t)
 
 		var spawnCalled bool
-		spawnCodexDaemonFunc = func(hookInput *types.CodexHookInput) error {
+		spawnDaemonFunc = func(launch *daemonLaunchInput) error {
 			spawnCalled = true
 			return nil
 		}
@@ -261,8 +261,8 @@ func TestCodexSessionStartFromReader(t *testing.T) {
 			"source":          "startup",
 		})
 
-		if err := codexSessionStartFromReader(strings.NewReader(string(inputJSON))); err != nil {
-			t.Fatalf("codexSessionStartFromReader failed: %v", err)
+		if err := runCodexSessionStart(t, inputJSON); err != nil {
+			t.Fatalf("sessionStartFromReader (codex) failed: %v", err)
 		}
 		if !spawnCalled {
 			t.Fatal("expected Codex daemon spawn for user rollout")
@@ -273,7 +273,7 @@ func TestCodexSessionStartFromReader(t *testing.T) {
 		tmpDir := setupCodexSyncTestEnv(t)
 
 		var spawnCalled bool
-		spawnCodexDaemonFunc = func(hookInput *types.CodexHookInput) error {
+		spawnDaemonFunc = func(launch *daemonLaunchInput) error {
 			spawnCalled = true
 			return nil
 		}
@@ -287,8 +287,8 @@ func TestCodexSessionStartFromReader(t *testing.T) {
 			"source":          "resume",
 		})
 
-		if err := codexSessionStartFromReader(strings.NewReader(string(inputJSON))); err != nil {
-			t.Fatalf("codexSessionStartFromReader failed: %v", err)
+		if err := runCodexSessionStart(t, inputJSON); err != nil {
+			t.Fatalf("sessionStartFromReader (codex) failed: %v", err)
 		}
 		if !spawnCalled {
 			t.Fatal("expected Codex daemon spawn for fresh rollout path")
@@ -298,7 +298,7 @@ func TestCodexSessionStartFromReader(t *testing.T) {
 	t.Run("subagent rollout is skipped", func(t *testing.T) {
 		tmpDir := setupCodexSyncTestEnv(t)
 
-		spawnCodexDaemonFunc = func(hookInput *types.CodexHookInput) error {
+		spawnDaemonFunc = func(launch *daemonLaunchInput) error {
 			t.Fatal("should not spawn for Codex subagent rollout")
 			return nil
 		}
@@ -313,15 +313,15 @@ func TestCodexSessionStartFromReader(t *testing.T) {
 			"source":          "startup",
 		})
 
-		if err := codexSessionStartFromReader(strings.NewReader(string(inputJSON))); err != nil {
-			t.Fatalf("codexSessionStartFromReader failed: %v", err)
+		if err := runCodexSessionStart(t, inputJSON); err != nil {
+			t.Fatalf("sessionStartFromReader (codex) failed: %v", err)
 		}
 	})
 
 	t.Run("missing transcript path fails soft", func(t *testing.T) {
 		setupCodexSyncTestEnv(t)
 
-		spawnCodexDaemonFunc = func(hookInput *types.CodexHookInput) error {
+		spawnDaemonFunc = func(launch *daemonLaunchInput) error {
 			t.Fatal("should not spawn when Codex transcript_path is missing")
 			return nil
 		}
@@ -332,21 +332,21 @@ func TestCodexSessionStartFromReader(t *testing.T) {
 			"hook_event_name": "SessionStart",
 		})
 
-		if err := codexSessionStartFromReader(strings.NewReader(string(inputJSON))); err != nil {
-			t.Fatalf("codexSessionStartFromReader should fail soft: %v", err)
+		if err := runCodexSessionStart(t, inputJSON); err != nil {
+			t.Fatalf("sessionStartFromReader (codex) should fail soft: %v", err)
 		}
 	})
 
 	t.Run("invalid JSON fails soft", func(t *testing.T) {
 		setupCodexSyncTestEnv(t)
 
-		spawnCodexDaemonFunc = func(hookInput *types.CodexHookInput) error {
+		spawnDaemonFunc = func(launch *daemonLaunchInput) error {
 			t.Fatal("should not spawn on invalid Codex hook input")
 			return nil
 		}
 
-		if err := codexSessionStartFromReader(strings.NewReader("not valid json")); err != nil {
-			t.Fatalf("codexSessionStartFromReader should fail soft: %v", err)
+		if err := runCodexSessionStart(t, []byte("not valid json")); err != nil {
+			t.Fatalf("sessionStartFromReader (codex) should fail soft: %v", err)
 		}
 	})
 }

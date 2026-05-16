@@ -31,13 +31,16 @@ type Provider interface {
 	IsProcess(pid int) bool
 
 	// ParseSessionHook reads a SessionStart-style hook payload from r and
-	// returns the provider-agnostic view. The concrete typed result is
-	// recoverable from the adapter via Inner().
+	// returns the provider-agnostic view.
 	ParseSessionHook(r io.Reader) (HookInput, error)
 
 	InstallHooks() (string, error)
 	UninstallHooks() (string, error)
 	IsHooksInstalled() (bool, error)
+
+	// InstallSkills installs provider-specific Claude Code skills. No-op
+	// for providers that don't ship skills.
+	InstallSkills() error
 
 	// WalkUpToRoot returns the root session ID and its rollout path. For
 	// providers without a separate root file identifier (Claude Code),
@@ -48,6 +51,11 @@ type Provider interface {
 	// SessionStart should result in a daemon. Codex returns false for
 	// subagent rollouts; Claude is always true.
 	ShouldSpawnForInput(in HookInput) bool
+
+	// WriteHookResponse writes a hook response payload to w. The response
+	// shape is provider-specific but the (continue, suppressOutput,
+	// systemMessage) tuple is shared.
+	WriteHookResponse(w io.Writer, suppressOutput bool, systemMessage string) error
 }
 
 var registry = map[string]Provider{

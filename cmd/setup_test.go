@@ -398,7 +398,7 @@ func TestSetupCmd_BackendURLRequired(t *testing.T) {
 	}
 }
 
-func TestRunCodexSetupOutput(t *testing.T) {
+func TestRunSetupCodexProviderOutput(t *testing.T) {
 	backend := &setupTestBackend{validateValid: true}
 	server := httptest.NewServer(backend)
 	defer server.Close()
@@ -407,22 +407,25 @@ func TestRunCodexSetupOutput(t *testing.T) {
 	codexDir := filepath.Join(tmpDir, ".codex")
 	t.Setenv(provider.CodexStateDirEnv, codexDir)
 
+	origProvider := setupProviderName
+	setupProviderName = provider.NameCodex
+	defer func() { setupProviderName = origProvider }()
+
 	cmd := &cobra.Command{}
 	cmd.Flags().String("backend-url", server.URL, "")
 	cmd.Flags().String("api-key", "cfb_codex-test-key-12345678", "")
 
 	output := captureStdout(t, func() {
-		if err := runCodexSetup(cmd); err != nil {
-			t.Fatalf("runCodexSetup failed: %v", err)
+		if err := runSetup(cmd, nil); err != nil {
+			t.Fatalf("runSetup failed: %v", err)
 		}
 	})
 
 	wantSnippets := []string{
 		"Backend URL: " + server.URL,
 		"✓ API key validated and saved",
-		"Enabling Codex feature flag: features.hooks = true",
-		"Codex hooks installed in",
-		"Codex root rollout sessions will sync to " + server.URL,
+		"Installing codex hooks",
+		"✅ Setup complete. codex sessions will sync to " + server.URL,
 	}
 	for _, want := range wantSnippets {
 		if !strings.Contains(output, want) {

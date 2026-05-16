@@ -14,24 +14,9 @@ var hookProviderName string
 // writeClaudeHookResponse writes a standard Claude hook response to the given writer.
 // All hooks must output valid JSON, even on error, so Claude Code can continue.
 func writeClaudeHookResponse(w io.Writer, suppressOutput bool) {
-	writeClaudeHookResponseMsg(w, suppressOutput, "")
-}
-
-// writeClaudeHookResponseMsg writes a hook response with an optional systemMessage.
-// The systemMessage is shown as a banner to the user (not added to Claude's context).
-func writeClaudeHookResponseMsg(w io.Writer, suppressOutput bool, systemMessage string) {
 	json.NewEncoder(w).Encode(types.ClaudeHookResponse{
 		Continue:       true,
 		SuppressOutput: suppressOutput,
-		SystemMessage:  systemMessage,
-	})
-}
-
-func writeCodexHookResponse(w io.Writer, suppressOutput bool, systemMessage string) {
-	json.NewEncoder(w).Encode(types.CodexHookResponse{
-		Continue:       true,
-		SuppressOutput: suppressOutput,
-		SystemMessage:  systemMessage,
 	})
 }
 

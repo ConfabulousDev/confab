@@ -1,7 +1,6 @@
 package provider
 
 import (
-	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,9 +11,9 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/ConfabulousDev/confab/pkg/hookconfig"
 	"github.com/ConfabulousDev/confab/pkg/logger"
 	"github.com/ConfabulousDev/confab/pkg/types"
-	toml "github.com/pelletier/go-toml/v2"
 )
 
 const CodexStateDirEnv = "CONFAB_CODEX_DIR"
@@ -27,8 +26,7 @@ var _ Provider = Codex{}
 func (Codex) Name() string { return NameCodex }
 
 // ParseSessionHook reads a Codex SessionStart hook payload and returns
-// the provider-agnostic view. The typed payload is recoverable via the
-// adapter's Inner() method.
+// the provider-agnostic view.
 func (p Codex) ParseSessionHook(r io.Reader) (HookInput, error) {
 	in, err := p.ReadSessionHookInput(r)
 	if err != nil {
@@ -43,71 +41,42 @@ func (p Codex) ParseSessionHook(r io.Reader) (HookInput, error) {
 func (p Codex) ShouldSpawnForInput(in HookInput) bool {
 	info, err := p.ReadSessionInfo(in.TranscriptPath())
 	if err != nil {
-		// TODO: Codex SessionStart can fire before Codex finishes writing
-		// the rollout file (~5–50ms race on a fresh session), so
-		// ReadSessionInfo returns os.IsNotExist and we can't yet tell
-		// user from subagent. Symmetric to the spawn-vs-edge race in
-		// WalkUpToRoot — ideally we'd retry with a short backoff. Current
-		// behavior errs toward over-spawning rather than missing a user
-		// session; the daemon's per-cycle DiscoverCodexDescendants
-		// catches the rest.
-		return true
+		// Codex SessionStart can fire before Codex finishes writing the
+		// rollout file (~5–50ms race on a fresh session). For os.IsNotExist
+		// we err toward over-spawning rather than missing a user session;
+		// the daemon's per-cycle DiscoverCodexDescendants catches the rest.
+		// Other errors (permission, malformed JSON) signal a real problem,
+		// so refuse — matches the pre-CF-396 behavior.
+		if os.IsNotExist(err) {
+			return true
+		}
+		logger.Warn("Codex ShouldSpawnForInput: failed to inspect rollout %s: %v", in.TranscriptPath(), err)
+		return false
 	}
 	return info.IsUserSession()
 }
 
-// codexHooksConfig is the minimal TOML schema for IsHooksInstalled.
-// We only inspect [[hooks.SessionStart]].hooks entries to decide
-// whether at least one confab command is registered.
-type codexHooksConfig struct {
-	Hooks struct {
-		SessionStart []struct {
-			Hooks []struct {
-				Type    string `toml:"type"`
-				Command string `toml:"command"`
-			} `toml:"hooks"`
-		} `toml:"SessionStart"`
-	} `toml:"hooks"`
+// InstallSkills is a no-op for Codex (no skill files shipped).
+func (Codex) InstallSkills() error { return nil }
+
+// WriteHookResponse writes a CodexHookResponse to w.
+func (Codex) WriteHookResponse(w io.Writer, suppressOutput bool, systemMessage string) error {
+	return json.NewEncoder(w).Encode(types.CodexHookResponse{
+		Continue:       true,
+		SuppressOutput: suppressOutput,
+		SystemMessage:  systemMessage,
+	})
 }
 
-// IsHooksInstalled parses ~/.codex/config.toml and returns true iff a
-// confab command is registered under [[hooks.SessionStart]].
+// IsHooksInstalled delegates to pkg/hookconfig, which parses
+// ~/.codex/config.toml and returns true iff a confab command is
+// registered under [[hooks.SessionStart]].
 func (p Codex) IsHooksInstalled() (bool, error) {
 	configPath, err := p.ConfigPath()
 	if err != nil {
 		return false, err
 	}
-	data, err := os.ReadFile(configPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return false, nil
-		}
-		return false, fmt.Errorf("failed to read Codex config: %w", err)
-	}
-	var cfg codexHooksConfig
-	if err := toml.Unmarshal(data, &cfg); err != nil {
-		return false, fmt.Errorf("failed to parse Codex config: %w", err)
-	}
-	for _, group := range cfg.Hooks.SessionStart {
-		for _, h := range group.Hooks {
-			if h.Type == "command" && isConfabCodexCommand(h.Command) {
-				return true, nil
-			}
-		}
-	}
-	return false, nil
-}
-
-// isConfabCodexCommand reports whether a Codex hook command line invokes
-// the confab binary. The first token is the executable; we check its
-// base name. This mirrors pkg/config.isConfabCommand but lives here so
-// pkg/provider stays independent of pkg/config.
-func isConfabCodexCommand(command string) bool {
-	parts := strings.Fields(command)
-	if len(parts) == 0 {
-		return false
-	}
-	return filepath.Base(parts[0]) == "confab"
+	return hookconfig.IsCodexHooksInstalled(configPath)
 }
 
 // FindParentPID walks up the process tree to find the Codex process.
@@ -530,227 +499,20 @@ func (p Codex) ReadSessionHookInput(r io.Reader) (*types.CodexHookInput, error) 
 	return input, nil
 }
 
+// InstallHooks delegates to pkg/hookconfig.
 func (p Codex) InstallHooks() (string, error) {
 	configPath, err := p.ConfigPath()
 	if err != nil {
 		return "", err
 	}
-	if err := os.MkdirAll(filepath.Dir(configPath), 0700); err != nil {
-		return "", fmt.Errorf("failed to create Codex state directory: %w", err)
-	}
-
-	var existing []byte
-	if data, err := os.ReadFile(configPath); err == nil {
-		existing = data
-		backupPath := fmt.Sprintf("%s.confab-backup-%s", configPath, time.Now().Format("20060102-150405"))
-		if err := os.WriteFile(backupPath, data, 0600); err != nil {
-			return "", fmt.Errorf("failed to create backup: %w", err)
-		}
-	} else if !os.IsNotExist(err) {
-		return "", fmt.Errorf("failed to read Codex config: %w", err)
-	}
-
-	binaryPath, err := binaryPath()
-	if err != nil {
-		return "", err
-	}
-
-	updated := ensureCodexHooksConfig(string(existing), configPath, binaryPath)
-	if err := writeFileAtomic(configPath, []byte(updated), 0600); err != nil {
-		return "", fmt.Errorf("failed to write Codex config: %w", err)
-	}
-	return configPath, nil
+	return hookconfig.InstallCodexHooks(configPath)
 }
 
+// UninstallHooks delegates to pkg/hookconfig.
 func (p Codex) UninstallHooks() (string, error) {
 	configPath, err := p.ConfigPath()
 	if err != nil {
 		return "", err
 	}
-	data, err := os.ReadFile(configPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return configPath, nil
-		}
-		return "", fmt.Errorf("failed to read Codex config: %w", err)
-	}
-	backupPath := fmt.Sprintf("%s.confab-backup-%s", configPath, time.Now().Format("20060102-150405"))
-	if err := os.WriteFile(backupPath, data, 0600); err != nil {
-		return "", fmt.Errorf("failed to create backup: %w", err)
-	}
-	updated := removeManagedBlock(string(data), confabCodexHooksStart, confabCodexHooksEnd)
-	if err := writeFileAtomic(configPath, []byte(strings.TrimRight(updated, "\n")+"\n"), 0600); err != nil {
-		return "", fmt.Errorf("failed to write Codex config: %w", err)
-	}
-	return configPath, nil
-}
-
-const confabCodexHooksStart = "# >>> confab codex hooks >>>"
-const confabCodexHooksEnd = "# <<< confab codex hooks <<<"
-
-func ensureCodexHooksConfig(config, configPath, binaryPath string) string {
-	config = removeManagedBlock(config, confabCodexHooksStart, confabCodexHooksEnd)
-	config = ensureCodexHooksFeature(config)
-	sessionStartGroupIndex := countCodexHookMatcherGroups(config, "SessionStart")
-	return appendTOMLBlock(config, confabCodexHooksStart+"\n"+codexHooksTOML(configPath, binaryPath, sessionStartGroupIndex)+confabCodexHooksEnd+"\n")
-}
-
-func ensureCodexHooksFeature(config string) string {
-	config = removeCodexHooksDeprecatedFeature(config)
-
-	re := regexp.MustCompile(`(?m)^hooks\s*=\s*false\s*$`)
-	if re.MatchString(config) {
-		return re.ReplaceAllString(config, "hooks = true")
-	}
-	re = regexp.MustCompile(`(?m)^hooks\s*=\s*true\s*$`)
-	if re.MatchString(config) {
-		return config
-	}
-	if strings.Contains(config, "[features]") {
-		lines := strings.Split(config, "\n")
-		for i, line := range lines {
-			if strings.TrimSpace(line) == "[features]" {
-				next := append([]string{}, lines[:i+1]...)
-				next = append(next, "hooks = true")
-				next = append(next, lines[i+1:]...)
-				return strings.Join(next, "\n")
-			}
-		}
-	}
-	return appendTOMLBlock(config, "[features]\nhooks = true\n")
-}
-
-func removeCodexHooksDeprecatedFeature(config string) string {
-	lines := strings.Split(config, "\n")
-	out := lines[:0]
-	for _, line := range lines {
-		if regexp.MustCompile(`^\s*codex_hooks\s*=`).MatchString(line) {
-			continue
-		}
-		out = append(out, line)
-	}
-	return strings.Join(out, "\n")
-}
-
-func appendTOMLBlock(config, block string) string {
-	config = strings.TrimRight(config, "\n")
-	if config == "" {
-		return block
-	}
-	return config + "\n\n" + block
-}
-
-func removeManagedBlock(config, start, end string) string {
-	startIdx := strings.Index(config, start)
-	if startIdx == -1 {
-		return config
-	}
-	endIdx := strings.Index(config[startIdx:], end)
-	if endIdx == -1 {
-		return config
-	}
-	endIdx += startIdx + len(end)
-	for endIdx < len(config) && (config[endIdx] == '\n' || config[endIdx] == '\r') {
-		endIdx++
-	}
-	return strings.TrimRight(config[:startIdx], "\n") + "\n" + config[endIdx:]
-}
-
-func countCodexHookMatcherGroups(config, eventName string) int {
-	re := regexp.MustCompile(`(?m)^\s*\[\[\s*hooks\.` + regexp.QuoteMeta(eventName) + `\s*\]\]\s*(?:#.*)?$`)
-	return len(re.FindAllStringIndex(config, -1))
-}
-
-// codexHooksTOML emits the managed Codex hook block. We install only
-// SessionStart — Codex fires Stop at every agent/turn boundary (including
-// root rollout stops while the interactive session is still alive), so a Stop
-// hook would prematurely kill the root sync daemon. Daemon shutdown is driven
-// by parent-process liveness instead (see Codex.FindParentPID).
-func codexHooksTOML(configPath, binaryPath string, sessionStartGroupIndex int) string {
-	escapedBinaryPath := strings.ReplaceAll(binaryPath, `\`, `\\`)
-	escapedBinaryPath = strings.ReplaceAll(escapedBinaryPath, `"`, `\"`)
-	sessionStartCommand := binaryPath + " hook session-start --provider codex"
-	sessionStartHash := codexTrustedHookHash("session_start", "startup|resume|clear", sessionStartCommand, "Starting Confab sync")
-	sessionStartKey := tomlQuoteString(fmt.Sprintf("%s:session_start:%d:0", configPath, sessionStartGroupIndex))
-	return fmt.Sprintf(`[[hooks.SessionStart]]
-matcher = "startup|resume|clear"
-[[hooks.SessionStart.hooks]]
-type = "command"
-command = "%s hook session-start --provider codex"
-statusMessage = "Starting Confab sync"
-
-[hooks.state.%s]
-trusted_hash = "%s"
-`, escapedBinaryPath, sessionStartKey, sessionStartHash)
-}
-
-type codexHookTrustIdentity struct {
-	EventName string                  `json:"event_name"`
-	Hooks     []codexTrustedHookEntry `json:"hooks"`
-	Matcher   string                  `json:"matcher,omitempty"`
-}
-
-type codexTrustedHookEntry struct {
-	Async         bool   `json:"async"`
-	Command       string `json:"command"`
-	StatusMessage string `json:"statusMessage"`
-	Timeout       int    `json:"timeout"`
-	Type          string `json:"type"`
-}
-
-func codexTrustedHookHash(eventName, matcher, command, statusMessage string) string {
-	identity := codexHookTrustIdentity{
-		EventName: eventName,
-		Hooks: []codexTrustedHookEntry{{
-			Async:         false,
-			Command:       command,
-			StatusMessage: statusMessage,
-			Timeout:       600,
-			Type:          "command",
-		}},
-		Matcher: matcher,
-	}
-	b, _ := json.Marshal(identity)
-	sum := sha256.Sum256(b)
-	return fmt.Sprintf("sha256:%x", sum)
-}
-
-func tomlQuoteString(s string) string {
-	b, _ := json.Marshal(s)
-	return string(b)
-}
-
-func binaryPath() (string, error) {
-	exe, err := os.Executable()
-	if err != nil {
-		return "", fmt.Errorf("failed to get executable path: %w", err)
-	}
-	realPath, err := filepath.EvalSymlinks(exe)
-	if err != nil {
-		return "", fmt.Errorf("failed to resolve executable symlink: %w", err)
-	}
-	return realPath, nil
-}
-
-func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
-	dir := filepath.Dir(path)
-	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".tmp-*")
-	if err != nil {
-		return err
-	}
-	tmpPath := tmp.Name()
-	defer os.Remove(tmpPath)
-
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Chmod(perm); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmpPath, path)
+	return hookconfig.UninstallCodexHooks(configPath)
 }

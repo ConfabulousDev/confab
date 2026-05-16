@@ -10,19 +10,16 @@ import (
 	"github.com/ConfabulousDev/confab/pkg/daemon"
 	"github.com/ConfabulousDev/confab/pkg/logger"
 	"github.com/ConfabulousDev/confab/pkg/provider"
-	"github.com/ConfabulousDev/confab/pkg/types"
 )
 
 // spawnDaemonFunc is the function used to spawn the daemon process.
-// It can be overridden in tests to avoid actually spawning processes.
+// Overridable in tests.
 var spawnDaemonFunc = spawnDaemonImpl
-var spawnCodexDaemonFunc = spawnCodexDaemonImpl
 
-// codexFindParentPIDFunc resolves the Codex parent PID for daemon liveness.
-// Overridable in tests so they can assert wiring without depending on the
-// real process tree.
-var codexFindParentPIDFunc = func() int { return provider.Codex{}.FindParentPID() }
-
+// daemonLaunchInput is the canonical wire format passed from a hook
+// handler to a freshly-spawned daemon process. It is also the mutable
+// spawn-side representation that hooks may mutate (e.g., after
+// WalkUpToRoot resolves a Codex subagent to its root).
 type daemonLaunchInput struct {
 	Provider       string `json:"provider"`
 	ExternalID     string `json:"external_id"`
@@ -31,163 +28,85 @@ type daemonLaunchInput struct {
 	ParentPID      int    `json:"parent_pid,omitempty"`
 }
 
-// maybeSpawnDaemon checks if a daemon is already running for the session,
-// and spawns one if not. Returns true if a daemon was spawned.
-//
-// This is the shared entry point for spawning daemons from any hook
-// (SessionStart, UserPromptSubmit, etc.).
-func maybeSpawnDaemon(p provider.ClaudeCode, hookInput *types.ClaudeHookInput) (spawned bool, err error) {
-	// Validate required fields for spawning a daemon
-	if hookInput.TranscriptPath == "" {
+// launchAsHookInput satisfies provider.HookInput for the sole purpose
+// of calling p.ShouldSpawnForInput inside maybeSpawnDaemon. HookEventName
+// is intentionally empty (spawn-side code doesn't need it; the gate
+// only inspects TranscriptPath in practice).
+type launchAsHookInput struct{ l *daemonLaunchInput }
+
+func (a launchAsHookInput) SessionID() string      { return a.l.ExternalID }
+func (a launchAsHookInput) TranscriptPath() string { return a.l.TranscriptPath }
+func (a launchAsHookInput) CWD() string            { return a.l.CWD }
+func (a launchAsHookInput) HookEventName() string  { return "" }
+func (a launchAsHookInput) ParentPID() int         { return a.l.ParentPID }
+
+// maybeSpawnDaemon checks whether a daemon should be spawned for the
+// (provider, session) pair. Returns true if a fresh daemon was spawned;
+// false if one was already running or the provider gate refused. The
+// caller pre-fills launch with parsed hook fields and any WalkUpToRoot
+// rewrites; this function sets ParentPID + Provider before spawn.
+func maybeSpawnDaemon(p provider.Provider, launch *daemonLaunchInput) (bool, error) {
+	if launch.TranscriptPath == "" {
 		return false, fmt.Errorf("transcript_path is required to spawn daemon")
 	}
 
-	// Check if daemon already running for this session
-	existingState, err := daemon.LoadStateForProvider(provider.NameClaudeCode, hookInput.SessionID)
-	if err != nil {
-		logger.Warn("Error checking existing state: %v", err)
-		// Continue - we'll try to spawn anyway
-	}
-	if existingState != nil && existingState.IsDaemonRunning() {
-		logger.Info("Daemon already running: pid=%d", existingState.PID)
+	if !p.ShouldSpawnForInput(launchAsHookInput{launch}) {
+		logger.Info("Skipping %s daemon: provider gate refused (session_id=%s)",
+			p.Name(), launch.ExternalID)
 		return false, nil
 	}
 
-	// Find Claude Code's PID by walking up the process tree.
-	hookInput.ParentPID = p.FindParentPID()
-
-	// Spawn the daemon
-	if err := spawnDaemonFunc(hookInput); err != nil {
-		return false, fmt.Errorf("failed to spawn daemon: %w", err)
+	existingState, err := daemon.LoadStateForProvider(p.Name(), launch.ExternalID)
+	if err != nil {
+		logger.Warn("Error checking existing %s state: %v", p.Name(), err)
+	}
+	if existingState != nil && existingState.IsDaemonRunning() {
+		logger.Info("%s daemon already running: pid=%d", p.Name(), existingState.PID)
+		return false, nil
 	}
 
-	logger.Info("Daemon spawned successfully")
+	launch.Provider = p.Name()
+	launch.ParentPID = p.FindParentPID()
+
+	if err := spawnDaemonFunc(launch); err != nil {
+		return false, fmt.Errorf("failed to spawn %s daemon: %w", p.Name(), err)
+	}
+	logger.Info("%s daemon spawned successfully", p.Name())
 	return true, nil
 }
 
-func maybeSpawnCodexDaemon(hookInput *types.CodexHookInput) (spawned bool, err error) {
-	if hookInput.TranscriptPath == "" {
-		return false, fmt.Errorf("transcript_path is required to spawn daemon")
-	}
-
-	codex := provider.Codex{}
-	if info, err := codex.ReadSessionInfo(hookInput.TranscriptPath); err == nil && !info.IsUserSession() {
-		logger.Info("Skipping Codex daemon for non-user rollout: session_id=%s thread_source=%s agent_path=%s agent_role=%s agent_nickname=%s",
-			hookInput.SessionID, info.ThreadSource, info.AgentPath, info.AgentRole, info.AgentNickname)
-		return false, nil
-	} else if err != nil && !os.IsNotExist(err) {
-		return false, fmt.Errorf("failed to inspect Codex rollout: %w", err)
-	}
-
-	existingState, err := daemon.LoadStateForProvider(provider.NameCodex, hookInput.SessionID)
-	if err != nil {
-		logger.Warn("Error checking existing Codex state: %v", err)
-	}
-	if existingState != nil && existingState.IsDaemonRunning() {
-		logger.Info("Codex daemon already running: pid=%d", existingState.PID)
-		return false, nil
-	}
-
-	// Find Codex's PID by walking up the process tree. Codex has no usable
-	// SessionEnd signal (Stop fires at every turn boundary), so daemon
-	// shutdown relies entirely on parent-PID liveness.
-	hookInput.ParentPID = codexFindParentPIDFunc()
-
-	if err := spawnCodexDaemonFunc(hookInput); err != nil {
-		return false, fmt.Errorf("failed to spawn Codex daemon: %w", err)
-	}
-
-	logger.Info("Codex daemon spawned successfully")
-	return true, nil
-}
-
-// spawnDaemonImpl starts a detached daemon process and writes initial state.
-// The state file is written immediately after the process starts, before
-// this function returns. This ensures no race window where another hook
-// could spawn a duplicate daemon.
-func spawnDaemonImpl(hookInput *types.ClaudeHookInput) error {
+// spawnDaemonImpl starts a detached daemon process and writes initial
+// state. The state file is written immediately after the process starts
+// so no race window exists where another hook could spawn a duplicate.
+func spawnDaemonImpl(launch *daemonLaunchInput) error {
 	executable, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("failed to get executable path: %w", err)
 	}
 
-	// Serialize hook input to pass to daemon
-	hookInputJSON, err := json.Marshal(hookInput)
+	launchJSON, err := json.Marshal(launch)
 	if err != nil {
-		return fmt.Errorf("failed to serialize hook input: %w", err)
+		return fmt.Errorf("failed to serialize daemon launch input: %w", err)
 	}
 
-	// Spawn daemon using "hook session-start --bg-daemon"
-	cmd := exec.Command(executable, "hook", "session-start", "--bg-daemon", string(hookInputJSON))
-
-	// Detach from parent process group
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Setpgid: true,
-	}
-
-	// Redirect stdout/stderr to /dev/null (logs go to log file)
-	cmd.Stdout = nil
-	cmd.Stderr = nil
-	cmd.Stdin = nil
+	cmd := exec.Command(executable, "hook", "session-start",
+		"--provider", launch.Provider, "--bg-daemon", string(launchJSON))
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Stdout, cmd.Stderr, cmd.Stdin = nil, nil, nil
 
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("failed to start daemon: %w", err)
 	}
 
-	// Write state immediately with daemon's PID.
-	// This eliminates the race window between spawn and daemon's own state write.
-	state := daemon.NewStateForProvider(provider.NameClaudeCode, hookInput.SessionID, hookInput.TranscriptPath,
-		hookInput.CWD, hookInput.ParentPID)
-	state.PID = cmd.Process.Pid // Use daemon's PID, not ours
+	state := daemon.NewStateForProvider(launch.Provider, launch.ExternalID,
+		launch.TranscriptPath, launch.CWD, launch.ParentPID)
+	state.PID = cmd.Process.Pid
 	if err := state.Save(); err != nil {
-		// Log but don't fail - daemon will write its own state as backup
 		logger.Warn("Failed to save initial state: %v", err)
 	}
 
 	if err := cmd.Process.Release(); err != nil {
 		return fmt.Errorf("failed to release daemon: %w", err)
 	}
-
-	return nil
-}
-
-func spawnCodexDaemonImpl(hookInput *types.CodexHookInput) error {
-	executable, err := os.Executable()
-	if err != nil {
-		return fmt.Errorf("failed to get executable path: %w", err)
-	}
-
-	launch := daemonLaunchInput{
-		Provider:       provider.NameCodex,
-		ExternalID:     hookInput.SessionID,
-		TranscriptPath: hookInput.TranscriptPath,
-		CWD:            hookInput.CWD,
-		ParentPID:      hookInput.ParentPID,
-	}
-	launchJSON, err := json.Marshal(launch)
-	if err != nil {
-		return fmt.Errorf("failed to serialize daemon launch input: %w", err)
-	}
-
-	cmd := exec.Command(executable, "hook", "session-start", "--provider", provider.NameCodex, "--bg-daemon", string(launchJSON))
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Stdout = nil
-	cmd.Stderr = nil
-	cmd.Stdin = nil
-
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("failed to start daemon: %w", err)
-	}
-
-	state := daemon.NewStateForProvider(provider.NameCodex, hookInput.SessionID, hookInput.TranscriptPath, hookInput.CWD, hookInput.ParentPID)
-	state.PID = cmd.Process.Pid
-	if err := state.Save(); err != nil {
-		logger.Warn("Failed to save initial Codex state: %v", err)
-	}
-
-	if err := cmd.Process.Release(); err != nil {
-		return fmt.Errorf("failed to release daemon: %w", err)
-	}
-
 	return nil
 }

@@ -31,9 +31,6 @@ func TestClaudeHookInputAdapter(t *testing.T) {
 	if got := a.ParentPID(); got != src.ParentPID {
 		t.Errorf("ParentPID() = %d, want %d", got, src.ParentPID)
 	}
-	if got := a.Inner(); got != src {
-		t.Errorf("Inner() returned different pointer than input")
-	}
 }
 
 func TestCodexHookInputAdapter(t *testing.T) {
@@ -61,12 +58,5 @@ func TestCodexHookInputAdapter(t *testing.T) {
 	if got := a.ParentPID(); got != src.ParentPID {
 		t.Errorf("ParentPID() = %d, want %d", got, src.ParentPID)
 	}
-	if got := a.Inner(); got != src {
-		t.Errorf("Inner() returned different pointer than input")
-	}
 }
 
-func TestHookInputAdaptersSatisfyInterface(t *testing.T) {
-	var _ HookInput = claudeHookInputAdapter{}
-	var _ HookInput = codexHookInputAdapter{}
-}

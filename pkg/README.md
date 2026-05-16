@@ -7,13 +7,14 @@ Internal packages for the Confab CLI. Each package has its own README with exten
 | Package | Purpose | Change this when... |
 |---------|---------|---------------------|
 | [codextest](codextest/) | Reusable Codex SQLite + sessions-tree fixture for tests | Adding new fixture builders for cross-package Codex tests |
-| [config](config/) | Confab config + Claude Code hook management | Adding config fields, new hook types |
+| [config](config/) | Confab config (API key, redaction, settings.json read/write) | Adding config fields, changing settings.json plumbing |
 | [daemon](daemon/) | Background sync daemon lifecycle | Changing sync behavior, shutdown logic |
 | [discovery](discovery/) | Session scanning, metadata extraction, agent IDs | Adding metadata fields, new ID formats |
 | [git](git/) | Git repo info extraction | Adding new git fields to sync |
+| [hookconfig](hookconfig/) | Per-provider hook install/uninstall (Claude settings.json, Codex config.toml) | Adding new hook event types, changing hook command shape |
 | [http](http/) | HTTP client with compression + retries | Adding error types, changing retry logic |
 | [logger](logger/) | Singleton file logger with rotation | Changing log format, adding levels |
-| [provider](provider/) | Per-tool integration (Claude Code, Codex) — paths, hooks, transcripts, Codex local SQLite | Adding a new provider or changing tool-specific behavior |
+| [provider](provider/) | `Provider` interface + Claude Code / Codex implementations (paths, hooks, parent-PID, root walk, hook payloads) | Adding a new provider or changing tool-specific behavior |
 | [redactor](redactor/) | JSON-aware sensitive data redaction | Adding pattern types (patterns themselves live in config) |
 | [sync](sync/) | Sync engine, API client, file tracking | Adding API endpoints, changing chunking |
 | [types](types/) | Shared type definitions | Adding cross-package types |
@@ -27,13 +28,15 @@ cmd/  (uses all packages)
  ├── daemon ──── sync ──┬── http ──── config, logger
  │                      ├── redactor ── config
  │                      ├── discovery ── config, logger
- │                      ├── provider ── config, types, logger
+ │                      ├── provider ── hookconfig ── config, logger
+ │                      │                └── types, logger
  │                      ├── git
  │                      └── config
  │
  ├── config
  ├── discovery
  ├── provider
+ ├── hookconfig
  ├── sync
  ├── http
  ├── redactor

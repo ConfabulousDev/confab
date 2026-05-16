@@ -18,11 +18,12 @@ var setupCmd = &cobra.Command{
 
 This command:
 1. Authenticates with the backend (if not already logged in)
-2. Installs hooks (sync daemon + git commit trailers + PR linking)
+2. Installs the full Confab hook set for the selected provider
+3. Installs provider-specific skills (Claude only; no-op for Codex)
 
-If you're already authenticated with a valid API key, the login step is skipped.
-
-Use --api-key to provide an API key directly (bypasses device auth flow).`,
+If you're already authenticated with a valid API key, the login step is
+skipped. Use --api-key to provide an API key directly (bypasses device
+auth flow).`,
 	RunE: runSetup,
 }
 
@@ -32,8 +33,9 @@ func runSetup(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	if providerName == provider.NameCodex {
-		return runCodexSetup(cmd)
+	p, err := provider.Get(providerName)
+	if err != nil {
+		return err
 	}
 
 	backendURL, needsLogin, err := runSetupAuth(cmd)
@@ -41,86 +43,29 @@ func runSetup(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Install hooks
 	if needsLogin {
-		fmt.Println("Step 2/2: Installing hooks")
+		fmt.Printf("Step 2/2: Installing %s hooks\n", p.Name())
 	} else {
-		fmt.Println("Installing hooks...")
+		fmt.Printf("Installing %s hooks...\n", p.Name())
 	}
 	fmt.Println()
 
-	if err := config.InstallSyncHooks(); err != nil {
-		logger.Error("Failed to install sync hooks: %v", err)
-		return fmt.Errorf("failed to install sync hooks: %w", err)
+	path, err := p.InstallHooks()
+	if err != nil {
+		logger.Error("Failed to install %s hooks: %v", p.Name(), err)
+		return fmt.Errorf("failed to install %s hooks: %w", p.Name(), err)
 	}
+	logger.Info("%s hooks installed in %s", p.Name(), path)
 
-	if err := config.InstallPreToolUseHooks(); err != nil {
-		logger.Error("Failed to install PreToolUse hooks: %v", err)
-		return fmt.Errorf("failed to install PreToolUse hooks: %w", err)
-	}
-
-	if err := config.InstallPostToolUseHooks(); err != nil {
-		logger.Error("Failed to install PostToolUse hooks: %v", err)
-		return fmt.Errorf("failed to install PostToolUse hooks: %w", err)
-	}
-
-	if err := config.InstallUserPromptSubmitHook(); err != nil {
-		logger.Error("Failed to install UserPromptSubmit hook: %v", err)
-		return fmt.Errorf("failed to install UserPromptSubmit hook: %w", err)
-	}
-
-	settingsPath, _ := config.GetSettingsPath()
-	logger.Info("Hooks installed in %s", settingsPath)
-
-	// Install skills
 	fmt.Println()
 	fmt.Println("Installing skills...")
-	fmt.Println()
-
-	if err := config.InstallTilSkill(); err != nil {
-		logger.Error("Failed to install /til skill: %v", err)
-		return fmt.Errorf("failed to install /til skill: %w", err)
-	}
-	fmt.Println("  ✓ /til skill")
-
-	if err := config.InstallRetroSkill(); err != nil {
-		logger.Error("Failed to install /retro skill: %v", err)
-		return fmt.Errorf("failed to install /retro skill: %w", err)
-	}
-	fmt.Println("  ✓ /retro skill")
-
-	fmt.Println()
-	fmt.Println("✅ Setup complete. Claude Code sessions will sync to", backendURL)
-
-	return nil
-}
-
-func runCodexSetup(cmd *cobra.Command) error {
-	fmt.Println("Setting up Confab for Codex")
-	fmt.Println()
-
-	backendURL, needsLogin, err := runSetupAuth(cmd)
-	if err != nil {
-		return err
-	}
-
-	if needsLogin {
-		fmt.Println("Step 2/2: Installing Codex hooks")
-	} else {
-		fmt.Println("Installing Codex hooks...")
-	}
-	fmt.Println("Installing Codex hooks in ~/.codex/config.toml...")
-	fmt.Println("Enabling Codex feature flag: features.hooks = true")
-
-	configPath, err := provider.Codex{}.InstallHooks()
-	if err != nil {
-		logger.Error("Failed to install Codex hooks: %v", err)
-		return fmt.Errorf("failed to install Codex hooks: %w", err)
+	if err := p.InstallSkills(); err != nil {
+		logger.Error("Failed to install %s skills: %v", p.Name(), err)
+		return fmt.Errorf("failed to install %s skills: %w", p.Name(), err)
 	}
 
 	fmt.Println()
-	fmt.Printf("✅ Setup complete. Codex hooks installed in %s\n", configPath)
-	fmt.Println("Codex root rollout sessions will sync to", backendURL)
+	fmt.Printf("✅ Setup complete. %s sessions will sync to %s\n", p.Name(), backendURL)
 	return nil
 }
 

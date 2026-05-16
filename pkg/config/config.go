@@ -21,14 +21,26 @@ type ClaudeSettings struct {
 	raw map[string]any
 }
 
+// NewClaudeSettings returns an empty ClaudeSettings. Useful for tests
+// and for callers that want to build a settings object before writing.
+func NewClaudeSettings() *ClaudeSettings {
+	return &ClaudeSettings{raw: make(map[string]any)}
+}
+
+// MarshalJSON implements json.Marshaler so callers can inspect the
+// serialized shape directly (used by tests).
+func (s *ClaudeSettings) MarshalJSON() ([]byte, error) {
+	return json.Marshal(s.raw)
+}
+
 // ErrHooksTypeMismatch is returned when the "hooks" field in settings.json
 // exists but is not a JSON object. This prevents silently overwriting user config.
 var ErrHooksTypeMismatch = errors.New("settings.json: 'hooks' field exists but is not a JSON object — please fix manually")
 
-// getHooksMap returns the hooks map, creating it if it doesn't exist.
+// GetHooksMap returns the hooks map, creating it if it doesn't exist.
 // Returns an error if the hooks field exists but has the wrong type,
 // to prevent silently overwriting user configuration.
-func (s *ClaudeSettings) getHooksMap() (map[string]any, error) {
+func (s *ClaudeSettings) GetHooksMap() (map[string]any, error) {
 	hooksRaw, exists := s.raw["hooks"]
 	if !exists {
 		hooks := make(map[string]any)
@@ -42,9 +54,9 @@ func (s *ClaudeSettings) getHooksMap() (map[string]any, error) {
 	return hooks, nil
 }
 
-// getEventHooks returns the array of matchers for an event, as []any.
+// GetEventHooks returns the array of matchers for an event, as []any.
 // This is a read-only operation that does not create the hooks map if it doesn't exist.
-func (s *ClaudeSettings) getEventHooks(eventName string) []any {
+func (s *ClaudeSettings) GetEventHooks(eventName string) []any {
 	hooksRaw, exists := s.raw["hooks"]
 	if !exists {
 		return nil
@@ -66,11 +78,11 @@ func (s *ClaudeSettings) getEventHooks(eventName string) []any {
 	return eventHooks
 }
 
-// setEventHooks sets the array of matchers for an event.
+// SetEventHooks sets the array of matchers for an event.
 // If matchers is nil or empty, the event key is removed.
 // If the hooks map becomes empty, it is removed from settings.
-func (s *ClaudeSettings) setEventHooks(eventName string, matchers []any) error {
-	hooks, err := s.getHooksMap()
+func (s *ClaudeSettings) SetEventHooks(eventName string, matchers []any) error {
+	hooks, err := s.GetHooksMap()
 	if err != nil {
 		return err
 	}
@@ -283,366 +295,9 @@ func GetBinaryPath() (string, error) {
 	return realPath, nil
 }
 
-// isConfabCommand checks if a command string is a confab command
-// More precise than simple string contains to avoid false positives
-func isConfabCommand(command string) bool {
-	// Extract the executable name from the command
-	// Command format is typically: "/path/to/confab save" or "confab save"
-	parts := strings.Fields(command)
-	if len(parts) == 0 {
-		return false
-	}
-
-	executable := parts[0]
-	baseName := filepath.Base(executable)
-
-	// Check if the executable is exactly "confab"
-	return baseName == "confab"
-}
-
-// isConfabHookEntry checks if a hook entry is a confab command hook.
-func isConfabHookEntry(hook map[string]any) bool {
-	cmd, _ := hook["command"].(string)
-	return hook["type"] == "command" && isConfabCommand(cmd)
-}
-
-// getHooksList extracts and validates the hooks array from a matcher entry.
-// Returns nil with debug logging if missing or invalid type.
-func getHooksList(entry map[string]any, eventName string, entryIdx int) []any {
-	hooksListRaw, exists := entry["hooks"]
-	if !exists {
-		return nil
-	}
-	hooksList, ok := hooksListRaw.([]any)
-	if !ok {
-		logger.Debug("settings.json: hooks[%q][%d].hooks has unexpected type %T (expected array)", eventName, entryIdx, hooksListRaw)
-		return nil
-	}
-	return hooksList
-}
-
-// installHook installs a confab hook for a specific event.
-// When hasMatcher is true, it looks for an entry whose "matcher" key equals matcherValue.
-// When hasMatcher is false, it looks for an entry where the "matcher" key is entirely absent.
-func installHook(settings *ClaudeSettings, hook map[string]any, eventName, matcherValue string, hasMatcher bool) error {
-	eventHooks := settings.getEventHooks(eventName)
-
-	for i, entryAny := range eventHooks {
-		entry, ok := entryAny.(map[string]any)
-		if !ok {
-			logger.Debug("settings.json: hooks[%q][%d] has unexpected type %T (expected object), skipping", eventName, i, entryAny)
-			continue
-		}
-
-		// Check if this entry matches our target
-		if hasMatcher {
-			if entry["matcher"] != matcherValue {
-				continue
-			}
-		} else {
-			if _, has := entry["matcher"]; has {
-				continue
-			}
-		}
-
-		// Found matching entry — look for existing confab hook to update
-		hooksList := getHooksList(entry, eventName, i)
-		for j, existingHookAny := range hooksList {
-			existingHook, ok := existingHookAny.(map[string]any)
-			if !ok {
-				logger.Debug("settings.json: hooks[%q][%d].hooks[%d] has unexpected type %T (expected object), skipping", eventName, i, j, existingHookAny)
-				continue
-			}
-			if isConfabHookEntry(existingHook) {
-				hooksList[j] = hook
-				entry["hooks"] = hooksList
-				eventHooks[i] = entry
-				return settings.setEventHooks(eventName, eventHooks)
-			}
-		}
-
-		// No existing confab hook, append
-		hooksList = append(hooksList, hook)
-		entry["hooks"] = hooksList
-		eventHooks[i] = entry
-		return settings.setEventHooks(eventName, eventHooks)
-	}
-
-	// No matching entry found, create new one
-	newEntry := map[string]any{
-		"hooks": []any{hook},
-	}
-	if hasMatcher {
-		newEntry["matcher"] = matcherValue
-	}
-	eventHooks = append(eventHooks, newEntry)
-	return settings.setEventHooks(eventName, eventHooks)
-}
-
-// removeHooksFromEvent removes hooks matching a predicate from all matchers of an event.
-// Empty matchers (no remaining hooks) are dropped.
-func removeHooksFromEvent(settings *ClaudeSettings, eventName string, shouldRemove func(map[string]any) bool) error {
-	eventHooks := settings.getEventHooks(eventName)
-	if len(eventHooks) == 0 {
-		return nil
-	}
-
-	var updatedMatchers []any
-	for i, matcherAny := range eventHooks {
-		matcher, ok := matcherAny.(map[string]any)
-		if !ok {
-			logger.Debug("settings.json: hooks[%q][%d] has unexpected type %T (expected object), preserving as-is", eventName, i, matcherAny)
-			updatedMatchers = append(updatedMatchers, matcherAny)
-			continue
-		}
-
-		hooksList := getHooksList(matcher, eventName, i)
-		if hooksList == nil {
-			updatedMatchers = append(updatedMatchers, matcher)
-			continue
-		}
-
-		var remainingHooks []any
-		for j, hookAny := range hooksList {
-			hook, ok := hookAny.(map[string]any)
-			if !ok {
-				logger.Debug("settings.json: hooks[%q][%d].hooks[%d] has unexpected type %T (expected object), preserving as-is", eventName, i, j, hookAny)
-				remainingHooks = append(remainingHooks, hookAny)
-				continue
-			}
-			if !shouldRemove(hook) {
-				remainingHooks = append(remainingHooks, hook)
-			}
-		}
-
-		if len(remainingHooks) > 0 {
-			matcher["hooks"] = remainingHooks
-			updatedMatchers = append(updatedMatchers, matcher)
-		}
-	}
-	return settings.setEventHooks(eventName, updatedMatchers)
-}
-
-// findHookInEvent searches for a hook matching a predicate across all matchers of an event.
-func findHookInEvent(settings *ClaudeSettings, eventName string, matches func(map[string]any) bool) bool {
-	eventHooks := settings.getEventHooks(eventName)
-	for i, matcherAny := range eventHooks {
-		matcher, ok := matcherAny.(map[string]any)
-		if !ok {
-			logger.Debug("settings.json: hooks[%q][%d] has unexpected type %T (expected object), skipping", eventName, i, matcherAny)
-			continue
-		}
-		for j, hookAny := range getHooksList(matcher, eventName, i) {
-			hook, ok := hookAny.(map[string]any)
-			if !ok {
-				logger.Debug("settings.json: hooks[%q][%d].hooks[%d] has unexpected type %T (expected object), skipping", eventName, i, j, hookAny)
-				continue
-			}
-			if matches(hook) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-// InstallSyncHooks installs hooks for incremental sync daemon
-// This installs both SessionStart (to start daemon) and SessionEnd (to stop daemon)
-func InstallSyncHooks() error {
-	binaryPath, err := GetBinaryPath()
-	if err != nil {
-		return fmt.Errorf("failed to get binary path: %w", err)
-	}
-
-	sessionStartHook := map[string]any{
-		"type":    "command",
-		"command": fmt.Sprintf("%s hook session-start", binaryPath),
-	}
-
-	sessionEndHook := map[string]any{
-		"type":    "command",
-		"command": fmt.Sprintf("%s hook session-end", binaryPath),
-	}
-
-	return AtomicUpdateSettings(func(settings *ClaudeSettings) error {
-		if err := installHook(settings, sessionStartHook, "SessionStart", "*", true); err != nil {
-			return err
-		}
-		return installHook(settings, sessionEndHook, "SessionEnd", "*", true)
-	})
-}
-
-// UninstallSyncHooks removes the sync daemon hooks.
-// This handles both old ("sync start/stop") and new ("hook session-start/end") patterns.
-func UninstallSyncHooks() error {
-	return AtomicUpdateSettings(func(settings *ClaudeSettings) error {
-		isSyncHook := func(hook map[string]any) bool {
-			cmd, _ := hook["command"].(string)
-			return hook["type"] == "command" &&
-				(isConfabCommand(cmd) ||
-					strings.Contains(cmd, "sync start") ||
-					strings.Contains(cmd, "sync stop") ||
-					strings.Contains(cmd, "hook session-start") ||
-					strings.Contains(cmd, "hook session-end"))
-		}
-		if err := removeHooksFromEvent(settings, "SessionStart", isSyncHook); err != nil {
-			return err
-		}
-		return removeHooksFromEvent(settings, "SessionEnd", isSyncHook)
-	})
-}
-
-// IsSyncHooksInstalled checks if sync daemon hooks are installed
-// This checks for both old ("sync start/stop") and new ("hook session-start/end") patterns
-func IsSyncHooksInstalled() (bool, error) {
-	settings, err := ReadSettings()
-	if err != nil {
-		return false, fmt.Errorf("failed to read settings: %w", err)
-	}
-
-	// Check for either old or new pattern for SessionStart
-	hasStart := hasHookWithCommand(settings, "SessionStart", "sync start") ||
-		hasHookWithCommand(settings, "SessionStart", "hook session-start")
-
-	// Check for either old or new pattern for SessionEnd
-	hasEnd := hasHookWithCommand(settings, "SessionEnd", "sync stop") ||
-		hasHookWithCommand(settings, "SessionEnd", "hook session-end")
-
-	return hasStart && hasEnd, nil
-}
-
-// hasHookWithCommand checks if a confab hook with the given command substring exists
-func hasHookWithCommand(settings *ClaudeSettings, eventName, cmdSubstring string) bool {
-	return findHookInEvent(settings, eventName, func(hook map[string]any) bool {
-		cmd, _ := hook["command"].(string)
-		return hook["type"] == "command" && isConfabCommand(cmd) && strings.Contains(cmd, cmdSubstring)
-	})
-}
-
-// InstallPreToolUseHooks installs the PreToolUse hook for git commit validation.
-// This installs a hook with a "Bash" matcher to intercept git commit commands.
-func InstallPreToolUseHooks() error {
-	binaryPath, err := GetBinaryPath()
-	if err != nil {
-		return fmt.Errorf("failed to get binary path: %w", err)
-	}
-
-	preToolUseHook := map[string]any{
-		"type":    "command",
-		"command": fmt.Sprintf("%s hook pre-tool-use", binaryPath),
-	}
-
-	return AtomicUpdateSettings(func(settings *ClaudeSettings) error {
-		for _, matcher := range toolUseMatchers {
-			if err := installHook(settings, preToolUseHook, "PreToolUse", matcher, true); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-}
-
-// Tool names for PreToolUse/PostToolUse hook matching
+// Tool names for PreToolUse/PostToolUse hook matching.
 const (
 	ToolNameBash              = "Bash"
 	ToolNameMCPGitHubCreatePR = "mcp__github__create_pull_request"
 )
-
-// toolUseMatchers are the tool names we intercept for session linking and PR tracking.
-var toolUseMatchers = []string{
-	ToolNameBash,              // git commit, gh pr create
-	ToolNameMCPGitHubCreatePR, // GitHub MCP tool
-}
-
-// UninstallPreToolUseHooks removes the PreToolUse hook
-func UninstallPreToolUseHooks() error {
-	return AtomicUpdateSettings(func(settings *ClaudeSettings) error {
-		return removeHooksFromEvent(settings, "PreToolUse", isConfabHookEntry)
-	})
-}
-
-// IsPreToolUseHooksInstalled checks if the PreToolUse hook is installed
-func IsPreToolUseHooksInstalled() (bool, error) {
-	settings, err := ReadSettings()
-	if err != nil {
-		return false, fmt.Errorf("failed to read settings: %w", err)
-	}
-
-	return hasHookWithCommand(settings, "PreToolUse", "hook pre-tool-use"), nil
-}
-
-// InstallPostToolUseHooks installs the PostToolUse hook for GitHub link tracking.
-// This installs hooks with "Bash" and MCP matchers to capture PR creation output.
-func InstallPostToolUseHooks() error {
-	binaryPath, err := GetBinaryPath()
-	if err != nil {
-		return fmt.Errorf("failed to get binary path: %w", err)
-	}
-
-	postToolUseHook := map[string]any{
-		"type":    "command",
-		"command": fmt.Sprintf("%s hook post-tool-use", binaryPath),
-	}
-
-	return AtomicUpdateSettings(func(settings *ClaudeSettings) error {
-		for _, matcher := range toolUseMatchers {
-			if err := installHook(settings, postToolUseHook, "PostToolUse", matcher, true); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-}
-
-// UninstallPostToolUseHooks removes the PostToolUse hook
-func UninstallPostToolUseHooks() error {
-	return AtomicUpdateSettings(func(settings *ClaudeSettings) error {
-		return removeHooksFromEvent(settings, "PostToolUse", isConfabHookEntry)
-	})
-}
-
-// IsPostToolUseHooksInstalled checks if the PostToolUse hook is installed
-func IsPostToolUseHooksInstalled() (bool, error) {
-	settings, err := ReadSettings()
-	if err != nil {
-		return false, fmt.Errorf("failed to read settings: %w", err)
-	}
-
-	return hasHookWithCommand(settings, "PostToolUse", "hook post-tool-use"), nil
-}
-
-// InstallUserPromptSubmitHook installs the UserPromptSubmit hook.
-// Unlike other hooks, UserPromptSubmit doesn't use matchers.
-func InstallUserPromptSubmitHook() error {
-	binaryPath, err := GetBinaryPath()
-	if err != nil {
-		return fmt.Errorf("failed to get binary path: %w", err)
-	}
-
-	hook := map[string]any{
-		"type":    "command",
-		"command": fmt.Sprintf("%s hook user-prompt-submit", binaryPath),
-	}
-
-	return AtomicUpdateSettings(func(settings *ClaudeSettings) error {
-		return installHook(settings, hook, "UserPromptSubmit", "", false)
-	})
-}
-
-// UninstallUserPromptSubmitHook removes the UserPromptSubmit hook
-func UninstallUserPromptSubmitHook() error {
-	return AtomicUpdateSettings(func(settings *ClaudeSettings) error {
-		return removeHooksFromEvent(settings, "UserPromptSubmit", isConfabHookEntry)
-	})
-}
-
-// IsUserPromptSubmitHookInstalled checks if the UserPromptSubmit hook is installed
-func IsUserPromptSubmitHookInstalled() (bool, error) {
-	settings, err := ReadSettings()
-	if err != nil {
-		return false, fmt.Errorf("failed to read settings: %w", err)
-	}
-
-	return hasHookWithCommand(settings, "UserPromptSubmit", "hook user-prompt-submit"), nil
-}
 
