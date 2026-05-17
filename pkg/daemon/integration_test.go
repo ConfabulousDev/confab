@@ -284,6 +284,25 @@ func TestDaemonRetryOnBackendError(t *testing.T) {
 	if len(mock.getInitRequests()) == 0 {
 		t.Error("Expected at least one successful init request after retries")
 	}
+
+	// Stronger assertion: after the backend recovered, the daemon must
+	// have actually uploaded the transcript chunk. Without this, a
+	// retry loop that gives up after init never proves the recovery
+	// path delivers data.
+	chunkReqs := mock.getChunkRequests()
+	if len(chunkReqs) == 0 {
+		t.Fatal("Expected at least one chunk upload after backend recovered; daemon retried init but never delivered data")
+	}
+	got := chunkReqs[0]
+	if got.FileType != "transcript" {
+		t.Errorf("first chunk file_type = %q, want %q", got.FileType, "transcript")
+	}
+	if len(got.Lines) != 1 || got.Lines[0] != `{"type":"system"}` {
+		t.Errorf("first chunk lines = %v, want one transcript line matching the seeded content", got.Lines)
+	}
+	if got.FirstLine != 1 {
+		t.Errorf("first chunk first_line = %d, want 1 (full upload from line 1)", got.FirstLine)
+	}
 }
 
 // TestDaemonAgentDiscovery tests that daemon discovers and uploads agent files
@@ -2478,5 +2497,73 @@ func TestDaemonIntegration_Codex_ShutdownPath_FinalSyncIncludesChildren(t *testi
 	}
 	if !found {
 		t.Errorf("final sync did not include late child %s", late.threadUUID)
+	}
+}
+
+// TestDaemonShutsDownWhenParentPIDDies guards the parent-process-died
+// shutdown path at daemon.go:193. The whole reason Codex avoids using
+// a Stop hook for shutdown is that this path must work. Without a
+// test, a regression that broke parent-PID monitoring would leave
+// orphaned daemons consuming resources on user machines after their
+// editor exits.
+//
+// Spawns a real `sleep` subprocess, points the daemon at its PID,
+// kills the subprocess, and asserts the daemon exits on its next
+// sync cycle (well before the context deadline).
+func TestDaemonShutsDownWhenParentPIDDies(t *testing.T) {
+	mock := newMockBackend(t)
+	server := httptest.NewServer(mock)
+	defer server.Close()
+
+	tmpDir, transcriptPath := setupTestEnv(t, server.URL)
+	os.WriteFile(transcriptPath, []byte(`{"type":"system"}`+"\n"), 0644)
+
+	// Spawn a real child process to serve as the parent PID.
+	cmd := exec.Command("sleep", "30")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("failed to spawn child process: %v", err)
+	}
+	parentPID := cmd.Process.Pid
+	// Reap regardless of what the daemon does.
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		_, _ = cmd.Process.Wait()
+	})
+
+	d := New(Config{
+		ExternalID:         "parent-pid-death-test",
+		TranscriptPath:     transcriptPath,
+		CWD:                tmpDir,
+		ParentPID:          parentPID,
+		SyncInterval:       100 * time.Millisecond,
+		SyncIntervalJitter: 0,
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- d.Run(ctx) }()
+
+	// Let the daemon complete its first sync, then kill the parent.
+	time.Sleep(300 * time.Millisecond)
+	if err := cmd.Process.Kill(); err != nil {
+		t.Fatalf("kill parent: %v", err)
+	}
+	// Drain the process so the kill becomes visible to the kernel
+	// (avoids the zombie window where signal-0 still reports running).
+	if _, err := cmd.Process.Wait(); err != nil {
+		t.Logf("wait parent (expected error after Kill): %v", err)
+	}
+
+	// The daemon must exit within a few sync intervals after the
+	// parent dies — not when the context deadline fires.
+	select {
+	case <-errCh:
+		// Good — daemon returned.
+	case <-time.After(2 * time.Second):
+		cancel()
+		<-errCh
+		t.Fatal("daemon did not exit within 2s after parent PID died; parent-PID monitoring is broken")
 	}
 }

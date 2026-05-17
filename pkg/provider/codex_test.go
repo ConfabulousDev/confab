@@ -450,3 +450,54 @@ command = "` + otherCommand + `"
 		})
 	}
 }
+
+// TestCodexInstallHooksWritesToConfigPath verifies the Codex provider's
+// InstallHooks/UninstallHooks delegation lands at the path resolved by
+// ConfigPath(). The underlying TOML mutation is tested in
+// pkg/hookconfig — this test guards the path-resolution + delegation
+// seam at codex.go:333,342.
+//
+// Note: IsHooksInstalled() can't be used as a positive-check round-trip
+// here because installation writes the actual test-binary path
+// (`provider.test`) into config.toml, and isConfabCommand requires the
+// basename to be exactly `confab`. The negative-side uninstall check is
+// still meaningful: IsHooksInstalled() must return false after
+// UninstallHooks regardless of the binary used to install.
+func TestCodexInstallHooksWritesToConfigPath(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv(CodexStateDirEnv, tmpDir)
+
+	wantPath := filepath.Join(tmpDir, "config.toml")
+	gotPath, err := (Codex{}).InstallHooks()
+	if err != nil {
+		t.Fatalf("Codex.InstallHooks() error = %v", err)
+	}
+	if gotPath != wantPath {
+		t.Errorf("Codex.InstallHooks() returned %q, want %q", gotPath, wantPath)
+	}
+	data, err := os.ReadFile(wantPath)
+	if err != nil {
+		t.Fatalf("config.toml not written at expected path: %v", err)
+	}
+	// Verify the SessionStart hook was written with the codex provider arg.
+	// The binary path varies (it's the test binary), so just check the
+	// trailing command shape.
+	if !strings.Contains(string(data), "hook session-start --provider codex") {
+		t.Errorf("config.toml missing confab SessionStart hook after InstallHooks; got:\n%s", data)
+	}
+
+	uninstallPath, err := (Codex{}).UninstallHooks()
+	if err != nil {
+		t.Fatalf("Codex.UninstallHooks() error = %v", err)
+	}
+	if uninstallPath != wantPath {
+		t.Errorf("Codex.UninstallHooks() returned %q, want %q", uninstallPath, wantPath)
+	}
+	data, err = os.ReadFile(wantPath)
+	if err != nil {
+		t.Fatalf("config.toml gone after uninstall: %v", err)
+	}
+	if strings.Contains(string(data), "hook session-start --provider codex") {
+		t.Errorf("config.toml still contains SessionStart hook after UninstallHooks; got:\n%s", data)
+	}
+}

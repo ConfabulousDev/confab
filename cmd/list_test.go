@@ -165,13 +165,40 @@ func TestListSessions_FilterByDuration(t *testing.T) {
 	os.MkdirAll(project, 0755)
 
 	recentSession := filepath.Join(project, "aaaaaaaa-1111-1111-1111-111111111111.jsonl")
-	os.WriteFile(recentSession, []byte(`{"type":"summary","summary":"Recent session"}`), 0644)
+	if err := os.WriteFile(recentSession, []byte(`{"type":"summary","summary":"Recent session"}`), 0644); err != nil {
+		t.Fatalf("write recent session: %v", err)
+	}
+
+	// Plant an old session that must be filtered OUT. Without this,
+	// the test would pass even if scanAndFilterSessions returned every
+	// session regardless of duration — the assertion `len == 1` would
+	// be satisfied by the recent-only setup.
+	oldSession := filepath.Join(project, "bbbbbbbb-2222-2222-2222-222222222222.jsonl")
+	if err := os.WriteFile(oldSession, []byte(`{"type":"summary","summary":"Old session"}`), 0644); err != nil {
+		t.Fatalf("write old session: %v", err)
+	}
+	oldTime := time.Now().Add(-25 * time.Hour)
+	if err := os.Chtimes(oldSession, oldTime, oldTime); err != nil {
+		t.Fatalf("chtimes old session: %v", err)
+	}
 
 	filtered, err := scanAndFilterSessions(provider.ClaudeCode{}, "1h")
 	if err != nil {
 		t.Fatalf("scanAndFilterSessions error: %v", err)
 	}
 	if len(filtered) != 1 {
-		t.Errorf("Expected 1 session within last hour, got %d", len(filtered))
+		t.Fatalf("Expected 1 session within last hour, got %d", len(filtered))
+	}
+	if got := filtered[0].SessionID; got != "aaaaaaaa-1111-1111-1111-111111111111" {
+		t.Errorf("expected recent session retained, got %q", got)
+	}
+
+	// Sanity-check the inverse: with no filter, both should appear.
+	all, err := scanAndFilterSessions(provider.ClaudeCode{}, "")
+	if err != nil {
+		t.Fatalf("scanAndFilterSessions(unfiltered) error: %v", err)
+	}
+	if len(all) != 2 {
+		t.Errorf("Expected 2 sessions without filter, got %d", len(all))
 	}
 }

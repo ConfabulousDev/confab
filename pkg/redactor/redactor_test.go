@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ConfabulousDev/confab/pkg/config"
 )
@@ -1002,4 +1003,50 @@ func TestRedactFieldPattern(t *testing.T) {
 			t.Errorf("API key should not remain in note, got: %v", note)
 		}
 	})
+}
+
+// TestRedact_NoCatastrophicBacktracking guards against regex
+// catastrophic backtracking on degenerate inputs. The private-key
+// patterns use `(?s).*?` which would hang under PCRE on a marker
+// without a closing terminator. Go's regexp uses RE2 (linear time, no
+// backtracking) by design, so this test pins the invariant: a runaway
+// input must redact (or pass through) in bounded time. If anyone
+// switches to a backtracking engine, this test fails loudly.
+//
+// The daemon ingests untrusted user-transcript content; freezing the
+// process on a malicious payload would be a real DoS vector.
+func TestRedact_NoCatastrophicBacktracking(t *testing.T) {
+	r, err := NewFromConfig(&config.RedactionConfig{Enabled: true})
+	if err != nil {
+		t.Fatalf("NewFromConfig: %v", err)
+	}
+	if r == nil {
+		t.Fatal("expected non-nil redactor")
+	}
+
+	// 5MB of `A` after a private-key opening marker, no closing marker.
+	// On a backtracking engine this would explore O(2^n) paths.
+	var b strings.Builder
+	b.WriteString("-----BEGIN RSA PRIVATE KEY-----\n")
+	for i := 0; i < 5*1024*1024; i++ {
+		b.WriteByte('A')
+	}
+	input := b.String()
+
+	done := make(chan struct{})
+	var out string
+	go func() {
+		out = r.Redact(input)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Pattern requires the closing marker, so input is preserved.
+		if len(out) != len(input) {
+			t.Errorf("Redact altered length unexpectedly: in=%d out=%d", len(input), len(out))
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Redact did not return within 2s on degenerate input — possible catastrophic backtracking introduced")
+	}
 }

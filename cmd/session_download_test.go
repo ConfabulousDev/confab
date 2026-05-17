@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/ConfabulousDev/confab/pkg/config"
@@ -224,6 +225,94 @@ func TestRunSessionDownload_NoTranscriptFile(t *testing.T) {
 	}
 	if err.Error() != "no transcript file found for session" {
 		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+// TestDownloadAllFiles_RejectsPathTraversal guards the path-traversal
+// defense at session_download.go:140-145. A malicious backend returning
+// file names like ".." or "/etc/passwd" must not write outside
+// outputDir. The two layers of defense are filepath.Base (strips path
+// components, so "../../etc/passwd" becomes "passwd" inside outputDir —
+// benign) and the absDest/absOutputDir HasPrefix check (catches the
+// edge cases like bare ".." that filepath.Base preserves).
+func TestDownloadAllFiles_RejectsPathTraversal(t *testing.T) {
+	// Every file is served with marker content; we then assert no file
+	// containing the marker exists outside outputDir.
+	const marker = "TRAVERSAL_MARKER_CONTENT"
+
+	maliciousNames := []string{
+		"..",
+		"../",
+		"../../etc/passwd",
+		"/etc/passwd",
+	}
+	files := make([]sessionFile, 0, len(maliciousNames))
+	fileContents := make(map[string]string)
+	for _, name := range maliciousNames {
+		files = append(files, sessionFile{FileName: name, FileType: "agent"})
+		fileContents[name] = marker
+	}
+	server := newTestServer(files, fileContents)
+	defer server.Close()
+
+	cfg := &config.UploadConfig{BackendURL: server.URL, APIKey: "test-key"}
+	client, err := confabhttp.NewClient(cfg, utils.DefaultHTTPTimeout)
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+
+	outerDir := t.TempDir()
+	outputDir := filepath.Join(outerDir, "session")
+	if err := os.MkdirAll(outputDir, 0755); err != nil {
+		t.Fatalf("mkdir outputDir: %v", err)
+	}
+
+	// Plant a sentinel above outputDir so we can prove nothing
+	// overwrote it.
+	sentinelPath := filepath.Join(outerDir, "passwd")
+	if err := os.WriteFile(sentinelPath, []byte("SENTINEL"), 0600); err != nil {
+		t.Fatalf("write sentinel: %v", err)
+	}
+
+	// downloadAllFiles is expected to return an error for any path that
+	// trips the HasPrefix check. filepath.Base may sanitize some inputs
+	// down to benign basenames inside outputDir; those are not an
+	// escape. The invariant we assert is: no file with the marker
+	// content exists outside outputDir.
+	_ = downloadAllFiles(client, "test-uuid", outputDir, files)
+
+	if data, err := os.ReadFile(sentinelPath); err != nil {
+		t.Errorf("sentinel disappeared: %v", err)
+	} else if string(data) != "SENTINEL" {
+		t.Errorf("sentinel was overwritten: %q", data)
+	}
+
+	// Walk outerDir; any file outside outputDir containing the marker
+	// would be a confirmed escape.
+	err = filepath.Walk(outerDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return nil
+		}
+		if strings.HasPrefix(path, outputDir+string(filepath.Separator)) {
+			return nil
+		}
+		if path == outputDir {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil
+		}
+		if strings.Contains(string(data), marker) {
+			t.Errorf("path traversal escaped to %q (content: %q)", path, data)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk: %v", err)
 	}
 }
 

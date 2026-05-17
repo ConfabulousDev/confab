@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 
@@ -234,18 +235,33 @@ func TestEngine_SyncAll_DispatchesAnnotateChunkPerChunk(t *testing.T) {
 }
 
 // TestEngine_SyncAll_AppliesSummaryLinksFromAnnotateChunk verifies the
-// engine drains AnnotationResult.SummaryLinks and invokes summary linking
-// for each entry. Tests the data-driven side-effect plumbing.
+// engine drains AnnotationResult.SummaryLinks and dispatches each
+// entry to the backend via UpdateSessionSummary. Plants two previous-
+// session transcript files (one per leafUUID) so the lookup in
+// FindSessionByLeafUUID succeeds; asserts the mock backend records
+// both PATCH requests with the right external_id + summary.
+//
+// Without the backend-side assertion, a silent drop of SummaryLinks
+// from the engine loop at engine.go:315 would still pass.
 func TestEngine_SyncAll_AppliesSummaryLinksFromAnnotateChunk(t *testing.T) {
-	engine, stub, _, transcriptPath := engineWithStub(t)
-	// Add a `leafUuid` summary in the parent transcript so summary linking
-	// has somewhere to look. The engine's linkSummaryToPreviousSession
-	// walks the projects directory for transcripts containing leafUuid;
-	// for this dispatch test we don't need a successful link — we just
-	// need to know the engine *tried* to apply each returned link.
+	engine, stub, mock, transcriptPath := engineWithStub(t)
 	if err := os.WriteFile(transcriptPath, []byte(`{"type":"system","line":1}`+"\n"), 0644); err != nil {
 		t.Fatalf("write transcript: %v", err)
 	}
+
+	// Plant two "previous session" transcripts in the same directory
+	// so FindSessionByLeafUUID can resolve each leafUUID to a session
+	// ID (the file's basename without .jsonl).
+	transcriptDir := filepath.Dir(transcriptPath)
+	prev1Path := filepath.Join(transcriptDir, "prev-session-aaa.jsonl")
+	prev2Path := filepath.Join(transcriptDir, "prev-session-bbb.jsonl")
+	if err := os.WriteFile(prev1Path, []byte(`{"type":"system","uuid":"leaf-1"}`+"\n"), 0644); err != nil {
+		t.Fatalf("write prev1: %v", err)
+	}
+	if err := os.WriteFile(prev2Path, []byte(`{"type":"system","uuid":"leaf-2"}`+"\n"), 0644); err != nil {
+		t.Fatalf("write prev2: %v", err)
+	}
+
 	stub.annotateResult = provider.AnnotationResult{
 		SummaryLinks: []provider.SummaryLink{
 			{Summary: "first", LeafUUID: "leaf-1"},
@@ -260,18 +276,24 @@ func TestEngine_SyncAll_AppliesSummaryLinksFromAnnotateChunk(t *testing.T) {
 		t.Fatalf("SyncAll: %v", err)
 	}
 
-	// The engine should have made one AnnotateChunk call (one chunk) and
-	// dispatched both returned summary links. The dispatch path itself is
-	// best-effort and may not surface anywhere we can assert; instead we
-	// assert the engine consumed the returned slice (i.e. did not drop it
-	// on the floor). The most reliable signal is that AnnotateChunk was
-	// called with the right chunk and the engine didn't error.
 	if got := len(stub.annotateCalls); got != 1 {
 		t.Fatalf("AnnotateChunk call count = %d, want 1", got)
 	}
-	// Stronger assertion: the engine must read SummaryLinks from the
-	// AnnotationResult, so a non-empty slice must NOT crash or be silently
-	// dropped. Sentinel: if the engine ignored the field entirely, the
-	// test still passes — but the contract test in claude_test.go pins the
-	// upstream half of this contract. Together they bracket the seam.
+
+	if got := len(mock.summaryRequests); got != 2 {
+		t.Fatalf("UpdateSessionSummary call count = %d, want 2 — engine dropped SummaryLinks", got)
+	}
+	want := map[string]string{
+		"prev-session-aaa": "first",
+		"prev-session-bbb": "second",
+	}
+	got := map[string]string{}
+	for _, req := range mock.summaryRequests {
+		got[req.ExternalID] = req.Summary
+	}
+	for id, summary := range want {
+		if got[id] != summary {
+			t.Errorf("summary for %s = %q, want %q", id, got[id], summary)
+		}
+	}
 }

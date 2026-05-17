@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -350,7 +351,7 @@ func TestRunLogin_WithAPIKeyFlag_InvalidKey(t *testing.T) {
 	server := httptest.NewServer(backend)
 	defer server.Close()
 
-	setupSetupTestEnv(t, server.URL)
+	_, configPath := setupSetupTestEnv(t, server.URL)
 
 	var loginCalled bool
 	doDeviceLoginFunc = func(backendURL, keyName string) error {
@@ -374,6 +375,34 @@ func TestRunLogin_WithAPIKeyFlag_InvalidKey(t *testing.T) {
 
 	if loginCalled {
 		t.Error("device login should not be called when api-key flag is provided")
+	}
+
+	// Side-effect assertions: a failed login must not persist the
+	// invalid key, must not write a config file from scratch, and must
+	// not install Claude hooks. Without these, a refactor that
+	// reordered "validate" after "save" would still pass the error-
+	// message check above.
+	if _, err := os.Stat(configPath); !os.IsNotExist(err) {
+		// If config exists from a prior step in the test environment,
+		// ensure it doesn't contain the invalid API key.
+		data, readErr := os.ReadFile(configPath)
+		if readErr != nil {
+			t.Fatalf("config exists but unreadable: %v", readErr)
+		}
+		if strings.Contains(string(data), "cfb_invalid-api-key-12345678") {
+			t.Errorf("config persisted the rejected API key: %s", data)
+		}
+	}
+
+	settingsPath := filepath.Join(os.Getenv("CONFAB_CLAUDE_DIR"), "settings.json")
+	if _, err := os.Stat(settingsPath); !os.IsNotExist(err) {
+		data, readErr := os.ReadFile(settingsPath)
+		if readErr != nil {
+			t.Fatalf("settings exists but unreadable: %v", readErr)
+		}
+		if strings.Contains(string(data), "hook session-start") {
+			t.Errorf("Claude hooks were installed despite invalid API key: %s", data)
+		}
 	}
 }
 

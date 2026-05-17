@@ -16,6 +16,98 @@ import (
 
 
 
+// TestEnsureAuthenticated guards the auth gate at upload.go:201. Every
+// command that talks to the backend depends on this; a regression that
+// green-lights an unconfigured install would surface as confusing API
+// errors instead of "run `confab login`".
+func TestEnsureAuthenticated(t *testing.T) {
+	tests := []struct {
+		name        string
+		config      *UploadConfig // nil = no config file
+		wantErr     bool
+		wantErrSub  string // substring expected in error
+		wantCfgPtr  bool   // expect non-nil returned cfg on success
+	}{
+		{
+			name:       "missing config file",
+			config:     nil,
+			wantErr:    true,
+			wantErrSub: "not authenticated",
+		},
+		{
+			name:       "empty config",
+			config:     &UploadConfig{},
+			wantErr:    true,
+			wantErrSub: "not authenticated",
+		},
+		{
+			name:       "missing api key",
+			config:     &UploadConfig{BackendURL: "https://api.example.com"},
+			wantErr:    true,
+			wantErrSub: "not authenticated",
+		},
+		{
+			name:       "missing backend url",
+			config:     &UploadConfig{APIKey: "cfb_test-key"},
+			wantErr:    true,
+			wantErrSub: "not authenticated",
+		},
+		{
+			name:       "both present",
+			config:     &UploadConfig{BackendURL: "https://api.example.com", APIKey: "cfb_test-key"},
+			wantErr:    false,
+			wantCfgPtr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			configPath := filepath.Join(tmpDir, "config.json")
+			t.Setenv("CONFAB_CONFIG_PATH", configPath)
+			if tt.config != nil {
+				data, err := json.Marshal(tt.config)
+				if err != nil {
+					t.Fatalf("marshal config: %v", err)
+				}
+				if err := os.WriteFile(configPath, data, 0600); err != nil {
+					t.Fatalf("write config: %v", err)
+				}
+			}
+
+			cfg, err := EnsureAuthenticated()
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("EnsureAuthenticated() error = nil, want error containing %q", tt.wantErrSub)
+				}
+				if tt.wantErrSub != "" && !contains(err.Error(), tt.wantErrSub) {
+					t.Errorf("EnsureAuthenticated() error = %q, want substring %q", err.Error(), tt.wantErrSub)
+				}
+				if cfg != nil {
+					t.Errorf("EnsureAuthenticated() cfg = %+v, want nil on error", cfg)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("EnsureAuthenticated() error = %v, want nil", err)
+			}
+			if tt.wantCfgPtr && cfg == nil {
+				t.Fatal("EnsureAuthenticated() cfg = nil, want non-nil")
+			}
+		})
+	}
+}
+
+// contains is a tiny helper so the test file doesn't need to import
+// strings just for one substring check.
+func contains(s, substr string) bool {
+	for i := 0; i+len(substr) <= len(s); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}
+
 func TestValidateBackendURL(t *testing.T) {
 	tests := []struct {
 		name    string

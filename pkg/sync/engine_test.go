@@ -41,14 +41,21 @@ func readRequestBody(r *http.Request) ([]byte, error) {
 
 // mockBackend tracks requests and provides configurable responses
 type mockBackend struct {
-	t              *testing.T
-	initRequests   []InitRequest
-	chunkRequests  []ChunkRequest
-	initResponse   *InitResponse
-	initError      bool
-	chunkError     bool
-	requestCount   int32
-	failUntilCount int32 // fail requests until this count is reached
+	t                *testing.T
+	initRequests     []InitRequest
+	chunkRequests    []ChunkRequest
+	summaryRequests  []summaryRequest // PATCH /api/v1/sessions/{id}/summary
+	initResponse     *InitResponse
+	initError        bool
+	chunkError       bool
+	requestCount     int32
+	failUntilCount   int32 // fail requests until this count is reached
+}
+
+// summaryRequest captures a PATCH to /api/v1/sessions/{externalID}/summary.
+type summaryRequest struct {
+	ExternalID string
+	Summary    string
 }
 
 func newMockBackend(t *testing.T) *mockBackend {
@@ -123,7 +130,30 @@ func (m *mockBackend) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(EventResponse{Success: true})
 
 	default:
-		m.t.Errorf("Unexpected request to %s", r.URL.Path)
+		// PATCH /api/v1/sessions/{external_id}/summary — used by
+		// linkSummaryToPreviousSession. Record the request so dispatch
+		// tests can assert it fired.
+		if r.Method == http.MethodPatch &&
+			strings.HasPrefix(r.URL.Path, "/api/v1/sessions/") &&
+			strings.HasSuffix(r.URL.Path, "/summary") {
+			externalID := strings.TrimSuffix(
+				strings.TrimPrefix(r.URL.Path, "/api/v1/sessions/"),
+				"/summary",
+			)
+			var req UpdateSummaryRequest
+			if err := json.Unmarshal(body, &req); err != nil {
+				m.t.Errorf("Failed to decode summary request: %v", err)
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			m.summaryRequests = append(m.summaryRequests, summaryRequest{
+				ExternalID: externalID,
+				Summary:    req.Summary,
+			})
+			json.NewEncoder(w).Encode(UpdateSummaryResponse{Status: "ok"})
+			return
+		}
+		m.t.Errorf("Unexpected request to %s %s", r.Method, r.URL.Path)
 		w.WriteHeader(http.StatusNotFound)
 	}
 }

@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/ConfabulousDev/confab/pkg/redactor"
 )
 
 func TestNewFileTracker(t *testing.T) {
@@ -215,6 +217,92 @@ func TestFileTracker_ReadChunk_ExtractsAgentIDs(t *testing.T) {
 	}
 	if !found["a3eaf63159a07953f"] || !found["acompact-2aaa241e456ebc94"] {
 		t.Errorf("expected agent IDs a3eaf63159a07953f and acompact-2aaa241e456ebc94, got %v", chunk.AgentIDs)
+	}
+}
+
+// TestFileTracker_ReadChunk_DoesNotExtractFromOtherFields verifies the
+// agent-ID extractor is field-aware. A previous version of the test
+// only exercised the positive case (JSON with toolUseResult.agentId
+// present) and would have passed even if extraction matched any
+// 17-char hex run.
+func TestFileTracker_ReadChunk_DoesNotExtractFromOtherFields(t *testing.T) {
+	tmpDir := t.TempDir()
+	transcriptPath := filepath.Join(tmpDir, "transcript.jsonl")
+
+	// agent-shaped IDs that are NOT inside toolUseResult.agentId:
+	// - inside a different field name
+	// - inside a message body (string content)
+	// - inside an unrelated nested object
+	content := `{"type":"user","content":"a3eaf63159a07953f"}
+{"type":"system","unrelated":{"agentId":"a3eaf63159a07953f"}}
+{"type":"user","message":{"text":"acompact-2aaa241e456ebc94 is just text"}}
+`
+	if err := os.WriteFile(transcriptPath, []byte(content), 0644); err != nil {
+		t.Fatalf("failed to write test file: %v", err)
+	}
+
+	ft := NewFileTracker(transcriptPath)
+	ft.InitFromBackendState(map[string]FileState{
+		"transcript.jsonl": {LastSyncedLine: 0},
+	})
+
+	chunk, err := ft.ReadChunk(ft.GetTranscriptFile(), nil, DefaultMaxChunkBytes)
+	if err != nil {
+		t.Fatalf("failed to read chunk: %v", err)
+	}
+	if len(chunk.AgentIDs) != 0 {
+		t.Errorf("expected 0 agent IDs (none inside toolUseResult.agentId), got %d: %v", len(chunk.AgentIDs), chunk.AgentIDs)
+	}
+}
+
+// TestFileTracker_ReadChunk_AppliesRedactor verifies ReadChunk actually
+// applies the redactor it's given. Every other ReadChunk test passes
+// nil for the redactor, so a regression that silently dropped redaction
+// at the tracker level would not be caught by unit tests.
+func TestFileTracker_ReadChunk_AppliesRedactor(t *testing.T) {
+	tmpDir := t.TempDir()
+	transcriptPath := filepath.Join(tmpDir, "transcript.jsonl")
+
+	// One line with a secret to scrub, one without.
+	content := `{"type":"user","message":"my key is SECRET-VALUE-123"}
+{"type":"assistant","message":"hello"}
+`
+	if err := os.WriteFile(transcriptPath, []byte(content), 0644); err != nil {
+		t.Fatalf("failed to write test file: %v", err)
+	}
+
+	r, err := redactor.NewRedactor(redactor.Config{
+		Patterns: []redactor.Pattern{
+			{Name: "test-secret", Pattern: `SECRET-VALUE-\d+`, Type: "test"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewRedactor: %v", err)
+	}
+
+	ft := NewFileTracker(transcriptPath)
+	ft.InitFromBackendState(map[string]FileState{
+		"transcript.jsonl": {LastSyncedLine: 0},
+	})
+
+	chunk, err := ft.ReadChunk(ft.GetTranscriptFile(), r, DefaultMaxChunkBytes)
+	if err != nil {
+		t.Fatalf("ReadChunk: %v", err)
+	}
+	if chunk == nil {
+		t.Fatal("expected chunk, got nil")
+	}
+	if len(chunk.Lines) != 2 {
+		t.Fatalf("expected 2 lines, got %d", len(chunk.Lines))
+	}
+	for i, line := range chunk.Lines {
+		if strings.Contains(line, "SECRET-VALUE-123") {
+			t.Errorf("line %d still contains unredacted secret: %q", i, line)
+		}
+	}
+	// Positive: line 1 should now contain a redaction marker.
+	if !strings.Contains(chunk.Lines[0], "[REDACTED") {
+		t.Errorf("line 0 missing redaction marker after Redact: %q", chunk.Lines[0])
 	}
 }
 
