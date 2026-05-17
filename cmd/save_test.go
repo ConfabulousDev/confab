@@ -122,7 +122,7 @@ func TestSaveSessionsByID(t *testing.T) {
 		atomic.StoreInt32(&backend.chunkCount, 0)
 		backend.initReqs = nil
 
-		err := saveSessionsByID([]string{sessionID})
+		err := saveSessionsForProvider(provider.ClaudeCode{}, []string{sessionID})
 		if err != nil {
 			t.Fatalf("saveSessionsByID failed: %v", err)
 		}
@@ -142,7 +142,7 @@ func TestSaveSessionsByID(t *testing.T) {
 		atomic.StoreInt32(&backend.initCount, 0)
 		atomic.StoreInt32(&backend.chunkCount, 0)
 
-		err := saveSessionsByID([]string{"aaaaaaaa"})
+		err := saveSessionsForProvider(provider.ClaudeCode{}, []string{"aaaaaaaa"})
 		if err != nil {
 			t.Fatalf("saveSessionsByID failed: %v", err)
 		}
@@ -177,7 +177,7 @@ func TestSaveSessionsByID(t *testing.T) {
 		atomic.StoreInt32(&backend.initCount, 0)
 		atomic.StoreInt32(&backend.chunkCount, 0)
 
-		err := saveSessionsByID([]string{sessionID1, sessionID2})
+		err := saveSessionsForProvider(provider.ClaudeCode{}, []string{sessionID1, sessionID2})
 		if err != nil {
 			t.Fatalf("saveSessionsByID failed: %v", err)
 		}
@@ -191,7 +191,7 @@ func TestSaveSessionsByID(t *testing.T) {
 		atomic.StoreInt32(&backend.initCount, 0)
 
 		// Should not return error, just print error message
-		err := saveSessionsByID([]string{"nonexistent", sessionID})
+		err := saveSessionsForProvider(provider.ClaudeCode{}, []string{"nonexistent", sessionID})
 		if err != nil {
 			t.Fatalf("saveSessionsByID should not fail: %v", err)
 		}
@@ -213,7 +213,7 @@ func TestSaveSessionsByID_UploadError(t *testing.T) {
 	_, sessionID, _ := setupSaveTestEnv(t, server.URL)
 
 	// Upload should continue even when individual uploads fail
-	err := saveSessionsByID([]string{sessionID})
+	err := saveSessionsForProvider(provider.ClaudeCode{}, []string{sessionID})
 	if err != nil {
 		t.Fatalf("saveSessionsByID should not fail on upload error: %v", err)
 	}
@@ -224,7 +224,7 @@ func TestSaveSessionsByID_NoAuth(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("CONFAB_CONFIG_PATH", filepath.Join(tmpDir, "nonexistent", "config.json"))
 
-	err := saveSessionsByID([]string{"some-session"})
+	err := saveSessionsForProvider(provider.ClaudeCode{}, []string{"some-session"})
 	if err == nil {
 		t.Fatal("Expected auth error, got nil")
 	}
@@ -434,4 +434,3 @@ func TestSaveCodex_StateDBMissing_FallsBackToSingleRolloutSync_NoCrash(t *testin
 			backend.chunkCount)
 	}
 }
-

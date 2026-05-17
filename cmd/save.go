@@ -33,13 +33,6 @@ Examples:
 
 var saveProviderName string
 
-// saveSessionsByID uploads Claude Code sessions by ID. Retained as a
-// convenience wrapper for legacy callers; new code should use
-// saveSessionsForProvider with an explicit Provider.
-func saveSessionsByID(sessionIDs []string) error {
-	return saveSessionsForProvider(provider.ClaudeCode{}, sessionIDs)
-}
-
 // saveSessionsForProvider resolves each session ID via the provider's
 // FindSessionByID (which transparently walks Codex subagent UUIDs up to
 // their root) and uploads through the sync engine.

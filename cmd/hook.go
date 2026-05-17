@@ -24,16 +24,19 @@ func writeClaudeHookResponse(w io.Writer, suppressOutput bool) {
 // This is distinct from hooksCmd which manages hook installation.
 var hookCmd = &cobra.Command{
 	Use:   "hook",
-	Short: "Hook handlers for Claude Code events",
-	Long: `Hook handlers that are invoked by Claude Code during various events.
+	Short: "Hook handlers for provider events",
+	Long: `Hook handlers invoked by the configured provider during session events.
 
-These commands are typically called by Claude Code hooks configured in
-~/.claude/settings.json, not directly by users.
+These commands are typically called by hooks configured in the provider's
+settings file (Claude Code: ~/.claude/settings.json; Codex: ~/.codex/config.toml),
+not directly by users.
 
 Available handlers:
-  session-start   Handle SessionStart events (starts sync daemon)
-  session-end     Handle SessionEnd events (stops sync daemon)
-  pre-tool-use    Handle PreToolUse events (e.g., git commit validation)`,
+  session-start       Handle SessionStart events (starts sync daemon)
+  session-end         Handle SessionEnd events (Claude Code only)
+  pre-tool-use        Handle PreToolUse events (Claude Code only)
+  post-tool-use       Handle PostToolUse events (Claude Code only)
+  user-prompt-submit  Handle UserPromptSubmit events (Claude Code only)`,
 }
 
 func init() {

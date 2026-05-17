@@ -14,7 +14,7 @@ import (
 var hookSessionEndCmd = &cobra.Command{
 	Use:   "session-end",
 	Short: "Handle SessionEnd hook events",
-	Long: `Handle SessionEnd hook events from Claude Code.
+	Long: `Handle SessionEnd hook events.
 
 This command is called by the SessionEnd hook configured in
 ~/.claude/settings.json. It signals the sync daemon to perform
@@ -23,10 +23,10 @@ a final sync and shut down gracefully.
 When called from a hook, it reads session info from stdin and
 signals the daemon to stop.
 
-This command is not supported for Codex. Codex fires Stop at every
-agent/turn boundary, so a Stop-driven shutdown would prematurely kill
-the root sync daemon. Codex daemons shut down via parent-process
-liveness instead (see Codex.FindParentPID).`,
+Claude Code only — Codex fires Stop at every agent/turn boundary, so a
+Stop-driven shutdown would prematurely kill the root sync daemon. Codex
+daemons shut down via parent-process liveness instead (see
+Codex.FindParentPID).`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		providerName, err := provider.NormalizeName(hookProviderName)
 		if err != nil {
@@ -77,4 +77,3 @@ func sessionEndFromReader(r io.Reader) error {
 
 	return nil
 }
-

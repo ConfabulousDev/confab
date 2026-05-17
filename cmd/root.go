@@ -11,9 +11,10 @@ import (
 
 var rootCmd = &cobra.Command{
 	Use:   "confab",
-	Short: "Archive and query your Claude Code sessions",
-	Long: `Confab automatically captures Claude Code session transcripts and agent sidechains
-and uploads them to the backend for retrieval, search, and analytics.`,
+	Short: "Archive and query your AI coding sessions",
+	Long: `Confab automatically captures session transcripts and agent sidechains from
+Claude Code and Codex, and uploads them to the backend for retrieval, search,
+and analytics.`,
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		// Initialize logger for all commands (except --help which doesn't run this)
 		logger.Init()

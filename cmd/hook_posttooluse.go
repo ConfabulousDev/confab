@@ -24,7 +24,7 @@ var prURLPattern = regexp.MustCompile(`https://github\.com/[^/\s]+/[^/\s]+/pull/
 var hookPostToolUseCmd = &cobra.Command{
 	Use:   "post-tool-use",
 	Short: "Handle PostToolUse hook events",
-	Long: `Handler for PostToolUse hook events from Claude Code.
+	Long: `Handler for PostToolUse hook events.
 
 For successful PR creation (gh pr create, GitHub MCP tool), extracts the PR URL
 from the output and links it to the current Confab session.
@@ -34,7 +34,9 @@ rev-parse and links the GitHub commit URL to the current Confab session.
 
 For all other tool calls, exits silently (code 0).
 
-This command is typically invoked by Claude Code, not directly by users.`,
+This command is typically invoked by Claude Code, not directly by users.
+
+Claude Code only — Codex does not fire PostToolUse.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return handlePostToolUse(os.Stdin, os.Stdout)
 	},

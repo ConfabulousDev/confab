@@ -1,8 +1,8 @@
 # confab
 
-Sync and explore your Claude Code sessions. Connect `confab` to your Confab backend to capture transcripts in real-time for exploration, sharing, and analysis.
+Sync and explore your Claude Code and Codex sessions. Connect `confab` to your Confab backend to capture transcripts in real-time for exploration, sharing, and analysis.
 
-Works seamlessly — your `claude` workflow stays exactly the same.
+Works seamlessly — your `claude` and `codex` workflows stay exactly the same.
 
 ![How Confab works](docs/how-it-works.svg)
 
@@ -16,7 +16,7 @@ curl -fsSL https://raw.githubusercontent.com/ConfabulousDev/confab/main/install.
 confab setup --backend-url https://confab.yourcompany.com
 ```
 
-After setup, your Claude Code sessions will automatically sync to the configured backend.
+After setup, your Claude Code sessions automatically sync to the backend. To also sync Codex, run `confab setup --provider codex`.
 
 ## Connect to Your Backend
 
@@ -88,6 +88,29 @@ Built-in patterns detect common secrets (API keys, private keys, JWT tokens, dat
 
 See [Redaction](REDACTION.md) for configuration details.
 
+## Codex
+
+Confab supports Codex sessions alongside Claude Code.
+
+```bash
+# Wire Codex hooks (in addition to or instead of Claude Code)
+confab setup --provider codex --backend-url https://confab.yourcompany.com
+
+# List Codex sessions
+confab list --provider codex
+
+# Upload a specific Codex session
+confab save --provider codex <id>
+```
+
+Codex stores session rollouts under `~/.codex/sessions/<yyyy>/<mm>/<dd>/rollout-*.jsonl`. Subagent rollouts are discovered automatically via Codex's local state database and synced as sidechain files under their root session.
+
+### Caveats
+
+- Skills (`/til`, `/retro`) are Claude Code only.
+- PR/commit linking hooks (PreToolUse, PostToolUse) are Claude Code only.
+- Codex sync daemons shut down via parent-process liveness, not a SessionEnd hook.
+
 ## Configuration
 
 | File | Purpose |
@@ -99,7 +122,7 @@ See [Redaction](REDACTION.md) for configuration details.
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `CONFAB_CLAUDE_DIR` | `~/.claude` | Claude Code state directory |
+| `CONFAB_CLAUDE_DIR` | `~/.claude` | Override the Claude Code state directory (Codex paths are fixed at `~/.codex/`) |
 | `CONFAB_CONFIG_PATH` | `~/.confab/config.json` | Config file location |
 | `CONFAB_LOG_DIR` | `~/.confab/logs` | Log directory |
 
@@ -109,7 +132,7 @@ Each package has a README with extension guides, invariants, and design decision
 
 - [`cmd/`](cmd/README.md) — CLI commands and hook handlers
 - [`pkg/`](pkg/README.md) — Package index and dependency map
-  - [`config`](pkg/config/README.md), [`daemon`](pkg/daemon/README.md), [`discovery`](pkg/discovery/README.md), [`git`](pkg/git/README.md), [`http`](pkg/http/README.md), [`logger`](pkg/logger/README.md), [`redactor`](pkg/redactor/README.md), [`sync`](pkg/sync/README.md), [`types`](pkg/types/README.md), [`utils`](pkg/utils/README.md)
+  - [`config`](pkg/config/README.md), [`daemon`](pkg/daemon/README.md), [`git`](pkg/git/README.md), [`http`](pkg/http/README.md), [`logger`](pkg/logger/README.md), [`redactor`](pkg/redactor/README.md), [`sync`](pkg/sync/README.md), [`types`](pkg/types/README.md), [`utils`](pkg/utils/README.md)
 
 See also [`CLAUDE.md`](CLAUDE.md) for AI-oriented architecture notes and development practices.
 

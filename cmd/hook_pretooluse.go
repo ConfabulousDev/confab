@@ -42,7 +42,7 @@ var ghPRCreatePattern = regexp.MustCompile(`\bgh\b\s+(-\S+(\s+\S+)?\s+)*pr\s+cre
 var hookPreToolUseCmd = &cobra.Command{
 	Use:   "pre-tool-use",
 	Short: "Handle PreToolUse hook events",
-	Long: `Handler for PreToolUse hook events from Claude Code.
+	Long: `Handler for PreToolUse hook events.
 
 For git commit commands, ensures the commit message includes a
 Confab session URL trailer (Confab-Link: {backend_url}/sessions/{session_id}).
@@ -52,7 +52,9 @@ Confab session link (📝 [Confab link]({backend_url}/sessions/{session_id})).
 
 For all other tool calls, exits silently (code 0) to allow normal flow.
 
-This command is typically invoked by Claude Code, not directly by users.`,
+This command is typically invoked by Claude Code, not directly by users.
+
+Claude Code only — Codex does not fire PreToolUse.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return handlePreToolUse(os.Stdin, os.Stdout)
 	},
