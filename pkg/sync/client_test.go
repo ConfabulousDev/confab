@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ConfabulousDev/confab/pkg/config"
 	pkghttp "github.com/ConfabulousDev/confab/pkg/http"
@@ -169,6 +170,111 @@ func TestClient_LinkGitHub_Unauthorized(t *testing.T) {
 
 	if err == nil {
 		t.Error("expected error for unauthorized")
+	}
+}
+
+// E1 — SendEvent and UpdateSessionSummary were 0% covered prior to
+// this addition. SendSessionEnd on Engine (engine.go:381) calls
+// SendEvent; covering it directly here protects the wire format.
+
+func TestClient_SendEvent_Success(t *testing.T) {
+	var receivedReq EventRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" {
+			t.Errorf("expected POST, got %s", r.Method)
+		}
+		if r.URL.Path != "/api/v1/sync/event" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&receivedReq); err != nil {
+			t.Errorf("failed to decode request: %v", err)
+		}
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(EventResponse{Success: true})
+	}))
+	defer server.Close()
+
+	client := mustNewTestClient(t, server.URL)
+	ts := time.Date(2026, 5, 17, 12, 0, 0, 0, time.UTC)
+	payload := json.RawMessage(`{"foo":"bar"}`)
+	if err := client.SendEvent("sess-1", "session_end", ts, payload); err != nil {
+		t.Fatalf("SendEvent failed: %v", err)
+	}
+
+	if receivedReq.SessionID != "sess-1" {
+		t.Errorf("SessionID = %q, want sess-1", receivedReq.SessionID)
+	}
+	if receivedReq.EventType != "session_end" {
+		t.Errorf("EventType = %q, want session_end", receivedReq.EventType)
+	}
+	if !receivedReq.Timestamp.Equal(ts) {
+		t.Errorf("Timestamp = %v, want %v", receivedReq.Timestamp, ts)
+	}
+	if string(receivedReq.Payload) != `{"foo":"bar"}` {
+		t.Errorf("Payload = %s, want {\"foo\":\"bar\"}", receivedReq.Payload)
+	}
+}
+
+func TestClient_SendEvent_5xxError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": "boom"})
+	}))
+	defer server.Close()
+
+	client := mustNewTestClient(t, server.URL)
+	err := client.SendEvent("sess-1", "session_end", time.Now(), json.RawMessage(`{}`))
+	if err == nil {
+		t.Fatal("expected error on 500, got nil")
+	}
+	if !strings.Contains(err.Error(), "send event failed") {
+		t.Errorf("error message = %q, want substring 'send event failed'", err)
+	}
+}
+
+func TestClient_UpdateSessionSummary_Success(t *testing.T) {
+	var receivedReq UpdateSummaryRequest
+	var receivedPath, receivedMethod string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedMethod = r.Method
+		receivedPath = r.URL.Path
+		if err := json.NewDecoder(r.Body).Decode(&receivedReq); err != nil {
+			t.Errorf("decode: %v", err)
+		}
+		json.NewEncoder(w).Encode(UpdateSummaryResponse{Status: "ok"})
+	}))
+	defer server.Close()
+
+	client := mustNewTestClient(t, server.URL)
+	if err := client.UpdateSessionSummary("sess-abc", "the summary"); err != nil {
+		t.Fatalf("UpdateSessionSummary failed: %v", err)
+	}
+
+	if receivedMethod != "PATCH" {
+		t.Errorf("method = %q, want PATCH", receivedMethod)
+	}
+	if receivedPath != "/api/v1/sessions/sess-abc/summary" {
+		t.Errorf("path = %q, want /api/v1/sessions/sess-abc/summary", receivedPath)
+	}
+	if receivedReq.Summary != "the summary" {
+		t.Errorf("summary = %q, want 'the summary'", receivedReq.Summary)
+	}
+}
+
+func TestClient_UpdateSessionSummary_NotFound(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(map[string]string{"error": "session not found"})
+	}))
+	defer server.Close()
+
+	client := mustNewTestClient(t, server.URL)
+	err := client.UpdateSessionSummary("missing-sess", "summary")
+	if err == nil {
+		t.Fatal("expected error for 404")
+	}
+	if !errors.Is(err, pkghttp.ErrSessionNotFound) {
+		t.Errorf("errors.Is(err, ErrSessionNotFound) = false; want true. err = %v", err)
 	}
 }
 

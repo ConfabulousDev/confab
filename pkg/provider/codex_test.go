@@ -354,7 +354,13 @@ func TestCodexParseSessionHook(t *testing.T) {
 	}
 }
 
-func TestCodexShouldSpawnForInput(t *testing.T) {
+// TestCodexShouldSpawnForInput_ThreadSourceCoverage exercises every
+// thread_source value the function might see, not just the
+// user/subagent canonical pair. Without this, a future thread_source
+// value (e.g. "memory_consolidation") could silently flip behavior
+// because IsUserSession's "anything not 'user' is a sidechain"
+// invariant has no negative-case regression test.
+func TestCodexShouldSpawnForInput_ThreadSourceCoverage(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv(CodexStateDirEnv, tmpDir)
 
@@ -363,31 +369,68 @@ func TestCodexShouldSpawnForInput(t *testing.T) {
 		t.Fatalf("failed to create sessions dir: %v", err)
 	}
 
-	userID := "11111111-1111-1111-1111-111111111111"
-	subagentID := "22222222-2222-2222-2222-222222222222"
-	writeCodexRollout(t, sessionsDir, userID, `"thread_source":"user","cwd":"/work/user"`)
-	writeCodexRollout(t, sessionsDir, subagentID, `"thread_source":"subagent","cwd":"/work/agent","agent_role":"reviewer"`)
-
-	userPath := filepath.Join(sessionsDir, "rollout-2026-05-12T18-06-53-"+userID+".jsonl")
-	subagentPath := filepath.Join(sessionsDir, "rollout-2026-05-12T18-06-53-"+subagentID+".jsonl")
-	missingPath := filepath.Join(sessionsDir, "rollout-2026-05-12T18-06-53-99999999-9999-9999-9999-999999999999.jsonl")
-
-	tests := []struct {
-		name           string
-		transcriptPath string
-		want           bool
-	}{
-		{"user session", userPath, true},
-		{"subagent rollout", subagentPath, false},
-		// File-not-yet-written race: permissive (true). Daemon will
-		// re-validate on first sync cycle.
-		{"missing rollout file (spawn race)", missingPath, true},
+	// Each case gets a distinct UUID so rollouts don't collide.
+	type rolloutCase struct {
+		name       string
+		id         string
+		metaFields string // empty means no session_meta line at all
+		want       bool
+		missing    bool // if true, don't write the rollout
 	}
-	for _, tt := range tests {
+	cases := []rolloutCase{
+		{
+			name:       "user session",
+			id:         "aaaaaaaa-1111-1111-1111-111111111111",
+			metaFields: `"thread_source":"user","cwd":"/work/user"`,
+			want:       true,
+		},
+		{
+			name:       "subagent rollout",
+			id:         "bbbbbbbb-1111-1111-1111-111111111111",
+			metaFields: `"thread_source":"subagent","cwd":"/work/agent","agent_role":"reviewer"`,
+			want:       false,
+		},
+		{
+			name:       "memory_consolidation rollout",
+			id:         "cccccccc-1111-1111-1111-111111111111",
+			metaFields: `"thread_source":"memory_consolidation","cwd":"/work/memory"`,
+			want:       false,
+		},
+		{
+			name:       "compaction rollout",
+			id:         "dddddddd-1111-1111-1111-111111111111",
+			metaFields: `"thread_source":"compaction","cwd":"/work/compact"`,
+			want:       false,
+		},
+		{
+			name:       "unknown future thread_source",
+			id:         "eeeeeeee-1111-1111-1111-111111111111",
+			metaFields: `"thread_source":"some_future_value","cwd":"/work/unknown"`,
+			want:       false,
+		},
+		{
+			name:       "empty thread_source treated as user",
+			id:         "ffffffff-1111-1111-1111-111111111111",
+			metaFields: `"cwd":"/work/empty"`, // no thread_source field
+			want:       true,
+		},
+		{
+			name:    "missing rollout file (spawn race)",
+			id:      "99999999-1111-1111-1111-111111111111",
+			missing: true,
+			want:    true, // permissive: daemon re-validates on first sync
+		},
+	}
+
+	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(sessionsDir, "rollout-2026-05-12T18-06-53-"+tt.id+".jsonl")
+			if !tt.missing {
+				writeCodexRollout(t, sessionsDir, tt.id, tt.metaFields)
+			}
 			in := codexHookInputAdapter{inner: &types.CodexHookInput{
 				SessionID:      "abcd1234-abcd-1234-abcd-1234abcd1234",
-				TranscriptPath: tt.transcriptPath,
+				TranscriptPath: path,
 			}}
 			if got := (Codex{}).ShouldSpawnForInput(in); got != tt.want {
 				t.Fatalf("ShouldSpawnForInput(%s) = %v, want %v", tt.name, got, tt.want)
@@ -499,5 +542,129 @@ func TestCodexInstallHooksWritesToConfigPath(t *testing.T) {
 	}
 	if strings.Contains(string(data), "hook session-start --provider codex") {
 		t.Errorf("config.toml still contains SessionStart hook after UninstallHooks; got:\n%s", data)
+	}
+}
+
+// TestCodexFindRolloutByID covers FindRolloutByID (codex_discovery.go:210)
+// which was 0% before. Unlike FindUserSession, this accepts subagent
+// rollouts and does NOT walk up to the root.
+func TestCodexFindRolloutByID(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv(CodexStateDirEnv, tmpDir)
+
+	sessionsDir := filepath.Join(tmpDir, "sessions", "2026", "05", "15")
+	if err := os.MkdirAll(sessionsDir, 0700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	userID := "aaaaaaaa-1111-1111-1111-111111111111"
+	subagentID := "bbbbbbbb-2222-2222-2222-222222222222"
+	writeCodexRollout(t, sessionsDir, userID, `"thread_source":"user","cwd":"/work/user"`)
+	writeCodexRollout(t, sessionsDir, subagentID, `"thread_source":"subagent","cwd":"/work/agent"`)
+
+	tests := []struct {
+		name    string
+		partial string
+		wantID  string
+		wantErr string
+	}{
+		{
+			name:    "user session resolves",
+			partial: userID,
+			wantID:  userID,
+		},
+		{
+			name:    "subagent rollout also resolves (unlike FindUserSession)",
+			partial: subagentID,
+			wantID:  subagentID,
+		},
+		{
+			name:    "8-char prefix resolves to user",
+			partial: "aaaaaaaa",
+			wantID:  userID,
+		},
+		{
+			name:    "8-char prefix resolves to subagent",
+			partial: "bbbbbbbb",
+			wantID:  subagentID,
+		},
+		{
+			name:    "missing prefix errors",
+			partial: "ffffffff",
+			wantErr: "session not found",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotID, gotPath, err := (Codex{}).FindRolloutByID(tt.partial)
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatalf("FindRolloutByID(%q): got no error, want substring %q", tt.partial, tt.wantErr)
+				}
+				if !strings.Contains(err.Error(), tt.wantErr) {
+					t.Errorf("FindRolloutByID(%q): error = %q, want substring %q", tt.partial, err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("FindRolloutByID(%q): unexpected error: %v", tt.partial, err)
+			}
+			if gotID != tt.wantID {
+				t.Errorf("FindRolloutByID(%q): id = %q, want %q", tt.partial, gotID, tt.wantID)
+			}
+			if !strings.HasSuffix(gotPath, tt.wantID+".jsonl") {
+				t.Errorf("FindRolloutByID(%q): path = %q, want suffix %q.jsonl", tt.partial, gotPath, tt.wantID)
+			}
+		})
+	}
+}
+
+// TestCodexDefaultCWD covers DefaultCWD (codex_discovery.go:375) which
+// was 0% before. Wrong CWD = silently-uploaded sessions with no project
+// directory information.
+func TestCodexDefaultCWD(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv(CodexStateDirEnv, tmpDir)
+	sessionsDir := filepath.Join(tmpDir, "sessions", "2026", "05", "15")
+	if err := os.MkdirAll(sessionsDir, 0700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	withCWD := "cccccccc-3333-3333-3333-333333333333"
+	emptyCWD := "dddddddd-4444-4444-4444-444444444444"
+	writeCodexRollout(t, sessionsDir, withCWD, `"thread_source":"user","cwd":"/work/from-meta"`)
+	writeCodexRollout(t, sessionsDir, emptyCWD, `"thread_source":"user","cwd":""`)
+
+	withCWDPath := filepath.Join(sessionsDir, "rollout-2026-05-12T18-06-53-"+withCWD+".jsonl")
+	emptyCWDPath := filepath.Join(sessionsDir, "rollout-2026-05-12T18-06-53-"+emptyCWD+".jsonl")
+	missingPath := filepath.Join(sessionsDir, "rollout-2026-05-12T18-06-53-99999999.jsonl")
+
+	tests := []struct {
+		name           string
+		transcriptPath string
+		want           string
+	}{
+		{
+			name:           "session_meta.cwd populated returns that value",
+			transcriptPath: withCWDPath,
+			want:           "/work/from-meta",
+		},
+		{
+			name:           "empty cwd falls back to filepath.Dir(transcriptPath)",
+			transcriptPath: emptyCWDPath,
+			want:           sessionsDir,
+		},
+		{
+			name:           "unreadable rollout falls back to filepath.Dir",
+			transcriptPath: missingPath,
+			want:           sessionsDir,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := (Codex{}).DefaultCWD(tt.transcriptPath); got != tt.want {
+				t.Errorf("DefaultCWD(%q) = %q, want %q", tt.transcriptPath, got, tt.want)
+			}
+		})
 	}
 }

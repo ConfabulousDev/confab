@@ -12,12 +12,14 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/ConfabulousDev/confab/pkg/codextest"
 	"github.com/ConfabulousDev/confab/pkg/config"
 	pkghttp "github.com/ConfabulousDev/confab/pkg/http"
 	"github.com/ConfabulousDev/confab/pkg/provider"
 	"github.com/ConfabulousDev/confab/pkg/redactor"
+	"github.com/ConfabulousDev/confab/pkg/types"
 	"github.com/klauspost/compress/zstd"
 )
 
@@ -44,6 +46,7 @@ type mockBackend struct {
 	t                *testing.T
 	initRequests     []InitRequest
 	chunkRequests    []ChunkRequest
+	eventRequests    []EventRequest   // POST /api/v1/sync/event
 	summaryRequests  []summaryRequest // PATCH /api/v1/sessions/{id}/summary
 	initResponse     *InitResponse
 	initError        bool
@@ -127,6 +130,13 @@ func (m *mockBackend) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		})
 
 	case "/api/v1/sync/event":
+		var req EventRequest
+		if err := json.Unmarshal(body, &req); err != nil {
+			m.t.Errorf("Failed to decode event request: %v", err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		m.eventRequests = append(m.eventRequests, req)
 		json.NewEncoder(w).Encode(EventResponse{Success: true})
 
 	default:
@@ -229,7 +239,96 @@ func TestEngine_Init_NewSession(t *testing.T) {
 	}
 }
 
-func TestEngine_Init_CodexProvider(t *testing.T) {
+// TestEngine_SendSessionEnd_DispatchesEvent verifies SendSessionEnd
+// marshals the hook payload and dispatches a "session_end" event with
+// the engine's externalID. Covers engine.go:381 — entirely 0% prior.
+func TestEngine_SendSessionEnd_DispatchesEvent(t *testing.T) {
+	mock := newMockBackend(t)
+	server := httptest.NewServer(mock)
+	defer server.Close()
+
+	tmpDir, transcriptPath := setupTestEnv(t, server.URL)
+	os.WriteFile(transcriptPath, []byte(`{"type":"system"}`+"\n"), 0644)
+
+	engine := NewWithClient(
+		mustNewClient(t, server.URL, tmpDir),
+		nil,
+		EngineConfig{
+			ExternalID:     "send-session-end-test",
+			TranscriptPath: transcriptPath,
+			CWD:            tmpDir,
+		},
+	)
+	if err := engine.Init(); err != nil {
+		t.Fatalf("Init failed: %v", err)
+	}
+
+	ts := time.Date(2026, 5, 17, 12, 0, 0, 0, time.UTC)
+	hookInput := &types.ClaudeHookInput{
+		SessionID:     "claude-session-uuid",
+		CWD:           "/work",
+		HookEventName: "SessionEnd",
+		Reason:        "user-exit",
+	}
+	if err := engine.SendSessionEnd(hookInput, ts); err != nil {
+		t.Fatalf("SendSessionEnd: %v", err)
+	}
+
+	if len(mock.eventRequests) != 1 {
+		t.Fatalf("event request count = %d, want 1", len(mock.eventRequests))
+	}
+	got := mock.eventRequests[0]
+	if got.EventType != "session_end" {
+		t.Errorf("EventType = %q, want session_end", got.EventType)
+	}
+	if got.SessionID != "test-session-id" {
+		// Engine uses the backend's session ID, not the hook's.
+		t.Errorf("SessionID = %q, want test-session-id (engine's backend id)", got.SessionID)
+	}
+	if !got.Timestamp.Equal(ts) {
+		t.Errorf("Timestamp = %v, want %v", got.Timestamp, ts)
+	}
+	// Payload must round-trip back to the original hook input.
+	var decoded types.ClaudeHookInput
+	if err := json.Unmarshal(got.Payload, &decoded); err != nil {
+		t.Fatalf("payload not valid JSON: %v", err)
+	}
+	if decoded.SessionID != hookInput.SessionID ||
+		decoded.HookEventName != hookInput.HookEventName ||
+		decoded.Reason != hookInput.Reason {
+		t.Errorf("payload round-trip mismatch: got %+v, want %+v", decoded, hookInput)
+	}
+}
+
+// TestEngine_SendSessionEnd_NotInitialized verifies SendSessionEnd is a
+// no-op (no error, no backend call) when the engine isn't initialized.
+// Protects the early-return at engine.go:382.
+func TestEngine_SendSessionEnd_NotInitialized(t *testing.T) {
+	mock := newMockBackend(t)
+	server := httptest.NewServer(mock)
+	defer server.Close()
+	tmpDir, transcriptPath := setupTestEnv(t, server.URL)
+	os.WriteFile(transcriptPath, []byte(`{"type":"system"}`+"\n"), 0644)
+	engine := NewWithClient(
+		mustNewClient(t, server.URL, tmpDir),
+		nil,
+		EngineConfig{ExternalID: "not-init", TranscriptPath: transcriptPath, CWD: tmpDir},
+	)
+	// No Init() call.
+	if err := engine.SendSessionEnd(&types.ClaudeHookInput{}, time.Now()); err != nil {
+		t.Errorf("SendSessionEnd on uninitialized engine returned %v, want nil (no-op)", err)
+	}
+	if len(mock.eventRequests) != 0 {
+		t.Errorf("uninitialized engine made %d event requests, want 0", len(mock.eventRequests))
+	}
+}
+
+// TestEngine_Init_RecordsProviderField asserts that the provider name
+// supplied via EngineConfig propagates to the InitRequest payload. It
+// does NOT exercise any Codex-specific provider behavior — for that,
+// see TestEngine_SyncAll_CodexRoot_FirstChunk_EmitsCodexRolloutMeta and
+// related Codex dispatch tests at the bottom of this file.
+func TestEngine_Init_RecordsProviderField(t *testing.T) {
 	mock := newMockBackend(t)
 	server := httptest.NewServer(mock)
 	defer server.Close()
@@ -369,6 +468,23 @@ func TestEngine_SyncAll_FirstSync(t *testing.T) {
 	}
 	if chunkReq.FirstLine != 1 {
 		t.Errorf("expected first_line 1, got %d", chunkReq.FirstLine)
+	}
+	// E7: assert the actual content was uploaded, not just the count.
+	// Without this, a bug that uploaded the wrong lines (e.g. read from
+	// a stale offset) would still pass.
+	wantLines := []string{
+		`{"type":"system","message":"hello"}`,
+		`{"type":"user","message":"world"}`,
+		`{"type":"assistant","message":"response"}`,
+	}
+	for i, want := range wantLines {
+		if i >= len(chunkReq.Lines) {
+			t.Errorf("Lines[%d] missing, want %q", i, want)
+			continue
+		}
+		if chunkReq.Lines[i] != want {
+			t.Errorf("Lines[%d] = %q, want %q", i, chunkReq.Lines[i], want)
+		}
 	}
 }
 

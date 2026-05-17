@@ -23,20 +23,32 @@ const (
 	// Below this, compression overhead isn't worth it.
 	compressionThreshold = 1024 // 1KB
 
-	// maxResponseSize is the maximum size of an HTTP response body we'll read.
-	// Prevents OOM from malicious or buggy servers sending unbounded responses.
-	maxResponseSize = 32 * 1024 * 1024 // 32MB
-
 	// maxRetryAfterSeconds is the maximum Retry-After value we'll honor.
 	// Prevents a malicious server from stalling the client indefinitely.
 	maxRetryAfterSeconds = 3600
 
 	// Retry settings for rate limiting
-	maxRetries       = 5
-	initialBackoff   = 1 * time.Second
-	maxBackoff       = 60 * time.Second
+	maxRetries        = 5
+	initialBackoff    = 1 * time.Second
+	maxBackoff        = 60 * time.Second
 	backoffMultiplier = 2.0
 )
+
+// maxResponseSize is the maximum size of an HTTP response body we'll read.
+// Prevents OOM from malicious or buggy servers sending unbounded responses.
+// It is a var (not const) so tests can lower it via
+// SetMaxResponseSizeForTest. Do not mutate from production code.
+var maxResponseSize int64 = 32 * 1024 * 1024 // 32MB
+
+// SetMaxResponseSizeForTest temporarily lowers the response-size cap so
+// tests can exercise the limit without allocating 32MB of memory.
+// Returns a restore function that callers should defer.
+// Intended for test code only — do not call from production.
+func SetMaxResponseSizeForTest(n int64) (restore func()) {
+	prev := maxResponseSize
+	maxResponseSize = n
+	return func() { maxResponseSize = prev }
+}
 
 // userAgent is set once at startup via SetUserAgent
 var userAgent string

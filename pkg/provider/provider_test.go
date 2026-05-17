@@ -5,6 +5,8 @@ import (
 	"testing"
 )
 
+// See bottom of file for compile-time Provider interface checks.
+
 func TestGet(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -73,11 +75,13 @@ func TestNormalizeName(t *testing.T) {
 	}
 }
 
-// TestProviderInterfaceSatisfaction ensures both concrete providers
-// satisfy the Provider interface. Compile-time assertions in claude.go
-// and codex.go are the primary check; this test exists so the contract
-// is also visible in the test report.
-func TestProviderInterfaceSatisfaction(t *testing.T) {
-	var _ Provider = ClaudeCode{}
-	var _ Provider = Codex{}
-}
+// Package-level compile-time interface satisfaction checks. These
+// ensure each Provider implementation continues to satisfy the
+// interface; the Go compiler enforces the assertion at build time.
+// They are intentionally NOT wrapped in a test function — the previous
+// TestProviderInterfaceSatisfaction had an empty body and gave the
+// false impression of runtime verification.
+var (
+	_ Provider = ClaudeCode{}
+	_ Provider = Codex{}
+)

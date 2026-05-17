@@ -790,8 +790,123 @@ func hasSyncHooks(settings *config.ClaudeSettings) bool {
 	return hasStart && hasEnd
 }
 
-// TestIsPreToolUseHooksInstalled / TestIsPostToolUseHooksInstalled /
-// TestIsUserPromptSubmitHookInstalled bracket the three "Is*Installed"
+// TestInstallHooks_WritesExactBinaryPath round-trips every public
+// InstallXxxHooks function and verifies the resulting hook command
+// equals exactly `<binaryPath> hook <event-name>`. Existing tests use
+// substring checks ("hook session-start"), which would pass if the
+// command silently dropped the binary path or appended garbage. This
+// pins the full command shape.
+func TestInstallHooks_WritesExactBinaryPath(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv(config.ClaudeStateDirEnv, tmpDir)
+
+	binPath, err := config.GetBinaryPath()
+	if err != nil {
+		t.Fatalf("GetBinaryPath: %v", err)
+	}
+
+	type installCase struct {
+		name      string
+		install   func() error
+		eventName string
+		want      []string // possible exact commands (matcher variants share an event)
+	}
+	cases := []installCase{
+		{
+			name:      "SessionStart",
+			install:   InstallSyncHooks,
+			eventName: "SessionStart",
+			want:      []string{binPath + " hook session-start"},
+		},
+		{
+			name:      "SessionEnd",
+			install:   InstallSyncHooks,
+			eventName: "SessionEnd",
+			want:      []string{binPath + " hook session-end"},
+		},
+		{
+			name:      "PreToolUse",
+			install:   InstallPreToolUseHooks,
+			eventName: "PreToolUse",
+			want:      []string{binPath + " hook pre-tool-use"},
+		},
+		{
+			name:      "PostToolUse",
+			install:   InstallPostToolUseHooks,
+			eventName: "PostToolUse",
+			want:      []string{binPath + " hook post-tool-use"},
+		},
+		{
+			name:      "UserPromptSubmit",
+			install:   InstallUserPromptSubmitHook,
+			eventName: "UserPromptSubmit",
+			want:      []string{binPath + " hook user-prompt-submit"},
+		},
+	}
+
+	// Install all hooks once (the helpers are idempotent).
+	for _, c := range cases {
+		if err := c.install(); err != nil {
+			t.Fatalf("%s install: %v", c.name, err)
+		}
+	}
+
+	settings, err := config.ReadSettings()
+	if err != nil {
+		t.Fatalf("ReadSettings: %v", err)
+	}
+
+	// For each event, walk every nested hook command and confirm one of
+	// the cases' commands matches exactly. Multiple matcher entries
+	// (Bash, mcp__github__create_pull_request, etc.) each have their
+	// own hook; any of them must equal the expected command exactly.
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			eventHooks := settings.GetEventHooks(c.eventName)
+			if len(eventHooks) == 0 {
+				t.Fatalf("no hooks recorded under event %q after install", c.eventName)
+			}
+			foundExact := false
+			for _, entry := range eventHooks {
+				entryMap, ok := entry.(map[string]any)
+				if !ok {
+					continue
+				}
+				hooks, _ := entryMap["hooks"].([]any)
+				for _, h := range hooks {
+					hookMap, ok := h.(map[string]any)
+					if !ok {
+						continue
+					}
+					cmd, _ := hookMap["command"].(string)
+					for _, expected := range c.want {
+						if cmd == expected {
+							foundExact = true
+						}
+					}
+				}
+			}
+			if !foundExact {
+				// Dump everything we found for debugging.
+				var got []string
+				for _, entry := range eventHooks {
+					entryMap, _ := entry.(map[string]any)
+					hooks, _ := entryMap["hooks"].([]any)
+					for _, h := range hooks {
+						hookMap, _ := h.(map[string]any)
+						if cmd, ok := hookMap["command"].(string); ok {
+							got = append(got, cmd)
+						}
+					}
+				}
+				t.Errorf("no exact command match for %q under %s; want one of %v; got %v",
+					c.want, c.eventName, c.want, got)
+			}
+		})
+	}
+}
+
+// TestIsHookInstalledCheckers brackets the three "Is*Installed"
 // checkers (claude.go:266, 303, 336) that gate daemon-side hook
 // verification. Without these, a regression in any of the three could
 // silently report "hooks missing" and trigger reinstall prompts on every
@@ -801,106 +916,75 @@ func hasSyncHooks(settings *config.ClaudeSettings) bool {
 // isConfabCommand's basename check passes — the test binary is named
 // `hookconfig.test`, not `confab`, so install-then-read round-trips
 // would otherwise read back hooks the production check rejects.
-func TestIsPreToolUseHooksInstalled(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv(config.ClaudeStateDirEnv, tmpDir)
-
-	// Initially no settings file → not installed.
-	if installed, err := IsPreToolUseHooksInstalled(); err != nil {
-		t.Fatalf("IsPreToolUseHooksInstalled initial: %v", err)
-	} else if installed {
-		t.Error("expected PreToolUse hooks to not be installed initially")
-	}
-
-	const installed = `{
+func TestIsHookInstalledCheckers(t *testing.T) {
+	cases := []struct {
+		name      string
+		isCheck   func() (bool, error)
+		uninstall func() error
+		settings  string
+	}{
+		{
+			name:      "PreToolUse",
+			isCheck:   IsPreToolUseHooksInstalled,
+			uninstall: UninstallPreToolUseHooks,
+			settings: `{
   "hooks": {
     "PreToolUse": [{"matcher": "Bash", "hooks": [{"type":"command","command":"/usr/local/bin/confab hook pre-tool-use"}]}]
   }
-}`
-	if err := os.WriteFile(filepath.Join(tmpDir, "settings.json"), []byte(installed), 0600); err != nil {
-		t.Fatalf("write settings: %v", err)
-	}
-	if ok, err := IsPreToolUseHooksInstalled(); err != nil {
-		t.Fatalf("IsPreToolUseHooksInstalled after install: %v", err)
-	} else if !ok {
-		t.Error("IsPreToolUseHooksInstalled() = false after manual install; want true")
-	}
-
-	if err := UninstallPreToolUseHooks(); err != nil {
-		t.Fatalf("UninstallPreToolUseHooks failed: %v", err)
-	}
-	if ok, err := IsPreToolUseHooksInstalled(); err != nil {
-		t.Fatalf("IsPreToolUseHooksInstalled after uninstall: %v", err)
-	} else if ok {
-		t.Error("IsPreToolUseHooksInstalled() = true after uninstall; want false")
-	}
-}
-
-func TestIsPostToolUseHooksInstalled(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv(config.ClaudeStateDirEnv, tmpDir)
-
-	if installed, err := IsPostToolUseHooksInstalled(); err != nil {
-		t.Fatalf("IsPostToolUseHooksInstalled initial: %v", err)
-	} else if installed {
-		t.Error("expected PostToolUse hooks to not be installed initially")
-	}
-
-	const installed = `{
+}`,
+		},
+		{
+			name:      "PostToolUse",
+			isCheck:   IsPostToolUseHooksInstalled,
+			uninstall: UninstallPostToolUseHooks,
+			settings: `{
   "hooks": {
     "PostToolUse": [{"matcher": "Bash", "hooks": [{"type":"command","command":"/usr/local/bin/confab hook post-tool-use"}]}]
   }
-}`
-	if err := os.WriteFile(filepath.Join(tmpDir, "settings.json"), []byte(installed), 0600); err != nil {
-		t.Fatalf("write settings: %v", err)
-	}
-	if ok, err := IsPostToolUseHooksInstalled(); err != nil {
-		t.Fatalf("IsPostToolUseHooksInstalled after install: %v", err)
-	} else if !ok {
-		t.Error("IsPostToolUseHooksInstalled() = false after manual install; want true")
-	}
-
-	if err := UninstallPostToolUseHooks(); err != nil {
-		t.Fatalf("UninstallPostToolUseHooks failed: %v", err)
-	}
-	if ok, err := IsPostToolUseHooksInstalled(); err != nil {
-		t.Fatalf("IsPostToolUseHooksInstalled after uninstall: %v", err)
-	} else if ok {
-		t.Error("IsPostToolUseHooksInstalled() = true after uninstall; want false")
-	}
-}
-
-func TestIsUserPromptSubmitHookInstalled(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv(config.ClaudeStateDirEnv, tmpDir)
-
-	if installed, err := IsUserPromptSubmitHookInstalled(); err != nil {
-		t.Fatalf("IsUserPromptSubmitHookInstalled initial: %v", err)
-	} else if installed {
-		t.Error("expected UserPromptSubmit hook to not be installed initially")
-	}
-
-	const installed = `{
+}`,
+		},
+		{
+			name:      "UserPromptSubmit",
+			isCheck:   IsUserPromptSubmitHookInstalled,
+			uninstall: UninstallUserPromptSubmitHook,
+			settings: `{
   "hooks": {
     "UserPromptSubmit": [{"hooks": [{"type":"command","command":"/usr/local/bin/confab hook user-prompt-submit"}]}]
   }
-}`
-	if err := os.WriteFile(filepath.Join(tmpDir, "settings.json"), []byte(installed), 0600); err != nil {
-		t.Fatalf("write settings: %v", err)
-	}
-	if ok, err := IsUserPromptSubmitHookInstalled(); err != nil {
-		t.Fatalf("IsUserPromptSubmitHookInstalled after install: %v", err)
-	} else if !ok {
-		t.Error("IsUserPromptSubmitHookInstalled() = false after manual install; want true")
+}`,
+		},
 	}
 
-	if err := UninstallUserPromptSubmitHook(); err != nil {
-		t.Fatalf("UninstallUserPromptSubmitHook failed: %v", err)
-	}
-	if ok, err := IsUserPromptSubmitHookInstalled(); err != nil {
-		t.Fatalf("IsUserPromptSubmitHookInstalled after uninstall: %v", err)
-	} else if ok {
-		t.Error("IsUserPromptSubmitHookInstalled() = true after uninstall; want false")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			t.Setenv(config.ClaudeStateDirEnv, tmpDir)
+
+			// Initially no settings file → not installed.
+			if ok, err := tc.isCheck(); err != nil {
+				t.Fatalf("isCheck initial: %v", err)
+			} else if ok {
+				t.Errorf("expected %s hooks to not be installed initially", tc.name)
+			}
+
+			if err := os.WriteFile(filepath.Join(tmpDir, "settings.json"), []byte(tc.settings), 0600); err != nil {
+				t.Fatalf("write settings: %v", err)
+			}
+			if ok, err := tc.isCheck(); err != nil {
+				t.Fatalf("isCheck after install: %v", err)
+			} else if !ok {
+				t.Errorf("%s isCheck = false after manual install; want true", tc.name)
+			}
+
+			if err := tc.uninstall(); err != nil {
+				t.Fatalf("uninstall failed: %v", err)
+			}
+			if ok, err := tc.isCheck(); err != nil {
+				t.Fatalf("isCheck after uninstall: %v", err)
+			} else if ok {
+				t.Errorf("%s isCheck = true after uninstall; want false", tc.name)
+			}
+		})
 	}
 }
 func TestUninstallSyncHooks(t *testing.T) {

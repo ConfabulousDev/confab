@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -233,6 +234,36 @@ func TestState_IsDaemonRunning(t *testing.T) {
 	state.PID = -1
 	if state.IsDaemonRunning() {
 		t.Error("expected daemon to not be running (negative PID)")
+	}
+}
+
+// TestIsProcessRunning_WithRealSubprocess covers the deterministic
+// positive-and-negative path of state.go:isProcessRunning by spawning
+// a real subprocess. The existing TestState_IsDaemonRunning only used
+// "PID=999999999, unlikely to exist" — true on developer machines but
+// not guaranteed on busy CI workers, and the function's signal-0
+// behavior was never verified against an actually-alive non-self PID.
+func TestIsProcessRunning_WithRealSubprocess(t *testing.T) {
+	cmd := exec.Command("sleep", "10")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("spawn subprocess: %v", err)
+	}
+	pid := cmd.Process.Pid
+
+	if !isProcessRunning(pid) {
+		t.Errorf("isProcessRunning(%d) = false while subprocess is alive; want true", pid)
+	}
+
+	if err := cmd.Process.Kill(); err != nil {
+		t.Fatalf("kill subprocess: %v", err)
+	}
+	// Drain the zombie so the kernel reaps the PID before we test
+	// liveness. Otherwise signal-0 still reports "running" against the
+	// zombie process.
+	_, _ = cmd.Process.Wait()
+
+	if isProcessRunning(pid) {
+		t.Errorf("isProcessRunning(%d) = true after subprocess killed+reaped; want false", pid)
 	}
 }
 

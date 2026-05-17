@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -79,7 +80,7 @@ func TestEnsureAuthenticated(t *testing.T) {
 				if err == nil {
 					t.Fatalf("EnsureAuthenticated() error = nil, want error containing %q", tt.wantErrSub)
 				}
-				if tt.wantErrSub != "" && !contains(err.Error(), tt.wantErrSub) {
+				if tt.wantErrSub != "" && !strings.Contains(err.Error(), tt.wantErrSub) {
 					t.Errorf("EnsureAuthenticated() error = %q, want substring %q", err.Error(), tt.wantErrSub)
 				}
 				if cfg != nil {
@@ -95,17 +96,6 @@ func TestEnsureAuthenticated(t *testing.T) {
 			}
 		})
 	}
-}
-
-// contains is a tiny helper so the test file doesn't need to import
-// strings just for one substring check.
-func contains(s, substr string) bool {
-	for i := 0; i+len(substr) <= len(s); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }
 
 func TestValidateBackendURL(t *testing.T) {

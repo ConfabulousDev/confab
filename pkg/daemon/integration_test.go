@@ -48,6 +48,7 @@ type mockBackend struct {
 	initResponse   *sync.InitResponse
 	initError      bool
 	chunkError     bool
+	chunkStatus    int   // if non-zero, /sync/chunk returns this status code with empty body
 	requestCount   int32
 	failUntilCount int32 // fail requests until this count is reached
 }
@@ -116,6 +117,18 @@ func (m *mockBackend) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(m.initResponse)
 
 	case "/api/v1/sync/chunk":
+		if m.chunkStatus != 0 {
+			// Per-endpoint status override (used by S9 to force 404s
+			// on every chunk upload). Still record the attempt so the
+			// test can count retries.
+			var req sync.ChunkRequest
+			_ = json.Unmarshal(body, &req)
+			m.mu.Lock()
+			m.chunkRequests = append(m.chunkRequests, req)
+			m.mu.Unlock()
+			w.WriteHeader(m.chunkStatus)
+			return
+		}
 		if m.chunkError {
 			w.WriteHeader(http.StatusInternalServerError)
 			json.NewEncoder(w).Encode(map[string]string{"error": "chunk failed"})
@@ -2497,6 +2510,54 @@ func TestDaemonIntegration_Codex_ShutdownPath_FinalSyncIncludesChildren(t *testi
 	}
 	if !found {
 		t.Errorf("final sync did not include late child %s", late.threadUUID)
+	}
+}
+
+// TestDaemon_ExitsAfter3Consecutive404s guards the
+// maxConsecutiveNotFound shutdown path at daemon.go (constant defined
+// at daemon.go:37, branch at daemon.go:216-220). If the user deletes
+// their backend session, the daemon's chunk uploads will 404 forever;
+// without this exit the daemon would consume resources indefinitely.
+//
+// This is a bug-revealing test by spec: if the daemon doesn't exit
+// after 3 consecutive 404s, the test fails and we fix the bug per the
+// CF-451 bug-policy.
+func TestDaemon_ExitsAfter3Consecutive404s(t *testing.T) {
+	mock := newMockBackend(t)
+	mock.chunkStatus = http.StatusNotFound
+	server := httptest.NewServer(mock)
+	defer server.Close()
+
+	tmpDir, transcriptPath := setupTestEnv(t, server.URL)
+	os.WriteFile(transcriptPath, []byte(`{"type":"system"}`+"\n"), 0644)
+
+	d := New(Config{
+		ExternalID:         "404-exit-test",
+		TranscriptPath:     transcriptPath,
+		CWD:                tmpDir,
+		SyncInterval:       50 * time.Millisecond,
+		SyncIntervalJitter: 0,
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- d.Run(ctx) }()
+
+	select {
+	case <-errCh:
+		// Daemon exited on its own — good.
+	case <-time.After(3 * time.Second):
+		cancel()
+		<-errCh
+		t.Fatal("daemon did not exit within 3s after backend returned 404 on chunk uploads; the consecutiveNotFound shutdown is broken")
+	}
+
+	// At least 3 chunk attempts should have happened before exit.
+	got := len(mock.getChunkRequests())
+	if got < 3 {
+		t.Errorf("got %d chunk attempts before exit, want >= 3 (one per cycle before shutdown)", got)
 	}
 }
 

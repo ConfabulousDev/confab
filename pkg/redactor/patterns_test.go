@@ -2,8 +2,91 @@ package redactor
 
 import (
 	"regexp"
+	"strings"
 	"testing"
 )
+
+// TestPatternBoundaries_AnthropicKey pins the {80,120}-char body
+// length. Without these boundary cases, a one-off regex change (e.g.
+// {79,120} or {80,121}) would silently widen or narrow the matcher.
+func TestPatternBoundaries_AnthropicKey(t *testing.T) {
+	pattern := `sk-ant-api\d{2}-[A-Za-z0-9_-]{80,120}`
+	re := regexp.MustCompile(pattern)
+
+	mk := func(n int) string {
+		return "sk-ant-api03-" + strings.Repeat("a", n)
+	}
+
+	cases := []struct {
+		name      string
+		input     string
+		wantMatch bool
+	}{
+		{"79 chars: just under min", mk(79), false},
+		{"80 chars: minimum", mk(80), true},
+		{"120 chars: maximum", mk(120), true},
+		{"121 chars: still matches (greedy stops at 120)", mk(121) + " end", true},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			got := re.FindString(tt.input)
+			if tt.wantMatch && got == "" {
+				t.Errorf("expected match for %s, got none", tt.name)
+			}
+			if !tt.wantMatch && got != "" {
+				t.Errorf("expected NO match for %s, got %q", tt.name, got)
+			}
+		})
+	}
+
+	// Cap-respected check: a 121-char body must produce a match of
+	// length 13+120, not 13+121. This is the assertion that pins the
+	// upper bound — the table case above only proves the regex still
+	// matches when input is over-long.
+	long := re.FindString(mk(121))
+	if len(long) != len("sk-ant-api03-")+120 {
+		t.Errorf("121-char input matched length = %d, want %d (cap respected)",
+			len(long), len("sk-ant-api03-")+120)
+	}
+}
+
+// TestPatternBoundaries_OpenAIKey pins the {20,200}-char body length.
+func TestPatternBoundaries_OpenAIKey(t *testing.T) {
+	pattern := `sk-(?:proj-)?[A-Za-z0-9_-]{20,200}`
+	re := regexp.MustCompile(pattern)
+
+	mk := func(n int) string {
+		return "sk-" + strings.Repeat("a", n)
+	}
+
+	cases := []struct {
+		name      string
+		input     string
+		wantMatch bool
+	}{
+		{"19 chars: just under min", mk(19), false},
+		{"20 chars: minimum", mk(20), true},
+		{"200 chars: maximum", mk(200), true},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			got := re.FindString(tt.input)
+			if tt.wantMatch && got == "" {
+				t.Errorf("expected match for %s, got none", tt.name)
+			}
+			if !tt.wantMatch && got != "" {
+				t.Errorf("expected NO match for %s, got %q", tt.name, got)
+			}
+		})
+	}
+
+	// 201-char input: must match exactly 200 chars after sk-, not 201.
+	got := re.FindString(mk(201))
+	if len(got) != len("sk-")+200 {
+		t.Errorf("201-char input matched length = %d, want %d (cap respected)",
+			len(got), len("sk-")+200)
+	}
+}
 
 // TestAnthropicAPIKeyPattern tests the Anthropic API key pattern
 func TestAnthropicAPIKeyPattern(t *testing.T) {

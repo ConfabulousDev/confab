@@ -220,6 +220,43 @@ func TestFileTracker_ReadChunk_ExtractsAgentIDs(t *testing.T) {
 	}
 }
 
+// TestFileTracker_HasFileChanged_AfterDelete guards the "Can't stat -
+// assume changed to be safe" branch at tracker.go:167. A regression
+// that swallowed the os.Stat error and returned false would silently
+// stop syncing files that were deleted-and-recreated.
+//
+// Bug-revealing test: if it fails, the SUT has the bug (CF-451 bug
+// policy: fix in this PR).
+func TestFileTracker_HasFileChanged_AfterDelete(t *testing.T) {
+	tmpDir := t.TempDir()
+	testFile := filepath.Join(tmpDir, "doomed.jsonl")
+	if err := os.WriteFile(testFile, []byte(`{"line": 1}`+"\n"), 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	ft := NewFileTracker(filepath.Join(tmpDir, "transcript.jsonl"))
+	tracked := &TrackedFile{
+		Path:           testFile,
+		Name:           "doomed.jsonl",
+		Type:           "transcript",
+		LastSyncedLine: 0,
+	}
+	// Sync once so the tracker has cached state.
+	ft.UpdateAfterSync(tracked, 1, 12)
+	if ft.HasFileChanged(tracked) {
+		t.Fatal("setup: HasFileChanged returned true on freshly-synced file")
+	}
+
+	// Now delete the file. Per the SUT comment ("Can't stat - assume
+	// changed to be safe"), HasFileChanged must return true.
+	if err := os.Remove(testFile); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+	if !ft.HasFileChanged(tracked) {
+		t.Error("HasFileChanged(deleted file) = false; want true (safety default)")
+	}
+}
+
 // TestFileTracker_ReadChunk_DoesNotExtractFromOtherFields verifies the
 // agent-ID extractor is field-aware. A previous version of the test
 // only exercised the positive case (JSON with toolUseResult.agentId

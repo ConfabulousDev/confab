@@ -1005,6 +1005,90 @@ func TestRedactFieldPattern(t *testing.T) {
 	})
 }
 
+// TestRedactor_UnicodeFieldName verifies field-pattern matching works
+// against non-ASCII field names. The Go json decoder handles Unicode
+// keys fine; if the regex doesn't, secrets in Unicode-keyed fields
+// would slip through unredacted.
+func TestRedactor_UnicodeFieldName(t *testing.T) {
+	cfg := Config{
+		Patterns: []Pattern{
+			{
+				Name:         "Unicode-aware password field",
+				FieldPattern: `^(?i)(password|パスワード|пароль)$`,
+				Type:         "sensitive_field",
+			},
+		},
+	}
+	r, err := NewRedactor(cfg)
+	if err != nil {
+		t.Fatalf("NewRedactor: %v", err)
+	}
+
+	cases := []struct {
+		name       string
+		input      string
+		field      string
+		mustRedact string
+	}{
+		{"ASCII password still matches", `{"password":"hunter2","note":"safe"}`, "password", "hunter2"},
+		{"Japanese パスワード", `{"パスワード":"日本語秘密","note":"safe"}`, "パスワード", "日本語秘密"},
+		{"Russian пароль", `{"пароль":"русский_секрет","note":"safe"}`, "пароль", "русский_секрет"},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			out := r.RedactJSONLine(tt.input)
+			var parsed map[string]interface{}
+			if err := json.Unmarshal([]byte(out), &parsed); err != nil {
+				t.Fatalf("redacted output not valid JSON: %v\nout=%s", err, out)
+			}
+			if v, ok := parsed[tt.field].(string); !ok {
+				t.Errorf("field %q missing or wrong type in output: %v", tt.field, parsed)
+			} else if strings.Contains(v, tt.mustRedact) {
+				t.Errorf("field %q still contains unredacted secret %q: got %q", tt.field, tt.mustRedact, v)
+			}
+			if got, ok := parsed["note"].(string); !ok || got != "safe" {
+				t.Errorf("note should be untouched, got %v", parsed["note"])
+			}
+		})
+	}
+}
+
+// TestNewFromConfig_DisablesDefaultsWhenFlagFalse verifies the
+// UseDefaultPatterns=false branch in redactor.NewFromConfig
+// (redactor.go:46). Without this, a user who explicitly disables
+// defaults could still see them applied if the flag check broke.
+func TestNewFromConfig_DisablesDefaultsWhenFlagFalse(t *testing.T) {
+	useDefaults := false
+	cfg := &config.RedactionConfig{
+		Enabled:            true,
+		UseDefaultPatterns: &useDefaults,
+		Patterns: []config.RedactionPattern{
+			{Name: "custom-token", Pattern: `CUSTOM-\d+`, Type: "test"},
+		},
+	}
+	r, err := NewFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("NewFromConfig: %v", err)
+	}
+	if r == nil {
+		t.Fatal("expected non-nil redactor with custom patterns + defaults off")
+	}
+
+	// Anthropic key (built-in pattern) must NOT be redacted because
+	// defaults are off.
+	anthropicKey := "sk-ant-api03-" + strings.Repeat("a", 95)
+	customToken := "CUSTOM-12345"
+	input := "see " + anthropicKey + " and " + customToken
+
+	out := r.Redact(input)
+	if !strings.Contains(out, anthropicKey) {
+		t.Errorf("Anthropic key should NOT be redacted (defaults off); got %q", out)
+	}
+	if strings.Contains(out, customToken) {
+		t.Errorf("Custom pattern should redact %q; got %q", customToken, out)
+	}
+}
+
 // TestRedact_NoCatastrophicBacktracking guards against regex
 // catastrophic backtracking on degenerate inputs. The private-key
 // patterns use `(?s).*?` which would hang under PCRE on a marker

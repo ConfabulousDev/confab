@@ -395,3 +395,122 @@ func TestClient_ErrUnauthorized(t *testing.T) {
 		})
 	}
 }
+
+// ============================================================================
+// S14 additions — Patch, SetUserAgent, network error, maxResponseSize
+// ============================================================================
+
+func TestClient_Patch(t *testing.T) {
+	var receivedMethod, receivedPath string
+	var receivedBody map[string]string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedMethod = r.Method
+		receivedPath = r.URL.Path
+		if err := json.NewDecoder(r.Body).Decode(&receivedBody); err != nil {
+			t.Errorf("decode: %v", err)
+		}
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	}))
+	defer server.Close()
+
+	client, err := NewClient(&config.UploadConfig{BackendURL: server.URL, APIKey: "k"}, 0)
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	var resp struct{ Status string }
+	if err := client.Patch("/api/v1/things/abc", map[string]string{"k": "v"}, &resp); err != nil {
+		t.Fatalf("Patch: %v", err)
+	}
+	if receivedMethod != http.MethodPatch {
+		t.Errorf("method = %q, want PATCH", receivedMethod)
+	}
+	if receivedPath != "/api/v1/things/abc" {
+		t.Errorf("path = %q, want /api/v1/things/abc", receivedPath)
+	}
+	if receivedBody["k"] != "v" {
+		t.Errorf("body[k] = %q, want v", receivedBody["k"])
+	}
+	if resp.Status != "ok" {
+		t.Errorf("resp.Status = %q, want ok", resp.Status)
+	}
+}
+
+func TestClient_SetUserAgent(t *testing.T) {
+	var receivedUA string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedUA = r.Header.Get("User-Agent")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+	}))
+	defer server.Close()
+
+	prevUA := userAgent
+	SetUserAgent("test-agent/9.9 (audit)")
+	t.Cleanup(func() { SetUserAgent(prevUA) })
+
+	client, err := NewClient(&config.UploadConfig{BackendURL: server.URL, APIKey: "k"}, 0)
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	var resp struct{ Ok bool }
+	if err := client.Post("/x", map[string]string{"a": "b"}, &resp); err != nil {
+		t.Fatalf("Post: %v", err)
+	}
+	if receivedUA != "test-agent/9.9 (audit)" {
+		t.Errorf("server saw User-Agent %q, want %q", receivedUA, "test-agent/9.9 (audit)")
+	}
+}
+
+// TestClient_NetworkError covers the connection-refused path (port 1
+// is reserved and unbound, producing a deterministic refusal on any
+// platform). Prior tests only exercised HTTP-status errors.
+func TestClient_NetworkError(t *testing.T) {
+	client, err := NewClient(&config.UploadConfig{BackendURL: "http://127.0.0.1:1", APIKey: "k"}, 0)
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	var resp struct{}
+	err = client.Post("/anything", map[string]string{}, &resp)
+	if err == nil {
+		t.Fatal("expected error from connection-refused, got nil")
+	}
+	// Don't pin on specific error type — net errors are platform-flavored.
+	// But it must NOT be one of our HTTP-status sentinels.
+	if errors.Is(err, ErrUnauthorized) || errors.Is(err, ErrSessionNotFound) {
+		t.Errorf("network error mis-categorized as HTTP-status sentinel: %v", err)
+	}
+}
+
+// TestClient_MaxResponseSize covers the maxResponseSize cap. Uses
+// SetMaxResponseSizeForTest to keep memory usage trivial; without
+// the var seam we'd have to allocate 32MB.
+func TestClient_MaxResponseSize(t *testing.T) {
+	// Cap at 100 bytes for this test.
+	restore := SetMaxResponseSizeForTest(100)
+	defer restore()
+
+	// Server sends a 500-byte JSON-shaped response. With a 100-byte cap
+	// the client will read at most 100 bytes — that truncates inside
+	// the JSON, so the decode must fail (the partial body is invalid
+	// JSON). We're not asserting on the specific error type, only that
+	// the client doesn't silently swallow the truncation.
+	bigJSON := `{"data":"` + strings.Repeat("A", 500) + `"}`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(bigJSON))
+	}))
+	defer server.Close()
+
+	client, err := NewClient(&config.UploadConfig{BackendURL: server.URL, APIKey: "k"}, 0)
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	var resp struct {
+		Data string `json:"data"`
+	}
+	err = client.Post("/x", map[string]string{}, &resp)
+	if err == nil {
+		t.Errorf("expected error decoding truncated response, got nil; resp = %+v", resp)
+	}
+}
