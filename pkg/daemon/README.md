@@ -1,6 +1,6 @@
 # pkg/daemon
 
-Background sync daemon that monitors a Claude Code session transcript and uploads it incrementally to the backend. One daemon runs per active session.
+Background sync daemon that monitors a provider session transcript (Claude Code transcript or Codex rollout) and uploads it incrementally to the backend. One daemon runs per active session (one per Codex root tree for Codex).
 
 ## Files
 
@@ -65,9 +65,9 @@ spawn ──> waitForTranscript (poll 2s, timeout 60s)
 
 ## Design Decisions
 
-**Lazy authentication.** The daemon starts immediately when Claude Code launches a session, but the user may not have authenticated yet. `tryInit()` defers backend communication until the first sync cycle, and handles auth failures gracefully.
+**Lazy authentication.** The daemon starts immediately when the provider launches a session, but the user may not have authenticated yet. `tryInit()` defers backend communication until the first sync cycle, and handles auth failures gracefully.
 
-**Jittered sync interval.** The base interval is 30s with ±5s random jitter. This prevents thundering herd when multiple Claude Code sessions start simultaneously. The jitter is applied per-cycle, not just at startup.
+**Jittered sync interval.** The base interval is 30s with ±5s random jitter. This prevents thundering herd when multiple sessions start simultaneously. The jitter is applied per-cycle, not just at startup.
 
 **State files with PID-based liveness check.** The state file stores the daemon PID. `IsDaemonRunning()` sends signal 0 to check if the process is still alive. This is more reliable than lock files (which can be orphaned) and simpler than IPC.
 

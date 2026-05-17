@@ -13,13 +13,13 @@ import (
 var skillsCmd = &cobra.Command{
 	Use:   "skills",
 	Short: "Manage Claude Code skills",
-	Long:  `Add or remove confab skills from Claude Code.`,
+	Long:  `Add or remove confab skills from Claude Code. Skills are Claude Code only — this command is a no-op for Codex.`,
 }
 
 var skillsAddCmd = &cobra.Command{
 	Use:   "add",
 	Short: "Install skills",
-	Long: `Installs confab skills in ~/.claude/skills/.
+	Long: `Installs confab skills in ~/.claude/skills/ (Claude Code only).
 
 Installs:
 - /til skill for capturing TILs (Today I Learned) during sessions
@@ -57,7 +57,7 @@ Installs:
 var skillsRemoveCmd = &cobra.Command{
 	Use:   "remove",
 	Short: "Remove skills",
-	Long:  `Removes all confab skills from ~/.claude/skills/.`,
+	Long:  `Removes all confab skills from ~/.claude/skills/ (Claude Code only).`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger.Info("Running skills remove command")
 

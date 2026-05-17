@@ -12,13 +12,15 @@ import (
 var hookUserPromptSubmitCmd = &cobra.Command{
 	Use:   "user-prompt-submit",
 	Short: "Handle UserPromptSubmit hook events",
-	Long: `Handler for UserPromptSubmit hook events from Claude Code.
+	Long: `Handler for UserPromptSubmit hook events.
 
 This hook fires when a user submits a prompt, before Claude processes
 it. It ensures a sync daemon is running for the session, which handles
 the teleport case where SessionStart doesn't fire.
 
-This command is typically invoked by Claude Code, not directly by users.`,
+This command is typically invoked by Claude Code, not directly by users.
+
+Claude Code only — Codex does not fire UserPromptSubmit.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return handleUserPromptSubmit(os.Stdin, os.Stdout)
 	},

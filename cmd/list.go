@@ -15,15 +15,15 @@ var listProviderName string
 var listCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List local sessions",
-	Long: `List all sessions found in ~/.claude/projects/.
+	Long: `List local sessions for the selected provider.
 
 Shows session ID (truncated), title/summary, and last activity time.
 Copy the session ID to use with 'confab save <session-id>'.
 
 Examples:
-  confab list          # List all sessions
-  confab list -d 5d    # List sessions from last 5 days
-  confab list -d 12h   # List sessions from last 12 hours`,
+  confab list                     # List sessions for the default provider
+  confab list --provider codex    # List Codex sessions
+  confab list -d 5d               # Sessions from last 5 days`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		defer NotifyIfUpdateAvailable()
 		p, err := provider.Get(listProviderName)
@@ -67,14 +67,11 @@ func printSessionTable(p provider.Provider, sessions []provider.SessionInfo) {
 		fmt.Printf("%-8s  %-50s  %s\n", id, title, activity)
 	}
 
-	switch {
-	case p.Name() == provider.NameCodex:
-		fmt.Printf("\n%d session(s) found. Use 'confab save --provider codex <id>' to sync to the backend.\n", len(sessions))
-	case len(sessions) == 1:
-		fmt.Println("\n1 session found. Use 'confab save <id>' to upload.")
-	default:
-		fmt.Printf("\n%d session(s) found. Use 'confab save <id>' to upload.\n", len(sessions))
+	providerFlag := ""
+	if p.Name() == provider.NameCodex {
+		providerFlag = "--provider codex "
 	}
+	fmt.Printf("\n%d session(s) found. Use 'confab save %s<id>' to upload.\n", len(sessions), providerFlag)
 }
 
 // formatSessionRow formats a single session for display.

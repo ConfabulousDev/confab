@@ -1,6 +1,6 @@
 # Claude Code Hook Input Examples
 
-These JSON files show the format of hook input that Claude Code sends to confab via stdin.
+These JSON files show the format of hook input that Claude Code sends to confab via stdin. (Codex uses a different format; see `pkg/provider/codex.go`.)
 
 ## When hooks are triggered
 

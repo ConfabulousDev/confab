@@ -43,7 +43,8 @@ type tilResponse struct {
 var tilCmd = &cobra.Command{
 	Use:   "til",
 	Short: "Save a TIL (Today I Learned) to the backend",
-	Long: `Save a TIL captured during a Claude Code session.
+	Long: `Save a TIL captured during a Claude Code session. The /til skill that
+invokes this command is Claude Code only today.
 
 This command is typically invoked by the /til skill, not directly by users.
 It looks up the active daemon state for the given session, extracts the

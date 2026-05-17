@@ -7,7 +7,7 @@ import "github.com/spf13/cobra"
 var sessionCmd = &cobra.Command{
 	Use:   "session",
 	Short: "Query and retrieve sessions",
-	Long:  `Commands for querying and retrieving Claude Code session data from the backend.`,
+	Long:  `Commands for querying and retrieving session data from the backend. Works for sessions captured from any supported provider.`,
 }
 
 func init() {
