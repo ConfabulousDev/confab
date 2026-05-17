@@ -118,6 +118,13 @@ func setupSetupTestEnv(t *testing.T, serverURL string) (tmpDir string, configPat
 	configPath = filepath.Join(confabDir, "config.json")
 	t.Setenv("CONFAB_CONFIG_PATH", configPath)
 
+	// Pre-CF-422 tests assume `confab setup` installs Claude hooks by
+	// default. Stub LookPath so Claude is detected on hosts that don't
+	// have the real binary installed (matters in CI). Tests that need
+	// a different shape (auto-detect both, neither, etc.) call
+	// stubProviderDetect after this and override cleanly.
+	stubProviderDetect(t, "claude")
+
 	return tmpDir, configPath
 }
 
@@ -506,6 +513,10 @@ func TestRunSetup_HookInstallationFails(t *testing.T) {
 	claudeFile := filepath.Join(tmpDir, ".claude")
 	os.WriteFile(claudeFile, []byte("not a directory"), 0644)
 	t.Setenv("CONFAB_CLAUDE_DIR", claudeFile)
+
+	// Force auto-detect to find claude so the install path actually runs
+	// (CI hosts don't have the real `claude` binary).
+	stubProviderDetect(t, "claude")
 
 	doDeviceLoginFunc = func(backendURL, keyName string) error {
 		t.Error("login should not be called")
