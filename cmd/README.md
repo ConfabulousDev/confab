@@ -18,8 +18,8 @@ CLI command layer built on [Cobra](https://github.com/spf13/cobra). Each file de
 | `spawn.go` | Generic `maybeSpawnDaemon(p, *daemonLaunchInput)` — single dispatch for Claude and Codex daemon spawn. `daemonLaunchInput` is the canonical wire format between the hook and the freshly-spawned daemon process. |
 | `login.go` | Device code auth flow and API key login |
 | `logout.go` | Clear stored credentials |
-| `setup.go` | One-command setup: auth + hooks |
-| `status.go` | Show hook and auth status |
+| `setup.go` | One-command setup: auth + hooks. Bare `confab setup --backend-url ...` auto-detects every provider CLI on `PATH` (via `provider.DetectInstalled`) and installs hooks for each. `--provider X` overrides to single-provider mode. Best-effort across providers: per-provider failure is reported in a summary but doesn't abort the loop. |
+| `status.go` | Show backend auth + per-provider hook/skill state for every supported provider. No `--provider` flag — output always covers all providers, with orphan-hook detection (hooks installed but CLI missing) and a remediation footer. |
 | `list.go` | List local sessions (dispatches through `provider.Provider.ScanSessions`) |
 | `list_utils.go` | Duration parsing, session filtering — fully provider-agnostic |
 | `save.go` | Manual session upload by ID (dispatches through `provider.Provider.FindSessionByID` + `DefaultCWD`) |

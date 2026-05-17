@@ -23,6 +23,9 @@ var _ Provider = Codex{}
 // Name returns the canonical Codex provider name.
 func (Codex) Name() string { return NameCodex }
 
+// CLIBinaryName returns "codex" — the binary users install via Codex.
+func (Codex) CLIBinaryName() string { return "codex" }
+
 // ParseSessionHook reads a Codex SessionStart hook payload and returns
 // the provider-agnostic view.
 func (p Codex) ParseSessionHook(r io.Reader) (HookInput, error) {

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -424,7 +425,8 @@ func TestRunSetupCodexProviderOutput(t *testing.T) {
 	wantSnippets := []string{
 		"Backend URL: " + server.URL,
 		"✓ API key validated and saved",
-		"Installing codex hooks",
+		"▶ codex",
+		"✓ hooks installed",
 		"✅ Setup complete. codex sessions will sync to " + server.URL,
 	}
 	for _, want := range wantSnippets {
@@ -905,5 +907,332 @@ func TestSetupFreshInstall_AddsDefaultRedaction(t *testing.T) {
 	// Patterns array should be empty (defaults applied at runtime)
 	if len(savedCfg.Redaction.Patterns) != 0 {
 		t.Errorf("expected 0 patterns in config (defaults are runtime), got %d", len(savedCfg.Redaction.Patterns))
+	}
+}
+
+// stubProviderDetect swaps provider.LookPath to simulate which CLIs are
+// on PATH for the duration of the test. Shared by setup and status tests.
+func stubProviderDetect(t *testing.T, present ...string) {
+	t.Helper()
+	set := make(map[string]struct{}, len(present))
+	for _, p := range present {
+		set[p] = struct{}{}
+	}
+	orig := provider.LookPath
+	provider.LookPath = func(name string) (string, error) {
+		if _, ok := set[name]; ok {
+			return "/usr/local/bin/" + name, nil
+		}
+		return "", exec.ErrNotFound
+	}
+	t.Cleanup(func() { provider.LookPath = orig })
+}
+
+// resetSetupProviderName clears the package-level setupProviderName
+// between tests so a previous test's value can't leak into auto-detect.
+func resetSetupProviderName(t *testing.T) {
+	t.Helper()
+	orig := setupProviderName
+	setupProviderName = ""
+	t.Cleanup(func() { setupProviderName = orig })
+}
+
+func TestRunSetup_AutoDetect_Both(t *testing.T) {
+	backend := &setupTestBackend{validateValid: true}
+	server := httptest.NewServer(backend)
+	defer server.Close()
+
+	tmpDir, _ := setupSetupTestEnv(t, server.URL)
+	codexDir := filepath.Join(tmpDir, ".codex")
+	t.Setenv(provider.CodexStateDirEnv, codexDir)
+
+	resetSetupProviderName(t)
+	stubProviderDetect(t, "claude", "codex")
+
+	cmd := &cobra.Command{}
+	cmd.Flags().String("backend-url", server.URL, "")
+	cmd.Flags().String("api-key", "cfb_autodetect-key-1234567890", "")
+
+	output := captureStdout(t, func() {
+		if err := runSetup(cmd, nil); err != nil {
+			t.Fatalf("runSetup failed: %v", err)
+		}
+	})
+
+	wantSnippets := []string{
+		"Detected providers: claude-code, codex",
+		"▶ claude-code",
+		"▶ codex",
+		"✓ hooks installed",
+		"Summary:",
+		"claude-code: installed",
+		"codex: installed",
+		"✅ Setup complete. claude-code, codex sessions will sync to " + server.URL,
+	}
+	for _, want := range wantSnippets {
+		if !strings.Contains(output, want) {
+			t.Fatalf("setup output missing %q\noutput:\n%s", want, output)
+		}
+	}
+
+	// Claude hooks landed in ~/.claude/settings.json
+	verifyHooksInstalled(t)
+
+	// Codex hooks landed in ~/.codex/config.toml
+	codexCfg := filepath.Join(codexDir, "config.toml")
+	data, err := os.ReadFile(codexCfg)
+	if err != nil {
+		t.Fatalf("expected Codex config.toml after auto-detect: %v", err)
+	}
+	if !strings.Contains(string(data), "hook session-start --provider codex") {
+		t.Fatal("expected Codex session-start hook in config.toml")
+	}
+}
+
+func TestRunSetup_AutoDetect_ClaudeOnly(t *testing.T) {
+	backend := &setupTestBackend{validateValid: true}
+	server := httptest.NewServer(backend)
+	defer server.Close()
+
+	tmpDir, _ := setupSetupTestEnv(t, server.URL)
+	codexDir := filepath.Join(tmpDir, ".codex")
+	t.Setenv(provider.CodexStateDirEnv, codexDir)
+
+	resetSetupProviderName(t)
+	stubProviderDetect(t, "claude")
+
+	cmd := &cobra.Command{}
+	cmd.Flags().String("backend-url", server.URL, "")
+	cmd.Flags().String("api-key", "cfb_claudeonly-key-1234567890", "")
+
+	output := captureStdout(t, func() {
+		if err := runSetup(cmd, nil); err != nil {
+			t.Fatalf("runSetup failed: %v", err)
+		}
+	})
+
+	if !strings.Contains(output, "Detected providers: claude-code") {
+		t.Fatalf("expected Claude-only detection line, got:\n%s", output)
+	}
+	if strings.Contains(output, "▶ codex") {
+		t.Fatalf("Codex should not be installed; output:\n%s", output)
+	}
+
+	verifyHooksInstalled(t)
+
+	// Codex config must not exist
+	codexCfg := filepath.Join(codexDir, "config.toml")
+	if _, err := os.Stat(codexCfg); !os.IsNotExist(err) {
+		t.Fatalf("expected no Codex config; stat err=%v", err)
+	}
+}
+
+func TestRunSetup_AutoDetect_CodexOnly(t *testing.T) {
+	backend := &setupTestBackend{validateValid: true}
+	server := httptest.NewServer(backend)
+	defer server.Close()
+
+	tmpDir, _ := setupSetupTestEnv(t, server.URL)
+	codexDir := filepath.Join(tmpDir, ".codex")
+	t.Setenv(provider.CodexStateDirEnv, codexDir)
+
+	// Wipe ~/.claude so a stale settings.json from setupSetupTestEnv's
+	// MkdirAll doesn't get hooks written into it. (Claude install path
+	// won't run because LookPath returns ErrNotFound for "claude".)
+	claudeDir := filepath.Join(tmpDir, ".claude")
+	if err := os.RemoveAll(claudeDir); err != nil {
+		t.Fatalf("cleanup: %v", err)
+	}
+
+	resetSetupProviderName(t)
+	stubProviderDetect(t, "codex")
+
+	cmd := &cobra.Command{}
+	cmd.Flags().String("backend-url", server.URL, "")
+	cmd.Flags().String("api-key", "cfb_codexonly-key-12345678901", "")
+
+	output := captureStdout(t, func() {
+		if err := runSetup(cmd, nil); err != nil {
+			t.Fatalf("runSetup failed: %v", err)
+		}
+	})
+
+	if !strings.Contains(output, "Detected providers: codex") {
+		t.Fatalf("expected Codex-only detection line, got:\n%s", output)
+	}
+	if strings.Contains(output, "▶ claude-code") {
+		t.Fatalf("Claude Code should not be installed; output:\n%s", output)
+	}
+
+	codexCfg := filepath.Join(codexDir, "config.toml")
+	if _, err := os.Stat(codexCfg); err != nil {
+		t.Fatalf("expected Codex config.toml: %v", err)
+	}
+
+	// Claude settings.json must not exist
+	settingsPath := filepath.Join(claudeDir, "settings.json")
+	if _, err := os.Stat(settingsPath); !os.IsNotExist(err) {
+		t.Fatalf("expected no Claude settings; stat err=%v", err)
+	}
+}
+
+func TestRunSetup_AutoDetect_None(t *testing.T) {
+	backend := &setupTestBackend{validateValid: true}
+	server := httptest.NewServer(backend)
+	defer server.Close()
+
+	tmpDir, configPath := setupSetupTestEnv(t, server.URL)
+	codexDir := filepath.Join(tmpDir, ".codex")
+	t.Setenv(provider.CodexStateDirEnv, codexDir)
+
+	resetSetupProviderName(t)
+	stubProviderDetect(t) // neither
+
+	cmd := &cobra.Command{}
+	cmd.Flags().String("backend-url", server.URL, "")
+	cmd.Flags().String("api-key", "cfb_none-detected-key-1234567", "")
+
+	output := captureStdout(t, func() {
+		if err := runSetup(cmd, nil); err != nil {
+			t.Fatalf("runSetup must exit 0 when no provider is detected, got: %v", err)
+		}
+	})
+
+	if !strings.Contains(output, "Detected providers: (none)") {
+		t.Fatalf("expected `Detected providers: (none)`, got:\n%s", output)
+	}
+	if !strings.Contains(output, "No supported CLIs") {
+		t.Fatalf("expected terse no-CLI warning, got:\n%s", output)
+	}
+	if !strings.Contains(output, "Auth saved, but no hooks were installed") {
+		t.Fatalf("expected auth-only warning copy, got:\n%s", output)
+	}
+	if strings.Contains(output, "▶ ") {
+		t.Fatalf("no provider sub-headers expected; got:\n%s", output)
+	}
+
+	// Auth must still be saved
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("config should be saved on auth-only path: %v", err)
+	}
+	var cfg config.UploadConfig
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		t.Fatalf("invalid config: %v", err)
+	}
+	if cfg.APIKey == "" {
+		t.Fatal("expected API key persisted even without provider hooks")
+	}
+}
+
+func TestRunSetup_AutoDetect_PartialFailure(t *testing.T) {
+	backend := &setupTestBackend{validateValid: true}
+	server := httptest.NewServer(backend)
+	defer server.Close()
+
+	tmpDir, _ := setupSetupTestEnv(t, server.URL)
+
+	// Force Codex install to fail by pointing CONFAB_CODEX_DIR at a file
+	codexFile := filepath.Join(tmpDir, "codex-blocker")
+	if err := os.WriteFile(codexFile, []byte("not a dir"), 0644); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	t.Setenv(provider.CodexStateDirEnv, codexFile)
+
+	resetSetupProviderName(t)
+	stubProviderDetect(t, "claude", "codex")
+
+	cmd := &cobra.Command{}
+	cmd.Flags().String("backend-url", server.URL, "")
+	cmd.Flags().String("api-key", "cfb_partial-fail-key-12345678", "")
+
+	var runErr error
+	output := captureStdout(t, func() {
+		runErr = runSetup(cmd, nil)
+	})
+
+	if runErr == nil {
+		t.Fatalf("expected non-nil error when any provider fails; output:\n%s", output)
+	}
+
+	// Claude should still have installed successfully
+	verifyHooksInstalled(t)
+
+	// Output must include summary block listing per-provider outcome
+	wantSnippets := []string{
+		"Summary:",
+		"claude-code: installed",
+		"codex: failed",
+	}
+	for _, want := range wantSnippets {
+		if !strings.Contains(output, want) {
+			t.Fatalf("setup output missing %q\noutput:\n%s", want, output)
+		}
+	}
+}
+
+func TestRunSetup_Idempotent_AlreadyInstalled(t *testing.T) {
+	backend := &setupTestBackend{validateValid: true}
+	server := httptest.NewServer(backend)
+	defer server.Close()
+
+	tmpDir, _ := setupSetupTestEnv(t, server.URL)
+	codexDir := filepath.Join(tmpDir, ".codex")
+	t.Setenv(provider.CodexStateDirEnv, codexDir)
+
+	// Pre-populate Claude settings.json with a `confab`-named hook
+	// command so IsHooksInstalled returns true. (See
+	// TestIsSyncHooksInstalledRoundTrip in pkg/hookconfig.)
+	claudeSettings := filepath.Join(tmpDir, ".claude", "settings.json")
+	confabClaudeCfg := `{
+  "hooks": {
+    "SessionStart": [{"matcher": "*", "hooks": [{"type":"command","command":"/usr/local/bin/confab hook session-start"}]}],
+    "SessionEnd":   [{"matcher": "*", "hooks": [{"type":"command","command":"/usr/local/bin/confab hook session-end"}]}],
+    "PreToolUse":   [{"matcher": "Bash", "hooks": [{"type":"command","command":"/usr/local/bin/confab hook pre-tool-use"}]}],
+    "PostToolUse":  [{"matcher": "Bash", "hooks": [{"type":"command","command":"/usr/local/bin/confab hook post-tool-use"}]}],
+    "UserPromptSubmit": [{"matcher": "*", "hooks": [{"type":"command","command":"/usr/local/bin/confab hook user-prompt-submit"}]}]
+  }
+}`
+	if err := os.WriteFile(claudeSettings, []byte(confabClaudeCfg), 0600); err != nil {
+		t.Fatalf("write claude settings: %v", err)
+	}
+
+	// Pre-populate Codex config.toml with a confab-named hook.
+	if err := os.MkdirAll(codexDir, 0700); err != nil {
+		t.Fatalf("mkdir codex: %v", err)
+	}
+	codexCfg := filepath.Join(codexDir, "config.toml")
+	confabCodexCfg := `[features]
+hooks = true
+
+[[hooks.SessionStart]]
+matcher = "startup|resume|clear"
+[[hooks.SessionStart.hooks]]
+type = "command"
+command = "/usr/local/bin/confab hook session-start --provider codex"
+`
+	if err := os.WriteFile(codexCfg, []byte(confabCodexCfg), 0600); err != nil {
+		t.Fatalf("write codex config: %v", err)
+	}
+
+	resetSetupProviderName(t)
+	stubProviderDetect(t, "claude", "codex")
+
+	cmd := &cobra.Command{}
+	cmd.Flags().String("backend-url", server.URL, "")
+	cmd.Flags().String("api-key", "cfb_idempotent-key-1234567890", "")
+
+	output := captureStdout(t, func() {
+		if err := runSetup(cmd, nil); err != nil {
+			t.Fatalf("runSetup failed: %v", err)
+		}
+	})
+
+	if !strings.Contains(output, "hooks already installed (no changes)") {
+		t.Fatalf("expected already-installed message, got:\n%s", output)
+	}
+	// Both providers must report already-installed.
+	if strings.Count(output, "hooks already installed (no changes)") < 2 {
+		t.Fatalf("expected already-installed for BOTH providers, got:\n%s", output)
 	}
 }

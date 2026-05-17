@@ -9,6 +9,7 @@ The package defines a `Provider` interface and a `HookInput` interface (Phase 1 
 | File | Role |
 |------|------|
 | `provider.go` | `Provider` and `HookInput` interfaces, sync-loop interfaces (`TranscriptRegistrar`, `DescendantRegistrar`, `ChunkView`), `SummaryLink` / `AnnotationResult` types, provider name constants (`NameClaudeCode`, `NameCodex`), the registry (`Get(name)`), and `NormalizeName(name)` |
+| `detect.go` | `DetectInstalled() []string` returns the canonical names of providers whose CLI binary is on `PATH`, in fixed registry order. Uses the exported package-level `LookPath` var (defaults to `exec.LookPath`) so tests can stub it. Backs `confab setup` auto-detect (CF-422) and `confab status` per-provider CLI presence. |
 | `session.go` | `SessionInfo` and `SessionMetadata` — cross-provider shapes returned by the discovery interface methods. Also defines `maxLinesForExtraction` and the shared `readHeadLines` helper. |
 | `codex_rollout.go` | `CodexRolloutMetadata` — wire-format metadata transmitted on the first chunk of every Codex rollout. Lives here (not pkg/sync) so the Codex implementation can construct one without a cycle; pkg/sync aliases it. |
 | `hookinput.go` | `claudeHookInputAdapter` and `codexHookInputAdapter` — wrap the typed structs in `pkg/types` so they satisfy `HookInput`. Required because the structs' existing exported `SessionID` field collides with a `SessionID()` method |
@@ -56,6 +57,7 @@ Codex fires `Stop` at every agent/turn boundary, including root rollout stops wh
 Methods every provider must implement:
 
 - `Name() string` — canonical name (one of `NameClaudeCode`, `NameCodex`).
+- `CLIBinaryName() string` — OS-level binary name used by `DetectInstalled` / `confab status` (`"claude"` for Claude Code, `"codex"` for Codex). Distinct from `Name()` because the canonical name (`claude-code`) is not the binary name.
 - `StateDir() (string, error)` — local state directory.
 - `FindParentPID() int`, `IsProcess(pid int) bool` — parent-process detection.
 - `ParseSessionHook(io.Reader) (HookInput, error)` — read a SessionStart hook payload and return the provider-agnostic view.
@@ -92,6 +94,8 @@ Methods every provider must implement:
 - Parent PID detection is part of the `Provider` interface (`FindParentPID`, `IsProcess`); the bodies remain provider-specific (different process-name patterns) and share the package-level `getProcCmdline` / `getParentPID` helpers in `claude.go`.
 - Agent-ID extraction (`ClaudeCode.ExtractAgentIDsFromMessage`) is intentionally Claude-only. Codex tracks subagents via its SQLite thread tree and never grows agent IDs in rollout JSONL — `pkg/sync/tracker.go` calls the Claude method on every chunk regardless of provider; the method's `msgType != "user"` early-return safely no-ops on Codex data.
 - `Codex.FindSessionByID` returns the ROOT thread for any partial UUID matching a subagent. Callers that need the un-walked rollout (e.g., for debugging a specific subagent) use `Codex.FindRolloutByID` instead — that one stays on the concrete `Codex` type rather than the interface.
+- `DetectInstalled()` returns names in fixed `detectOrder` (`claude-code` first, then `codex`) regardless of `LookPath` lookup order. This determinism is load-bearing for setup output and tests.
+- `CLIBinaryName()` is the OS binary name (`"claude"`, `"codex"`) — never the canonical provider name. The two diverge for Claude Code (`claude-code` vs `claude`).
 - `Codex.InstallHooks` installs only `SessionStart`. Daemon shutdown is driven by parent-PID liveness, never by Codex `Stop`.
 - `CodexRolloutMetadata` JSON tags are wire-format pins. Existing rows in the backend's `codex_rollouts` table were written against these tags; renaming any field is a backwards-incompatible change. Adding new optional fields (with `omitempty`) is safe.
 - Sync-loop providers (`InitTranscript`, `DiscoverDescendants`, `AnnotateChunk`) are called from a single goroutine inside the engine's sync loop. Implementations may mutate the passed `TranscriptRegistrar` / `DescendantRegistrar` / `ChunkView` without locking; the engine does not call them concurrently for the same engine instance.

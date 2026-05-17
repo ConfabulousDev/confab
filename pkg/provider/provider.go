@@ -72,6 +72,10 @@ type AnnotationResult struct {
 // implementing this interface and registering the instance.
 type Provider interface {
 	Name() string
+	// CLIBinaryName is the OS-level binary name to look up via
+	// exec.LookPath when detecting whether the provider is installed
+	// locally (e.g. "claude" for Claude Code, "codex" for Codex).
+	CLIBinaryName() string
 	StateDir() (string, error)
 	FindParentPID() int
 	IsProcess(pid int) bool

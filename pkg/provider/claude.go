@@ -28,6 +28,10 @@ var _ Provider = ClaudeCode{}
 // Name returns the canonical Claude Code provider name.
 func (ClaudeCode) Name() string { return NameClaudeCode }
 
+// CLIBinaryName returns "claude" — the binary `claude` users install via
+// the Claude Code installer.
+func (ClaudeCode) CLIBinaryName() string { return "claude" }
+
 // ParseSessionHook reads a Claude SessionStart hook payload and returns
 // the provider-agnostic view.
 func (p ClaudeCode) ParseSessionHook(r io.Reader) (HookInput, error) {

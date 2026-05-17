@@ -16,7 +16,7 @@ curl -fsSL https://raw.githubusercontent.com/ConfabulousDev/confab/main/install.
 confab setup --backend-url https://confab.yourcompany.com
 ```
 
-After setup, your Claude Code sessions automatically sync to the backend. To also sync Codex, run `confab setup --provider codex`.
+`confab setup` auto-detects whichever provider CLIs (`claude`, `codex`) are on your `PATH` and wires hooks for each. Both Claude Code and Codex sessions sync to the backend in the same setup pass.
 
 ## Connect to Your Backend
 
@@ -90,10 +90,13 @@ See [Redaction](REDACTION.md) for configuration details.
 
 ## Codex
 
-Confab supports Codex sessions alongside Claude Code.
+Confab supports Codex sessions alongside Claude Code. `confab setup` auto-detects the `codex` binary on your `PATH` and wires Codex hooks automatically — no extra invocation needed. Pass `--provider codex` explicitly to limit setup to Codex only.
 
 ```bash
-# Wire Codex hooks (in addition to or instead of Claude Code)
+# Auto-detect: installs hooks for every provider CLI on PATH
+confab setup --backend-url https://confab.yourcompany.com
+
+# Codex-only (explicit override)
 confab setup --provider codex --backend-url https://confab.yourcompany.com
 
 # List Codex sessions
