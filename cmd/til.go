@@ -20,10 +20,11 @@ import (
 )
 
 var (
-	tilSession string
-	tilTitle   string
-	tilSummary string
-	tilTags    []string
+	tilSession      string
+	tilTitle        string
+	tilSummary      string
+	tilTags         []string
+	tilProviderName string
 )
 
 type tilRequest struct {
@@ -52,22 +53,27 @@ Examples:
   confab til --session abc123 --title "Proxy blocks OCP" --summary "When upgrading..."`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		defer NotifyIfUpdateAvailable()
-		return runTil(tilSession, tilTitle, tilSummary, tilTags)
+		p, err := provider.Get(tilProviderName)
+		if err != nil {
+			return err
+		}
+		return runTil(p, tilSession, tilTitle, tilSummary, tilTags)
 	},
 }
 
 func init() {
-	tilCmd.Flags().StringVar(&tilSession, "session", "", "Claude Code session ID (required)")
+	tilCmd.Flags().StringVar(&tilSession, "session", "", "Session ID (required)")
 	tilCmd.Flags().StringVar(&tilTitle, "title", "", "TIL title (required)")
 	tilCmd.Flags().StringVar(&tilSummary, "summary", "", "TIL summary (required)")
 	tilCmd.Flags().StringArrayVar(&tilTags, "tag", nil, "Tags (repeatable)")
+	tilCmd.Flags().StringVar(&tilProviderName, "provider", provider.NameClaudeCode, "Provider whose session state to look up (claude-code or codex)")
 	tilCmd.MarkFlagRequired("session")
 	tilCmd.MarkFlagRequired("title")
 	tilCmd.MarkFlagRequired("summary")
 	rootCmd.AddCommand(tilCmd)
 }
 
-func runTil(session, title, summary string, tags []string) error {
+func runTil(p provider.Provider, session, title, summary string, tags []string) error {
 	cfg, err := config.EnsureAuthenticated()
 	if err != nil {
 		return err
@@ -79,12 +85,12 @@ func runTil(session, title, summary string, tags []string) error {
 	}
 
 	// Look up daemon state for this session
-	state, err := daemon.LoadStateForProvider(provider.NameClaudeCode, session)
+	state, err := daemon.LoadStateForProvider(p.Name(), session)
 	if err != nil {
 		return fmt.Errorf("failed to load session state: %w", err)
 	}
 	if state == nil {
-		return fmt.Errorf("no active session found for %s — run /til from within a Claude Code session", utils.TruncateSecret(session, 8, 0))
+		return fmt.Errorf("no active session found for %s — run /til from within an active session", utils.TruncateSecret(session, 8, 0))
 	}
 
 	if state.ConfabSessionID == "" {

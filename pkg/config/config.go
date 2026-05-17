@@ -103,9 +103,13 @@ func (s *ClaudeSettings) SetEventHooks(eventName string, matchers []any) error {
 }
 
 // GetSettingsPath returns the path to the Claude settings file
-// (defaults to ~/.claude/settings.json, can be overridden with CONFAB_CLAUDE_DIR)
+// (defaults to ~/.claude/settings.json, can be overridden with CONFAB_CLAUDE_DIR).
 func GetSettingsPath() (string, error) {
-	return GetClaudeSettingsPath()
+	stateDir, err := GetClaudeStateDir()
+	if err != nil {
+		return "", fmt.Errorf("failed to get settings path: %w", err)
+	}
+	return filepath.Join(stateDir, "settings.json"), nil
 }
 
 // ReadSettings reads the Claude settings file, preserving all fields

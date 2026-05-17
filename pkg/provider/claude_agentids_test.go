@@ -1,10 +1,10 @@
-package discovery
+package provider
 
 import (
 	"testing"
 )
 
-func TestIsValidAgentID(t *testing.T) {
+func TestClaudeCodeIsValidAgentID(t *testing.T) {
 	tests := []struct {
 		input string
 		want  bool
@@ -35,17 +35,17 @@ func TestIsValidAgentID(t *testing.T) {
 		{"", false},
 
 		// Invalid characters
-		{"abc def12", false},  // space
-		{"abc.1234", false},   // dot
-		{"abc/1234", false},   // slash
-		{"abc!1234", false},   // exclamation
-		{"agent@foo", false},  // at sign
-		{"abc\t1234", false},  // tab
+		{"abc def12", false}, // space
+		{"abc.1234", false},  // dot
+		{"abc/1234", false},  // slash
+		{"abc!1234", false},  // exclamation
+		{"agent@foo", false}, // at sign
+		{"abc\t1234", false}, // tab
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			got := IsValidAgentID(tt.input)
+			got := ClaudeCode{}.IsValidAgentID(tt.input)
 			if got != tt.want {
 				t.Errorf("IsValidAgentID(%q) = %v, want %v", tt.input, got, tt.want)
 			}
@@ -53,7 +53,7 @@ func TestIsValidAgentID(t *testing.T) {
 	}
 }
 
-func TestExtractAgentIDsFromMessage(t *testing.T) {
+func TestClaudeCodeExtractAgentIDsFromMessage(t *testing.T) {
 	tests := []struct {
 		name    string
 		message map[string]interface{}
@@ -137,16 +137,15 @@ func TestExtractAgentIDsFromMessage(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := ExtractAgentIDsFromMessage(tt.message)
-			if !sliceEqual(got, tt.want) {
+			got := ClaudeCode{}.ExtractAgentIDsFromMessage(tt.message)
+			if !agentIDSliceEqual(got, tt.want) {
 				t.Errorf("ExtractAgentIDsFromMessage() = %v, want %v", got, tt.want)
 			}
 		})
 	}
 }
 
-// sliceEqual compares two string slices for equality
-func sliceEqual(a, b []string) bool {
+func agentIDSliceEqual(a, b []string) bool {
 	if len(a) != len(b) {
 		return false
 	}

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/ConfabulousDev/confab/pkg/discovery"
 	"github.com/ConfabulousDev/confab/pkg/provider"
 	"github.com/ConfabulousDev/confab/pkg/utils"
 	"github.com/spf13/cobra"
@@ -27,90 +26,81 @@ Examples:
   confab list -d 12h   # List sessions from last 12 hours`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		defer NotifyIfUpdateAvailable()
-		providerName, err := provider.NormalizeName(listProviderName)
+		p, err := provider.Get(listProviderName)
 		if err != nil {
 			return err
 		}
-		return listSessions(providerName, listDuration)
+		return listSessions(p, listDuration)
 	},
 }
 
-// listSessions scans and displays all local sessions
-func listSessions(providerName, durationStr string) error {
-	sessions, err := scanAndFilterSessions(providerName, durationStr)
+// listSessions scans and displays all local sessions for the given provider.
+func listSessions(p provider.Provider, durationStr string) error {
+	sessions, err := scanAndFilterSessions(p, durationStr)
 	if err != nil {
 		return err
 	}
 
 	if len(sessions) == 0 {
-		if durationStr != "" {
+		switch {
+		case durationStr != "":
 			fmt.Printf("No sessions found within the last %s\n", durationStr)
-		} else if providerName == provider.NameCodex {
+		case p.Name() == provider.NameCodex:
 			fmt.Println("No sessions found in ~/.codex/sessions/")
-		} else {
+		default:
 			fmt.Println("No sessions found in ~/.claude/projects/")
 		}
 		return nil
 	}
 
-	// Print table
-	printSessionTable(providerName, sessions)
-
+	printSessionTable(p, sessions)
 	return nil
 }
 
-// printSessionTable displays sessions in a formatted table
-func printSessionTable(providerName string, sessions []discovery.SessionInfo) {
-	// Print header
+// printSessionTable displays sessions in a formatted table.
+func printSessionTable(p provider.Provider, sessions []provider.SessionInfo) {
 	fmt.Printf("%-8s  %-50s  %s\n", "ID", "TITLE", "LAST ACTIVITY")
 	fmt.Printf("%-8s  %-50s  %s\n", "--------", "--------------------------------------------------", "-------------")
 
-	// Print rows
 	for _, session := range sessions {
 		id, title, activity := formatSessionRow(session)
 		fmt.Printf("%-8s  %-50s  %s\n", id, title, activity)
 	}
 
-	if providerName == provider.NameCodex {
+	switch {
+	case p.Name() == provider.NameCodex:
 		fmt.Printf("\n%d session(s) found. Use 'confab save --provider codex <id>' to sync to the backend.\n", len(sessions))
-		return
+	case len(sessions) == 1:
+		fmt.Println("\n1 session found. Use 'confab save <id>' to upload.")
+	default:
+		fmt.Printf("\n%d session(s) found. Use 'confab save <id>' to upload.\n", len(sessions))
 	}
-	if len(sessions) == 1 {
-		fmt.Printf("\n1 session found. Use 'confab save <id>' to upload.\n")
-		return
-	}
-	fmt.Printf("\n%d session(s) found. Use 'confab save <id>' to upload.\n", len(sessions))
 }
 
-// formatSessionRow formats a single session for display
-func formatSessionRow(session discovery.SessionInfo) (id, title, activity string) {
-	// Truncate session ID to first 8 chars (for copying)
+// formatSessionRow formats a single session for display.
+func formatSessionRow(session provider.SessionInfo) (id, title, activity string) {
 	if len(session.SessionID) >= 8 {
 		id = session.SessionID[:8]
 	} else {
 		id = session.SessionID
 	}
 
-	// Derive title from summary or first user message (for display only)
 	displayTitle := session.Summary
 	if displayTitle == "" {
 		displayTitle = session.FirstUserMessage
 	}
 
-	// Format title (or dash if empty)
 	if displayTitle != "" {
 		title = utils.TruncateEnd(displayTitle, 50)
 	} else {
 		title = "-"
 	}
 
-	// Format last activity as relative time
 	activity = formatDuration(time.Since(session.ModTime))
-
 	return id, title, activity
 }
 
-// formatDuration formats a duration as a human-readable relative time
+// formatDuration formats a duration as a human-readable relative time.
 func formatDuration(d time.Duration) string {
 	if d < time.Minute {
 		return fmt.Sprintf("%ds ago", int(d.Seconds()))

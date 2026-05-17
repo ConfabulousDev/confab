@@ -6,7 +6,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -247,7 +246,7 @@ func TestSaveCodexSessionsByID_UploadsWithCodexProvider(t *testing.T) {
 	sessionID := "cccccccc-3333-3333-3333-333333333333"
 	writeCodexTestRollout(t, tmpDir, sessionID, `"thread_source":"user","cwd":"/work/user"`)
 
-	if err := saveSessionsByIDForProvider("codex", []string{"cccccccc"}); err != nil {
+	if err := saveSessionsForProvider(provider.Codex{}, []string{"cccccccc"}); err != nil {
 		t.Fatalf("saveSessionsByIDForProvider failed: %v", err)
 	}
 
@@ -266,13 +265,13 @@ func TestSaveCodexSessionsByID_UploadsWithCodexProvider(t *testing.T) {
 }
 
 // setupCodexSaveEnv creates a codextest fixture and writes a config file
-// pointing at the given backend URL. Returns the fixture and its tmp HOME.
-func setupCodexSaveEnv(t *testing.T, backendURL string) (*codextest.Fixture, string) {
+// pointing at the given backend URL.
+func setupCodexSaveEnv(t *testing.T, backendURL string) *codextest.Fixture {
 	t.Helper()
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
 	confabDir := filepath.Join(tmpHome, ".confab")
-	if err := os.MkdirAll(confabDir, 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Join(confabDir, "sync"), 0o700); err != nil {
 		t.Fatalf("mkdir confab dir: %v", err)
 	}
 	configPath := filepath.Join(confabDir, "config.json")
@@ -281,11 +280,7 @@ func setupCodexSaveEnv(t *testing.T, backendURL string) (*codextest.Fixture, str
 		t.Fatalf("write config: %v", err)
 	}
 	t.Setenv("CONFAB_CONFIG_PATH", configPath)
-	if err := os.MkdirAll(filepath.Join(tmpHome, ".confab", "sync"), 0o700); err != nil {
-		t.Fatalf("mkdir sync dir: %v", err)
-	}
-	fixture := codextest.NewFixture(t)
-	return fixture, tmpHome
+	return codextest.NewFixture(t)
 }
 
 // uuidStr returns a canonical UUID v4 string for use as a thread/session ID.
@@ -301,7 +296,7 @@ func TestSaveCodex_RootUUID_UploadsRootAndAllChildren_RecordsChunksOnBackend(t *
 	server := httptest.NewServer(backend)
 	defer server.Close()
 
-	fixture, _ := setupCodexSaveEnv(t, server.URL)
+	fixture := setupCodexSaveEnv(t, server.URL)
 
 	rootID := uuidStr(t, 0x10)
 	childA := uuidStr(t, 0x20)
@@ -317,7 +312,7 @@ func TestSaveCodex_RootUUID_UploadsRootAndAllChildren_RecordsChunksOnBackend(t *
 		WithSessionMeta("/work", "gpt-5").
 		WithUserMessage("plan b")
 
-	if err := saveSessionsByIDForProvider("codex", []string{rootID}); err != nil {
+	if err := saveSessionsForProvider(provider.Codex{}, []string{rootID}); err != nil {
 		t.Fatalf("save: %v", err)
 	}
 	if backend.initCount != 1 {
@@ -334,12 +329,12 @@ func TestSaveCodex_RootUUID_UploadsRootAndAllChildren_RecordsChunksOnBackend(t *
 	}
 }
 
-func TestSaveCodex_SubagentUUID_ResolvesToRoot_PrintsInfoMsg_StillUploadsWholeTree(t *testing.T) {
+func TestSaveCodex_SubagentUUID_ResolvesToRoot_StillUploadsWholeTree(t *testing.T) {
 	backend := &saveTestBackend{}
 	server := httptest.NewServer(backend)
 	defer server.Close()
 
-	fixture, _ := setupCodexSaveEnv(t, server.URL)
+	fixture := setupCodexSaveEnv(t, server.URL)
 
 	rootID := uuidStr(t, 0x11)
 	childID := uuidStr(t, 0x22)
@@ -348,22 +343,8 @@ func TestSaveCodex_SubagentUUID_ResolvesToRoot_PrintsInfoMsg_StillUploadsWholeTr
 	fixture.AddSubagent(rootID, childID, codextest.SubagentOpts{AgentRole: "reviewer"}).
 		WithSessionMeta("/work", "gpt-5").WithUserMessage("hi child")
 
-	// Capture stdout for the "Resolved subagent" message.
-	origStdout := os.Stdout
-	r, w, _ := os.Pipe()
-	os.Stdout = w
-
-	err := saveSessionsByIDForProvider("codex", []string{childID})
-
-	w.Close()
-	os.Stdout = origStdout
-	out := readAll(t, r)
-
-	if err != nil {
+	if err := saveSessionsForProvider(provider.Codex{}, []string{childID}); err != nil {
 		t.Fatalf("save: %v", err)
-	}
-	if !strings.Contains(out, "Resolved subagent") {
-		t.Errorf("expected 'Resolved subagent' info line in output, got: %s", out)
 	}
 	if backend.initReqs[0].ExternalID != rootID {
 		t.Errorf("external_id = %q, want root %q (subagent should be transparently rewritten)",
@@ -379,14 +360,14 @@ func TestSaveCodex_MultipleSessionsArgs_Independent(t *testing.T) {
 	server := httptest.NewServer(backend)
 	defer server.Close()
 
-	fixture, _ := setupCodexSaveEnv(t, server.URL)
+	fixture := setupCodexSaveEnv(t, server.URL)
 
 	root1 := uuidStr(t, 0x40)
 	root2 := uuidStr(t, 0x50)
 	fixture.AddRoot(root1).WithSessionMeta("/a", "gpt-5").WithUserMessage("a")
 	fixture.AddRoot(root2).WithSessionMeta("/b", "gpt-5").WithUserMessage("b")
 
-	if err := saveSessionsByIDForProvider("codex", []string{root1, root2}); err != nil {
+	if err := saveSessionsForProvider(provider.Codex{}, []string{root1, root2}); err != nil {
 		t.Fatalf("save: %v", err)
 	}
 	if backend.initCount != 2 {
@@ -409,14 +390,14 @@ func TestSaveCodex_OneSessionFails_OthersContinue(t *testing.T) {
 	server := httptest.NewServer(backend)
 	defer server.Close()
 
-	fixture, _ := setupCodexSaveEnv(t, server.URL)
+	fixture := setupCodexSaveEnv(t, server.URL)
 
 	// Only one valid session; the other arg is an unknown UUID.
 	rootID := uuidStr(t, 0x60)
 	fixture.AddRoot(rootID).WithSessionMeta("/work", "gpt-5").WithUserMessage("ok")
 
 	unknown := "ffffffff-ffff-ffff-ffff-ffffffffffff"
-	if err := saveSessionsByIDForProvider("codex", []string{unknown, rootID}); err != nil {
+	if err := saveSessionsForProvider(provider.Codex{}, []string{unknown, rootID}); err != nil {
 		t.Fatalf("save should not return error on per-session failure: %v", err)
 	}
 	if backend.initCount != 1 {
@@ -429,7 +410,7 @@ func TestSaveCodex_StateDBMissing_FallsBackToSingleRolloutSync_NoCrash(t *testin
 	server := httptest.NewServer(backend)
 	defer server.Close()
 
-	fixture, _ := setupCodexSaveEnv(t, server.URL)
+	fixture := setupCodexSaveEnv(t, server.URL)
 	rootID := uuidStr(t, 0x70)
 	fixture.AddRoot(rootID).WithSessionMeta("/work", "gpt-5").WithUserMessage("lonely root")
 
@@ -442,7 +423,7 @@ func TestSaveCodex_StateDBMissing_FallsBackToSingleRolloutSync_NoCrash(t *testin
 	// branch is exercised on this test's first lookup.
 	provider.ResetStateDBPathCacheForTest()
 
-	if err := saveSessionsByIDForProvider("codex", []string{rootID}); err != nil {
+	if err := saveSessionsForProvider(provider.Codex{}, []string{rootID}); err != nil {
 		t.Fatalf("save should still work with missing state DB: %v", err)
 	}
 	if backend.initCount != 1 {
@@ -454,19 +435,3 @@ func TestSaveCodex_StateDBMissing_FallsBackToSingleRolloutSync_NoCrash(t *testin
 	}
 }
 
-// readAll drains a pipe reader, failing the test on error.
-func readAll(t *testing.T, r *os.File) string {
-	t.Helper()
-	var sb strings.Builder
-	buf := make([]byte, 4096)
-	for {
-		n, err := r.Read(buf)
-		if n > 0 {
-			sb.Write(buf[:n])
-		}
-		if err != nil {
-			break
-		}
-	}
-	return sb.String()
-}

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ConfabulousDev/confab/pkg/discovery"
+	"github.com/ConfabulousDev/confab/pkg/provider"
 )
 
 func TestFormatDuration(t *testing.T) {
@@ -15,46 +15,14 @@ func TestFormatDuration(t *testing.T) {
 		duration time.Duration
 		expected string
 	}{
-		{
-			name:     "seconds",
-			duration: 30 * time.Second,
-			expected: "30s ago",
-		},
-		{
-			name:     "minutes",
-			duration: 5 * time.Minute,
-			expected: "5m ago",
-		},
-		{
-			name:     "hours",
-			duration: 3 * time.Hour,
-			expected: "3h ago",
-		},
-		{
-			name:     "days",
-			duration: 48 * time.Hour,
-			expected: "2d ago",
-		},
-		{
-			name:     "mixed hours and minutes shows just hours",
-			duration: 2*time.Hour + 30*time.Minute,
-			expected: "2h ago",
-		},
-		{
-			name:     "just under a minute",
-			duration: 59 * time.Second,
-			expected: "59s ago",
-		},
-		{
-			name:     "just under an hour",
-			duration: 59 * time.Minute,
-			expected: "59m ago",
-		},
-		{
-			name:     "just under a day",
-			duration: 23 * time.Hour,
-			expected: "23h ago",
-		},
+		{"seconds", 30 * time.Second, "30s ago"},
+		{"minutes", 5 * time.Minute, "5m ago"},
+		{"hours", 3 * time.Hour, "3h ago"},
+		{"days", 48 * time.Hour, "2d ago"},
+		{"mixed hours and minutes shows just hours", 2*time.Hour + 30*time.Minute, "2h ago"},
+		{"just under a minute", 59 * time.Second, "59s ago"},
+		{"just under an hour", 59 * time.Minute, "59m ago"},
+		{"just under a day", 23 * time.Hour, "23h ago"},
 	}
 
 	for _, tt := range tests {
@@ -72,13 +40,13 @@ func TestFormatSessionRow(t *testing.T) {
 
 	tests := []struct {
 		name           string
-		session        discovery.SessionInfo
+		session        provider.SessionInfo
 		wantContainsID string
 		wantTitle      string
 	}{
 		{
 			name: "session with summary",
-			session: discovery.SessionInfo{
+			session: provider.SessionInfo{
 				SessionID: "aaaaaaaa-1111-1111-1111-111111111111",
 				Summary:   "Fix authentication bug",
 				ModTime:   now.Add(-2 * time.Hour),
@@ -88,7 +56,7 @@ func TestFormatSessionRow(t *testing.T) {
 		},
 		{
 			name: "session with first user message only",
-			session: discovery.SessionInfo{
+			session: provider.SessionInfo{
 				SessionID:        "bbbbbbbb-2222-2222-2222-222222222222",
 				FirstUserMessage: "Help me refactor",
 				ModTime:          now.Add(-1 * time.Hour),
@@ -98,7 +66,7 @@ func TestFormatSessionRow(t *testing.T) {
 		},
 		{
 			name: "session with both - summary takes precedence",
-			session: discovery.SessionInfo{
+			session: provider.SessionInfo{
 				SessionID:        "cccccccc-3333-3333-3333-333333333333",
 				Summary:          "The summary",
 				FirstUserMessage: "The user message",
@@ -109,7 +77,7 @@ func TestFormatSessionRow(t *testing.T) {
 		},
 		{
 			name: "session without title",
-			session: discovery.SessionInfo{
+			session: provider.SessionInfo{
 				SessionID: "dddddddd-4444-4444-4444-444444444444",
 				ModTime:   now.Add(-1 * time.Hour),
 			},
@@ -122,20 +90,15 @@ func TestFormatSessionRow(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			id, title, activity := formatSessionRow(tt.session)
 
-			// Check ID is truncated to 8 chars
 			if len(id) != 8 {
 				t.Errorf("Expected ID length 8, got %d (%q)", len(id), id)
 			}
 			if id != tt.wantContainsID {
 				t.Errorf("Expected ID to start with %q, got %q", tt.wantContainsID, id)
 			}
-
-			// Check title
 			if title != tt.wantTitle {
 				t.Errorf("Expected title %q, got %q", tt.wantTitle, title)
 			}
-
-			// Check activity is formatted
 			if activity == "" {
 				t.Error("Expected activity to be non-empty")
 			}
@@ -144,23 +107,15 @@ func TestFormatSessionRow(t *testing.T) {
 }
 
 func TestListSessions_Integration(t *testing.T) {
-	// Create temp directory structure
 	tmpDir := t.TempDir()
+	t.Setenv("CONFAB_CLAUDE_DIR", tmpDir)
 
-	oldEnv := os.Getenv("CONFAB_CLAUDE_DIR")
-	os.Setenv("CONFAB_CLAUDE_DIR", tmpDir)
-	defer os.Setenv("CONFAB_CLAUDE_DIR", oldEnv)
-
-	// Create projects directory with sessions
 	projectsDir := filepath.Join(tmpDir, "projects")
 	project1 := filepath.Join(projectsDir, "test-project")
 	os.MkdirAll(project1, 0755)
 
-	// Create session files with content
-	// Session 1: Summary after user message (valid - this session's summary)
 	session1Content := `{"type":"user","message":{"content":"Fix the auth bug"}}
 {"type":"summary","summary":"Fix auth bug"}`
-	// Session 2: Just a user message (no summary yet)
 	session2Content := `{"type":"user","message":{"content":"Help me refactor"}}`
 
 	session1Path := filepath.Join(project1, "aaaaaaaa-1111-1111-1111-111111111111.jsonl")
@@ -170,18 +125,16 @@ func TestListSessions_Integration(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 	os.WriteFile(session2Path, []byte(session2Content), 0644)
 
-	// Test listing sessions
-	sessions, err := discovery.ScanAllSessions()
+	sessions, err := provider.ClaudeCode{}.ScanSessions()
 	if err != nil {
-		t.Fatalf("ScanAllSessions() error = %v", err)
+		t.Fatalf("ScanSessions() error = %v", err)
 	}
 
 	if len(sessions) != 2 {
 		t.Fatalf("Expected 2 sessions, got %d", len(sessions))
 	}
 
-	// Verify metadata was extracted
-	sessionMap := make(map[string]discovery.SessionInfo)
+	sessionMap := make(map[string]provider.SessionInfo)
 	for _, s := range sessions {
 		sessionMap[s.SessionID] = s
 	}
@@ -204,38 +157,20 @@ func TestListSessions_Integration(t *testing.T) {
 }
 
 func TestListSessions_FilterByDuration(t *testing.T) {
-	// Create temp directory structure
 	tmpDir := t.TempDir()
+	t.Setenv("CONFAB_CLAUDE_DIR", tmpDir)
 
-	oldEnv := os.Getenv("CONFAB_CLAUDE_DIR")
-	os.Setenv("CONFAB_CLAUDE_DIR", tmpDir)
-	defer os.Setenv("CONFAB_CLAUDE_DIR", oldEnv)
-
-	// Create projects directory
 	projectsDir := filepath.Join(tmpDir, "projects")
 	project := filepath.Join(projectsDir, "test-project")
 	os.MkdirAll(project, 0755)
 
-	// Create session files
 	recentSession := filepath.Join(project, "aaaaaaaa-1111-1111-1111-111111111111.jsonl")
 	os.WriteFile(recentSession, []byte(`{"type":"summary","summary":"Recent session"}`), 0644)
 
-	// Get all sessions
-	sessions, err := discovery.ScanAllSessions()
+	filtered, err := scanAndFilterSessions(provider.ClaudeCode{}, "1h")
 	if err != nil {
-		t.Fatalf("ScanAllSessions() error = %v", err)
+		t.Fatalf("scanAndFilterSessions error: %v", err)
 	}
-
-	// Filter by duration (1 hour)
-	cutoff := time.Now().Add(-1 * time.Hour)
-	var filtered []discovery.SessionInfo
-	for _, s := range sessions {
-		if s.ModTime.After(cutoff) {
-			filtered = append(filtered, s)
-		}
-	}
-
-	// The recent session should be included
 	if len(filtered) != 1 {
 		t.Errorf("Expected 1 session within last hour, got %d", len(filtered))
 	}

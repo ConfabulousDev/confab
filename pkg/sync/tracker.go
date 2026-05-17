@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ConfabulousDev/confab/pkg/discovery"
 	"github.com/ConfabulousDev/confab/pkg/git"
 	"github.com/ConfabulousDev/confab/pkg/logger"
 	"github.com/ConfabulousDev/confab/pkg/provider"
@@ -286,8 +285,13 @@ func (t *FileTracker) ReadChunk(file *TrackedFile, r *redactor.Redactor, maxByte
 		if extractMetadata {
 			var msg map[string]interface{}
 			if err := json.Unmarshal([]byte(line), &msg); err == nil {
-				// Extract agent IDs (agents can spawn other agents)
-				for _, agentID := range discovery.ExtractAgentIDsFromMessage(msg) {
+				// Extract agent IDs (agents can spawn other agents).
+				// Agent-ID extraction is Claude-only — Codex tracks
+				// subagents via its SQLite thread tree, not via inline
+				// IDs in rollout JSONL. Hard-binding to ClaudeCode here
+				// is the explicit "this is Claude's transcript schema"
+				// signal; see pkg/provider/claude_agentids.go.
+				for _, agentID := range (provider.ClaudeCode{}).ExtractAgentIDsFromMessage(msg) {
 					if !seenAgents[agentID] {
 						seenAgents[agentID] = true
 						agentIDs = append(agentIDs, agentID)

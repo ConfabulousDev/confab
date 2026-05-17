@@ -1,13 +1,258 @@
-package discovery
+package provider
 
 import (
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
-func TestExtractSessionMetadata(t *testing.T) {
+// mockDirEntry implements os.DirEntry for testing parseClaudeSessionFromPath.
+type mockDirEntry struct {
+	name  string
+	isDir bool
+	info  os.FileInfo
+}
+
+func (m mockDirEntry) Name() string               { return m.name }
+func (m mockDirEntry) IsDir() bool                { return m.isDir }
+func (m mockDirEntry) Type() os.FileMode          { return 0 }
+func (m mockDirEntry) Info() (os.FileInfo, error) { return m.info, nil }
+
+func TestParseClaudeSessionFromPath(t *testing.T) {
+	tmpDir := t.TempDir()
+	projectsDir := filepath.Join(tmpDir, "projects")
+	projectDir := filepath.Join(projectsDir, "test-project")
+	os.MkdirAll(projectDir, 0755)
+
+	tests := []struct {
+		name       string
+		filename   string
+		wantNil    bool
+		wantID     string
+		createFile bool
+	}{
+		{
+			name:       "valid session file",
+			filename:   "12345678-1234-1234-1234-123456789abc.jsonl",
+			wantNil:    false,
+			wantID:     "12345678-1234-1234-1234-123456789abc",
+			createFile: true,
+		},
+		{
+			name:       "agent file should be skipped",
+			filename:   "agent-abcd1234.jsonl",
+			wantNil:    true,
+			createFile: true,
+		},
+		{
+			name:       "non-jsonl file should be skipped",
+			filename:   "readme.txt",
+			wantNil:    true,
+			createFile: true,
+		},
+		{
+			name:       "short uuid should be skipped",
+			filename:   "short-id.jsonl",
+			wantNil:    true,
+			createFile: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			filePath := filepath.Join(projectDir, tt.filename)
+			if tt.createFile {
+				os.WriteFile(filePath, []byte("{}"), 0644)
+			}
+
+			info, _ := os.Stat(filePath)
+			entry := mockDirEntry{
+				name:  tt.filename,
+				isDir: false,
+				info:  info,
+			}
+
+			result := parseClaudeSessionFromPath(filePath, entry, projectsDir)
+
+			if tt.wantNil && result != nil {
+				t.Errorf("expected nil, got %+v", result)
+			}
+			if !tt.wantNil && result == nil {
+				t.Error("expected result, got nil")
+			}
+			if !tt.wantNil && result != nil && result.SessionID != tt.wantID {
+				t.Errorf("expected SessionID %q, got %q", tt.wantID, result.SessionID)
+			}
+		})
+	}
+}
+
+func TestParseClaudeSessionFromPath_Directory(t *testing.T) {
+	tmpDir := t.TempDir()
+	entry := mockDirEntry{name: "somedir", isDir: true}
+
+	result := parseClaudeSessionFromPath(tmpDir, entry, tmpDir)
+	if result != nil {
+		t.Errorf("expected nil for directory, got %+v", result)
+	}
+}
+
+func TestClaudeCodeScanSessions(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv(ClaudeStateDirEnv, tmpDir)
+
+	projectsDir := filepath.Join(tmpDir, "projects")
+	project1 := filepath.Join(projectsDir, "project1")
+	project2 := filepath.Join(projectsDir, "project2")
+	os.MkdirAll(project1, 0755)
+	os.MkdirAll(project2, 0755)
+
+	session1 := "aaaaaaaa-1111-1111-1111-111111111111.jsonl"
+	session2 := "bbbbbbbb-2222-2222-2222-222222222222.jsonl"
+	session3 := "cccccccc-3333-3333-3333-333333333333.jsonl"
+
+	os.WriteFile(filepath.Join(project1, session1), []byte("{}"), 0644)
+	time.Sleep(10 * time.Millisecond)
+	os.WriteFile(filepath.Join(project2, session2), []byte("{}"), 0644)
+	time.Sleep(10 * time.Millisecond)
+	os.WriteFile(filepath.Join(project1, session3), []byte("{}"), 0644)
+
+	// Files that should be ignored
+	os.WriteFile(filepath.Join(project1, "agent-12345678.jsonl"), []byte("{}"), 0644)
+	os.WriteFile(filepath.Join(project1, "readme.txt"), []byte("{}"), 0644)
+
+	sessions, err := ClaudeCode{}.ScanSessions()
+	if err != nil {
+		t.Fatalf("ScanSessions() error = %v", err)
+	}
+	if len(sessions) != 3 {
+		t.Errorf("Expected 3 sessions, got %d", len(sessions))
+	}
+
+	foundIDs := make(map[string]bool)
+	for _, s := range sessions {
+		foundIDs[s.SessionID] = true
+	}
+
+	expectedIDs := []string{
+		"aaaaaaaa-1111-1111-1111-111111111111",
+		"bbbbbbbb-2222-2222-2222-222222222222",
+		"cccccccc-3333-3333-3333-333333333333",
+	}
+	for _, id := range expectedIDs {
+		if !foundIDs[id] {
+			t.Errorf("Expected to find session %s", id)
+		}
+	}
+
+	if len(sessions) >= 2 && sessions[0].ModTime.After(sessions[1].ModTime) {
+		t.Error("Sessions not sorted by mod time (oldest first)")
+	}
+}
+
+func TestClaudeCodeScanSessions_EmptyDirectory(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv(ClaudeStateDirEnv, tmpDir)
+
+	projectsDir := filepath.Join(tmpDir, "projects")
+	os.MkdirAll(projectsDir, 0755)
+
+	sessions, err := ClaudeCode{}.ScanSessions()
+	if err != nil {
+		t.Fatalf("ScanSessions() error = %v", err)
+	}
+	if len(sessions) != 0 {
+		t.Errorf("Expected 0 sessions in empty directory, got %d", len(sessions))
+	}
+}
+
+func TestClaudeCodeScanSessions_NoProjectsDir(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv(ClaudeStateDirEnv, tmpDir)
+
+	sessions, err := ClaudeCode{}.ScanSessions()
+	if err != nil {
+		t.Fatalf("ScanSessions() error = %v", err)
+	}
+	if sessions != nil {
+		t.Errorf("Expected nil for non-existent directory, got %d sessions", len(sessions))
+	}
+}
+
+func TestClaudeCodeFindSessionByID(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv(ClaudeStateDirEnv, tmpDir)
+
+	projectsDir := filepath.Join(tmpDir, "projects")
+	project1 := filepath.Join(projectsDir, "project1")
+	os.MkdirAll(project1, 0755)
+
+	sessionID := "aaaaaaaa-1111-1111-1111-111111111111"
+	sessionFile := sessionID + ".jsonl"
+	sessionPath := filepath.Join(project1, sessionFile)
+	os.WriteFile(sessionPath, []byte("{}"), 0644)
+
+	tests := []struct {
+		name      string
+		searchID  string
+		wantFound bool
+		wantID    string
+	}{
+		{"find by full ID", "aaaaaaaa-1111-1111-1111-111111111111", true, "aaaaaaaa-1111-1111-1111-111111111111"},
+		{"find by 8-char prefix", "aaaaaaaa", true, "aaaaaaaa-1111-1111-1111-111111111111"},
+		{"find by 4-char prefix", "aaaa", true, "aaaaaaaa-1111-1111-1111-111111111111"},
+		{"not found", "nonexistent", false, ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fullID, transcriptPath, err := ClaudeCode{}.FindSessionByID(tt.searchID)
+
+			if tt.wantFound {
+				if err != nil {
+					t.Errorf("Expected to find session, got error: %v", err)
+					return
+				}
+				if fullID != tt.wantID {
+					t.Errorf("Expected ID %s, got %s", tt.wantID, fullID)
+				}
+				if transcriptPath != sessionPath {
+					t.Errorf("Expected path %s, got %s", sessionPath, transcriptPath)
+				}
+			} else {
+				if err == nil {
+					t.Error("Expected error for non-existent session")
+				}
+			}
+		})
+	}
+}
+
+func TestClaudeCodeFindSessionByID_AmbiguousID(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv(ClaudeStateDirEnv, tmpDir)
+
+	projectsDir := filepath.Join(tmpDir, "projects")
+	project1 := filepath.Join(projectsDir, "project1")
+	os.MkdirAll(project1, 0755)
+
+	session1 := "aaaa1111-1111-1111-1111-111111111111.jsonl"
+	session2 := "aaaa2222-2222-2222-2222-222222222222.jsonl"
+	os.WriteFile(filepath.Join(project1, session1), []byte("{}"), 0644)
+	os.WriteFile(filepath.Join(project1, session2), []byte("{}"), 0644)
+
+	_, _, err := ClaudeCode{}.FindSessionByID("aaaa")
+	if err == nil {
+		t.Error("Expected error for ambiguous session ID")
+	}
+	if err != nil && !strings.Contains(err.Error(), "ambiguous") {
+		t.Errorf("Expected 'ambiguous' error, got: %v", err)
+	}
+}
+
+func TestExtractClaudeSessionMetadataFromFile(t *testing.T) {
 	tests := []struct {
 		name                 string
 		content              string
@@ -125,14 +370,13 @@ func TestExtractSessionMetadata(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Create temp file with test content
 			tmpDir := t.TempDir()
 			tmpFile := filepath.Join(tmpDir, "test.jsonl")
 			if err := os.WriteFile(tmpFile, []byte(tt.content), 0644); err != nil {
 				t.Fatalf("failed to write temp file: %v", err)
 			}
 
-			result := ExtractSessionMetadata(tmpFile)
+			result := extractClaudeSessionMetadataFromFile(tmpFile)
 			if result.Summary != tt.expectedSummary {
 				t.Errorf("Summary = %q, want %q", result.Summary, tt.expectedSummary)
 			}
@@ -143,8 +387,8 @@ func TestExtractSessionMetadata(t *testing.T) {
 	}
 }
 
-func TestExtractSessionMetadata_NonexistentFile(t *testing.T) {
-	result := ExtractSessionMetadata("/nonexistent/path/file.jsonl")
+func TestExtractClaudeSessionMetadataFromFile_NonexistentFile(t *testing.T) {
+	result := extractClaudeSessionMetadataFromFile("/nonexistent/path/file.jsonl")
 	if result.Summary != "" || result.FirstUserMessage != "" {
 		t.Errorf("Expected empty result for nonexistent file, got Summary=%q, FirstUserMessage=%q",
 			result.Summary, result.FirstUserMessage)
@@ -246,38 +490,18 @@ func TestSanitizeText(t *testing.T) {
 		input    string
 		expected string
 	}{
-		{
-			name:     "plain text",
-			input:    "Hello world",
-			expected: "Hello world",
-		},
-		{
-			name:     "HTML tags",
-			input:    "<p>Hello</p> <strong>world</strong>",
-			expected: "Hello world",
-		},
-		{
-			name:     "HTML entities",
-			input:    "&lt;div&gt; &amp; &quot;test&quot;",
-			expected: "<div> & \"test\"",
-		},
-		{
-			name:     "whitespace normalization",
-			input:    "  multiple   spaces  ",
-			expected: "multiple spaces",
-		},
-		{
-			name:     "newlines",
-			input:    "line1\nline2\r\nline3",
-			expected: "line1 line2 line3",
-		},
+		{"plain text", "Hello world", "Hello world"},
+		{"HTML tags", "<p>Hello</p> <strong>world</strong>", "Hello world"},
+		{"HTML entities", "&lt;div&gt; &amp; &quot;test&quot;", "<div> & \"test\""},
+		{"whitespace normalization", "  multiple   spaces  ", "multiple spaces"},
+		{"newlines", "line1\nline2\r\nline3", "line1 line2 line3"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := SanitizeText(tt.input)
+			result := sanitizeText(tt.input)
 			if result != tt.expected {
-				t.Errorf("SanitizeText(%q) = %q, want %q", tt.input, result, tt.expected)
+				t.Errorf("sanitizeText(%q) = %q, want %q", tt.input, result, tt.expected)
 			}
 		})
 	}
@@ -290,48 +514,13 @@ func TestTruncateString(t *testing.T) {
 		maxBytes int
 		expected string
 	}{
-		{
-			name:     "no truncation needed",
-			input:    "hello",
-			maxBytes: 10,
-			expected: "hello",
-		},
-		{
-			name:     "exact length",
-			input:    "hello",
-			maxBytes: 5,
-			expected: "hello",
-		},
-		{
-			name:     "truncate ASCII",
-			input:    "hello world",
-			maxBytes: 8,
-			expected: "hello...",
-		},
-		{
-			name:     "truncate at UTF-8 boundary",
-			input:    "hello 世界 world", // 世 is 3 bytes, 界 is 3 bytes
-			maxBytes: 12,                  // 9 bytes content + 3 for "..."
-			expected: "hello 世...",
-		},
-		{
-			name:     "truncate mid-UTF8 removes partial char",
-			input:    "hello 世界", // "hello " = 6 bytes, 世 = 3 bytes
-			maxBytes: 10,           // Would cut in middle of 世, should remove it
-			expected: "hello ...",
-		},
-		{
-			name:     "very small limit",
-			input:    "hello",
-			maxBytes: 3,
-			expected: "...",
-		},
-		{
-			name:     "empty string",
-			input:    "",
-			maxBytes: 10,
-			expected: "",
-		},
+		{"no truncation needed", "hello", 10, "hello"},
+		{"exact length", "hello", 5, "hello"},
+		{"truncate ASCII", "hello world", 8, "hello..."},
+		{"truncate at UTF-8 boundary", "hello 世界 world", 12, "hello 世..."},
+		{"truncate mid-UTF8 removes partial char", "hello 世界", 10, "hello ..."},
+		{"very small limit", "hello", 3, "..."},
+		{"empty string", "", 10, ""},
 	}
 
 	for _, tt := range tests {
@@ -344,8 +533,7 @@ func TestTruncateString(t *testing.T) {
 	}
 }
 
-func TestExtractSessionMetadata_LongContent(t *testing.T) {
-	// Test that long content is truncated to MaxMetadataFieldSize/2
+func TestExtractClaudeSessionMetadataFromFile_LongContent(t *testing.T) {
 	longMessage := strings.Repeat("a", 5000) // 5KB message, above 4KB limit
 	content := `{"type":"user","message":{"content":"` + longMessage + `"}}`
 
@@ -355,8 +543,8 @@ func TestExtractSessionMetadata_LongContent(t *testing.T) {
 		t.Fatalf("failed to write temp file: %v", err)
 	}
 
-	result := ExtractSessionMetadata(tmpFile)
-	expectedLen := MaxMetadataFieldSize / 2 // 4KB
+	result := extractClaudeSessionMetadataFromFile(tmpFile)
+	expectedLen := maxMetadataFieldSize / 2 // 4KB
 	if len(result.FirstUserMessage) != expectedLen {
 		t.Errorf("Expected FirstUserMessage length %d, got %d", expectedLen, len(result.FirstUserMessage))
 	}
@@ -365,7 +553,7 @@ func TestExtractSessionMetadata_LongContent(t *testing.T) {
 	}
 }
 
-func TestExtractMetadataFromLines(t *testing.T) {
+func TestClaudeCodeExtractMetadata(t *testing.T) {
 	tests := []struct {
 		name                 string
 		lines                []string
@@ -500,7 +688,7 @@ func TestExtractMetadataFromLines(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := ExtractMetadataFromLines(tt.lines)
+			result := ClaudeCode{}.ExtractMetadata(tt.lines)
 
 			if result.Summary != tt.expectedSummary {
 				t.Errorf("Summary = %q, want %q", result.Summary, tt.expectedSummary)
@@ -509,7 +697,6 @@ func TestExtractMetadataFromLines(t *testing.T) {
 				t.Errorf("FirstUserMessage = %q, want %q", result.FirstUserMessage, tt.expectedFirstUserMsg)
 			}
 
-			// Check SummaryLinks
 			if len(result.SummaryLinks) != len(tt.expectedSummaryLinks) {
 				t.Errorf("SummaryLinks length = %d, want %d", len(result.SummaryLinks), len(tt.expectedSummaryLinks))
 			} else {
@@ -523,5 +710,13 @@ func TestExtractMetadataFromLines(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestClaudeCodeDefaultCWD(t *testing.T) {
+	got := ClaudeCode{}.DefaultCWD("/path/to/transcript.jsonl")
+	want := "/path/to"
+	if got != want {
+		t.Errorf("DefaultCWD = %q, want %q", got, want)
 	}
 }

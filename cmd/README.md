@@ -20,12 +20,12 @@ CLI command layer built on [Cobra](https://github.com/spf13/cobra). Each file de
 | `logout.go` | Clear stored credentials |
 | `setup.go` | One-command setup: auth + hooks |
 | `status.go` | Show hook and auth status |
-| `list.go` | List local sessions |
-| `list_utils.go` | Duration parsing, session filtering |
-| `save.go` | Manual session upload by ID |
+| `list.go` | List local sessions (dispatches through `provider.Provider.ScanSessions`) |
+| `list_utils.go` | Duration parsing, session filtering — fully provider-agnostic |
+| `save.go` | Manual session upload by ID (dispatches through `provider.Provider.FindSessionByID` + `DefaultCWD`) |
 | `install.go` | Copy binary to `~/.local/bin/` |
 | `update.go` | Check/install updates from GitHub Releases |
-| `til.go` | `confab til` — save a TIL to the backend (invoked by /til skill) |
+| `til.go` | `confab til` — save a TIL to the backend (invoked by /til skill). Accepts `--provider` to pick the daemon-state namespace. |
 | `retro.go` | `confab retro` — fetch session transcript for retrospective (invoked by /retro skill) |
 | `session.go` | Parent command for session subcommands (`confab session <cmd>`) |
 | `session_get_summary.go` | `confab session get-summary` — fetch condensed session transcript from backend |
@@ -126,6 +126,10 @@ This is a cross-cutting change spanning multiple packages:
 **SessionStart routes every firing through `p.WalkUpToRoot`.** Identity for Claude; thread-edge walk for Codex. For Codex, every subagent SessionStart that lands in an already-running root tree becomes a no-op via state-file dedup. `confab save --provider codex <subagent-uuid>` performs the same walk-up so manual saves of any UUID in a tree always sync the whole tree.
 
 **Announcements (`/til`, `/retro` skill auto-install) only run for Claude.** They write to `~/.claude/skills/` and surface Claude-only slash commands; running them on Codex SessionStart would silently install Claude config files for users who never installed Claude Code.
+
+**`list`, `save`, `til` route discovery through the `Provider` interface (CF-398).** Adding a new provider requires only `pkg/provider/<name>.go` + `<name>_discovery.go` — no changes in `cmd/`. The remaining `provider.NameClaudeCode` / `provider.NameCodex` references in `cmd/` are flag defaults (entry-point handling) and a couple of user-facing copy gates in `cmd/list.go` for the Codex-specific "save" hint.
+
+**Hook handlers (`hook_userpromptsubmit.go`, `hook_pretooluse.go`) stay hard-bound to `provider.ClaudeCode{}`.** UserPromptSubmit and PreToolUse are Claude-only hook events; Codex doesn't install them. CF-398 deferred adding a `p.SupportsCommitLinking()` interface gate to a follow-up — see the comments in those files.
 
 **Testable function pattern.** Hook handlers extract core logic into functions that take `io.Reader`/`io.Writer` parameters (e.g., `sessionStartFromReader(r io.Reader, w io.Writer)`). Tests call these directly without needing stdin/stdout. Some functions use overridable function variables (e.g., `spawnDaemonFunc`) for test injection.
 

@@ -7,7 +7,6 @@ import (
 )
 
 func TestGetClaudeStateDir(t *testing.T) {
-	// Save original env
 	originalEnv := os.Getenv(ClaudeStateDirEnv)
 	defer os.Setenv(ClaudeStateDirEnv, originalEnv)
 
@@ -41,7 +40,6 @@ func TestGetClaudeStateDir(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Set env var
 			if tt.envVal == "" {
 				os.Unsetenv(ClaudeStateDirEnv)
 			} else {
@@ -57,66 +55,5 @@ func TestGetClaudeStateDir(t *testing.T) {
 				t.Errorf("GetClaudeStateDir() = %v, want %v", got, tt.want)
 			}
 		})
-	}
-}
-
-func TestGetProjectsDir(t *testing.T) {
-	originalEnv := os.Getenv(ClaudeStateDirEnv)
-	defer os.Setenv(ClaudeStateDirEnv, originalEnv)
-
-	// Test with env var set
-	os.Setenv(ClaudeStateDirEnv, "/tmp/test-claude")
-	got, err := GetProjectsDir()
-	if err != nil {
-		t.Fatalf("GetProjectsDir() error = %v", err)
-	}
-
-	want := "/tmp/test-claude/projects"
-	if got != want {
-		t.Errorf("GetProjectsDir() = %v, want %v", got, want)
-	}
-}
-
-func TestGetClaudeSettingsPath(t *testing.T) {
-	originalEnv := os.Getenv(ClaudeStateDirEnv)
-	defer os.Setenv(ClaudeStateDirEnv, originalEnv)
-
-	// Test with env var set
-	os.Setenv(ClaudeStateDirEnv, "/tmp/test-claude")
-	got, err := GetClaudeSettingsPath()
-	if err != nil {
-		t.Fatalf("GetClaudeSettingsPath() error = %v", err)
-	}
-
-	want := "/tmp/test-claude/settings.json"
-	if got != want {
-		t.Errorf("GetClaudeSettingsPath() = %v, want %v", got, want)
-	}
-}
-
-// TestEndToEndWithCustomDir demonstrates how to use the env var for testing
-func TestEndToEndWithCustomDir(t *testing.T) {
-	originalEnv := os.Getenv(ClaudeStateDirEnv)
-	defer os.Setenv(ClaudeStateDirEnv, originalEnv)
-
-	// Create a temp directory for testing
-	tmpDir := t.TempDir()
-	os.Setenv(ClaudeStateDirEnv, tmpDir)
-
-	// Create test structure
-	projectsDir := filepath.Join(tmpDir, "projects")
-	os.MkdirAll(projectsDir, 0755)
-
-	// Verify paths resolve correctly
-	gotProjects, _ := GetProjectsDir()
-	if gotProjects != projectsDir {
-		t.Errorf("Expected projects dir %s, got %s", projectsDir, gotProjects)
-	}
-
-	// Settings file should be at tmpDir/settings.json
-	gotSettings, _ := GetClaudeSettingsPath()
-	wantSettings := filepath.Join(tmpDir, "settings.json")
-	if gotSettings != wantSettings {
-		t.Errorf("Expected settings path %s, got %s", wantSettings, gotSettings)
 	}
 }

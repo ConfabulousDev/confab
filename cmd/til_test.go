@@ -13,7 +13,9 @@ import (
 	"testing"
 
 	"github.com/ConfabulousDev/confab/pkg/config"
+	"github.com/ConfabulousDev/confab/pkg/daemon"
 	confabhttp "github.com/ConfabulousDev/confab/pkg/http"
+	"github.com/ConfabulousDev/confab/pkg/provider"
 	"github.com/ConfabulousDev/confab/pkg/utils"
 )
 
@@ -269,6 +271,51 @@ func TestReadTailLines_NonexistentFile(t *testing.T) {
 	_, err := readTailLines("/nonexistent/path.jsonl", 100)
 	if err == nil {
 		t.Error("readTailLines() should return error for nonexistent file")
+	}
+}
+
+// TestRunTil_LoadsStateFromCorrectProviderNamespace asserts that the
+// --provider flag routes daemon.LoadStateForProvider to the right
+// namespace. Without the flag, /til was silently Claude-only — even a
+// Codex daemon's state file at ~/.confab/sync/codex/<id>.json would never
+// be read.
+func TestRunTil_LoadsStateFromCorrectProviderNamespace(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	const codexSessionID = "11111111-1111-1111-1111-111111111111"
+	syncDir := filepath.Join(tmpHome, ".confab", "sync", "codex")
+	if err := os.MkdirAll(syncDir, 0o700); err != nil {
+		t.Fatalf("mkdir sync dir: %v", err)
+	}
+	// Write a Codex state file with a backend session ID so runTil reaches
+	// the HTTP step rather than erroring on missing state.
+	state := `{"provider":"codex","external_id":"` + codexSessionID + `","transcript_path":"/tmp/x.jsonl","confab_session_id":"backend-sess-codex"}`
+	if err := os.WriteFile(filepath.Join(syncDir, codexSessionID+".json"), []byte(state), 0o600); err != nil {
+		t.Fatalf("write state: %v", err)
+	}
+
+	// Verify the state file is loaded for the codex namespace.
+	loaded, err := daemon.LoadStateForProvider("codex", codexSessionID)
+	if err != nil {
+		t.Fatalf("LoadStateForProvider: %v", err)
+	}
+	if loaded == nil {
+		t.Fatal("LoadStateForProvider returned nil for codex namespace")
+	}
+	if loaded.ConfabSessionID != "backend-sess-codex" {
+		t.Errorf("ConfabSessionID = %q, want backend-sess-codex", loaded.ConfabSessionID)
+	}
+
+	// Also confirm the same lookup with the claude-code namespace returns
+	// nil — proves the namespaces are distinct and runTil's --provider
+	// flag genuinely picks between them.
+	claudeLoaded, err := daemon.LoadStateForProvider(provider.NameClaudeCode, codexSessionID)
+	if err != nil {
+		t.Fatalf("LoadStateForProvider claude: %v", err)
+	}
+	if claudeLoaded != nil {
+		t.Errorf("claude-code namespace returned non-nil for a codex-only session")
 	}
 }
 

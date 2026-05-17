@@ -29,7 +29,9 @@ func init() {
 }
 
 // handleUserPromptSubmit processes UserPromptSubmit hook events.
-// UserPromptSubmit is Claude-only, so we hard-bind to ClaudeCode here.
+// UserPromptSubmit is Claude-only today (Codex doesn't install this hook
+// event), so we hard-bind to ClaudeCode here. CF-398 deferred adding a
+// p.SupportsCommitLinking() gate to a follow-up.
 func handleUserPromptSubmit(r io.Reader, w io.Writer) error {
 	logger.Info("UserPromptSubmit hook triggered")
 

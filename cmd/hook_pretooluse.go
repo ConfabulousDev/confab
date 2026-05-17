@@ -72,6 +72,9 @@ func handlePreToolUse(r io.Reader, w io.Writer) error {
 		return nil
 	}
 
+	// PreToolUse is Claude-only today (Codex doesn't install this hook event),
+	// so we hard-bind to ClaudeCode here. CF-398 deferred adding a
+	// p.SupportsCommitLinking() gate to a follow-up.
 	hookInput, err := provider.ClaudeCode{}.ReadHookInput(r)
 	if err != nil {
 		logger.Warn("Failed to read hook input: %v", err)

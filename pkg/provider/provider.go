@@ -126,6 +126,28 @@ type Provider interface {
 	// applying. Engine inspects the returned AnnotationResult to flip its
 	// sentFirstUserMessage flag and dispatch any extracted summary links.
 	AnnotateChunk(c ChunkView, sentFirstUserMessage bool, redact func(string) string) AnnotationResult
+
+	// ScanSessions returns the user-initiated sessions discoverable on
+	// disk for this provider, sorted oldest first. Subagent rollouts and
+	// other non-user transcripts are filtered out.
+	ScanSessions() ([]SessionInfo, error)
+
+	// FindSessionByID resolves a full or partial session ID to its full
+	// ID and transcript path. For providers with a thread tree (Codex)
+	// this walks up to the root so the returned (id, path) refer to the
+	// top-most user session — callers that want the unwalked rollout use
+	// provider-specific methods.
+	FindSessionByID(partialID string) (id, transcriptPath string, err error)
+
+	// ExtractMetadata parses summary, first user message, and
+	// (Claude-only) summary links from in-memory transcript lines.
+	// Implementations cap the line count to bound cost.
+	ExtractMetadata(lines []string) SessionMetadata
+
+	// DefaultCWD returns the working directory to record alongside an
+	// upload for this transcript path. Claude derives from the path;
+	// Codex reads session_meta.cwd with a path-dir fallback.
+	DefaultCWD(transcriptPath string) string
 }
 
 var registry = map[string]Provider{

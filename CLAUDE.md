@@ -35,12 +35,11 @@ Confab is a CLI tool that captures Claude Code session transcripts and uploads t
 - **cmd/**: Cobra command handlers (root.go registers all subcommands)
 - **pkg/daemon/**: Background sync daemon with state management and parent process monitoring
 - **pkg/sync/**: Sync engine with client, tracker, and file management (handles incremental uploads)
-- **pkg/discovery/**: Session discovery - scans `~/.claude/projects/` for transcript files
 - **pkg/redactor/**: JSON-aware redaction of sensitive data before upload
 - **pkg/config/**: Configuration (Confab + Claude `settings.json` plumbing) and skill management (`~/.claude/skills/`)
 - **pkg/hookconfig/**: Per-provider hook install/uninstall — edits Claude `~/.claude/settings.json` and Codex `~/.codex/config.toml`. `pkg/provider`'s `InstallHooks` / `UninstallHooks` delegate here.
 - **pkg/http/**: HTTP client with zstd compression, auth, and retry logic
-- **pkg/provider/**: `Provider` interface + Claude Code / Codex implementations. `codex_state.go` reads Codex's local SQLite DB to walk subagent rollouts up to their root. All `cmd/` dispatch routes through this interface.
+- **pkg/provider/**: `Provider` interface + Claude Code / Codex implementations. Owns session discovery (`ScanSessions`, `FindSessionByID`, `ExtractMetadata`, `DefaultCWD`), metadata extraction, Claude agent-ID parsing, hooks, paths, and Codex tree-walking. `claude_discovery.go` walks `~/.claude/projects/`; `codex_discovery.go` scans `~/.codex/sessions/`; `codex_state.go` reads Codex's local SQLite DB to walk subagent rollouts up to their root. All `cmd/` discovery dispatch routes through this interface.
 - **pkg/codextest/**: Reusable Codex SQLite + sessions-tree fixture builder used by tests in `pkg/provider`, `pkg/sync`, `pkg/daemon`, and `cmd`.
 
 ## Backend

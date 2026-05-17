@@ -54,9 +54,9 @@ func TestCodexScanSessionsFiltersSubagents(t *testing.T) {
 	writeCodexRollout(t, sessionsDir, subagentID, `"thread_source":"subagent","cwd":"/work/agent","agent_role":"reviewer"`)
 	writeCodexRollout(t, sessionsDir, memoryID, `"thread_source":"memory_consolidation","cwd":"/work/memory"`)
 
-	sessions, err := Codex{}.ScanSessions()
+	sessions, err := Codex{}.ScanCodexSessions()
 	if err != nil {
-		t.Fatalf("ScanSessions() error = %v", err)
+		t.Fatalf("ScanCodexSessions() error = %v", err)
 	}
 	if len(sessions) != 1 {
 		t.Fatalf("expected 1 top-level user session, got %d", len(sessions))
@@ -84,9 +84,9 @@ func TestCodexFindSessionByIDUsesFilenameBeforeMetadata(t *testing.T) {
 		t.Fatalf("failed to write rollout: %v", err)
 	}
 
-	gotID, gotPath, err := Codex{}.FindSessionByID("44444444")
+	gotID, gotPath, err := Codex{}.FindUserSession("44444444")
 	if err != nil {
-		t.Fatalf("FindSessionByID() error = %v", err)
+		t.Fatalf("FindUserSession() error = %v", err)
 	}
 	if gotID != sessionID {
 		t.Fatalf("id = %q, want %q", gotID, sessionID)

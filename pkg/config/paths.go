@@ -34,20 +34,3 @@ func GetClaudeStateDir() (string, error) {
 	return filepath.Join(home, ".claude"), nil
 }
 
-// GetProjectsDir returns the path to the Claude projects directory.
-func GetProjectsDir() (string, error) {
-	stateDir, err := GetClaudeStateDir()
-	if err != nil {
-		return "", fmt.Errorf("failed to get projects directory: %w", err)
-	}
-	return filepath.Join(stateDir, "projects"), nil
-}
-
-// GetClaudeSettingsPath returns the path to the Claude settings file.
-func GetClaudeSettingsPath() (string, error) {
-	stateDir, err := GetClaudeStateDir()
-	if err != nil {
-		return "", fmt.Errorf("failed to get settings path: %w", err)
-	}
-	return filepath.Join(stateDir, "settings.json"), nil
-}

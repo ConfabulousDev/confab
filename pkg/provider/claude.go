@@ -12,7 +12,6 @@ import (
 	"strings"
 
 	"github.com/ConfabulousDev/confab/pkg/config"
-	"github.com/ConfabulousDev/confab/pkg/discovery"
 	"github.com/ConfabulousDev/confab/pkg/hookconfig"
 	"github.com/ConfabulousDev/confab/pkg/logger"
 	"github.com/ConfabulousDev/confab/pkg/types"
@@ -122,13 +121,13 @@ func (ClaudeCode) DiscoverDescendants(DescendantRegistrar, string) error { retur
 // flag — the discovery helper handles dedup internally and the engine
 // historically does not flip sentFirstUserMessage for Claude. The returned
 // IncludedFirstUserMessage stays false so the engine's flag is untouched.
-func (ClaudeCode) AnnotateChunk(c ChunkView, sentFirstUserMessage bool, redact func(string) string) AnnotationResult {
+func (p ClaudeCode) AnnotateChunk(c ChunkView, _ bool, redact func(string) string) AnnotationResult {
 	if c.FileType() != "transcript" {
 		return AnnotationResult{}
 	}
-	extracted := discovery.ExtractMetadataFromLines(c.Lines())
-	summary := extracted.Summary
-	firstUserMessage := extracted.FirstUserMessage
+	meta := p.ExtractMetadata(c.Lines())
+	summary := meta.Summary
+	firstUserMessage := meta.FirstUserMessage
 	if redact != nil {
 		summary = redact(summary)
 		firstUserMessage = redact(firstUserMessage)
@@ -136,11 +135,13 @@ func (ClaudeCode) AnnotateChunk(c ChunkView, sentFirstUserMessage bool, redact f
 	c.SetSummary(summary)
 	c.SetFirstUserMessage(firstUserMessage)
 
-	links := make([]SummaryLink, len(extracted.SummaryLinks))
-	for i, l := range extracted.SummaryLinks {
-		links[i] = SummaryLink{Summary: l.Summary, LeafUUID: l.LeafUUID}
-	}
-	return AnnotationResult{SummaryLinks: links}
+	return AnnotationResult{SummaryLinks: meta.SummaryLinks}
+}
+
+// DefaultCWD returns filepath.Dir(transcriptPath); Claude has no richer
+// per-session CWD source.
+func (p ClaudeCode) DefaultCWD(transcriptPath string) string {
+	return filepath.Dir(transcriptPath)
 }
 
 // IsHooksInstalled reports whether all four Confab hook bundles for
