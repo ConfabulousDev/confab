@@ -47,12 +47,10 @@ func TestInstallRetroSkill_CreatesParentDirs(t *testing.T) {
 func TestUninstallRetroSkill(t *testing.T) {
 	setupSkillTest(t)
 
-	// Install first
 	if err := InstallRetroSkill(); err != nil {
 		t.Fatalf("InstallRetroSkill() failed: %v", err)
 	}
 
-	// Uninstall
 	if err := UninstallRetroSkill(); err != nil {
 		t.Fatalf("UninstallRetroSkill() failed: %v", err)
 	}
@@ -62,7 +60,6 @@ func TestUninstallRetroSkill(t *testing.T) {
 		t.Error("Skill file still exists after uninstall")
 	}
 
-	// Directory should also be gone
 	dir := filepath.Dir(path)
 	if _, err := os.Stat(dir); !os.IsNotExist(err) {
 		t.Error("Skill directory still exists after uninstall")
@@ -72,7 +69,6 @@ func TestUninstallRetroSkill(t *testing.T) {
 func TestUninstallRetroSkill_NotInstalled(t *testing.T) {
 	setupSkillTest(t)
 
-	// Uninstall when nothing is installed — should not error
 	if err := UninstallRetroSkill(); err != nil {
 		t.Fatalf("UninstallRetroSkill() failed on non-existent skill: %v", err)
 	}
@@ -97,19 +93,17 @@ func TestIsRetroSkillInstalled(t *testing.T) {
 func TestInstallRetroSkill_BackupOnUpdate(t *testing.T) {
 	setupSkillTest(t)
 
-	// Install first
 	if err := InstallRetroSkill(); err != nil {
 		t.Fatalf("InstallRetroSkill() failed: %v", err)
 	}
 
-	// Modify the file
 	path, _ := getRetroSkillPath()
 	oldContent := "user customized content"
 	if err := os.WriteFile(path, []byte(oldContent), 0644); err != nil {
 		t.Fatalf("WriteFile failed: %v", err)
 	}
 
-	// Install again — should back up the modified file before overwriting
+	// Install again — should back up the modified file before overwriting.
 	if err := InstallRetroSkill(); err != nil {
 		t.Fatalf("InstallRetroSkill() failed: %v", err)
 	}

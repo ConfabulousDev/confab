@@ -225,19 +225,9 @@ func (c *Client) DoJSON(method, path string, reqBody, respBody interface{}) erro
 			continue
 		}
 
-		// Check other status codes (truncate body in errors to avoid logging sensitive data)
-		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-			return fmt.Errorf("%w: status %d: %s", ErrUnauthorized, resp.StatusCode, truncateBody(body, 256))
-		}
-		if resp.StatusCode == http.StatusNotFound {
-			return fmt.Errorf("%w: status %d: %s", ErrSessionNotFound, resp.StatusCode, truncateBody(body, 256))
-		}
-		if resp.StatusCode == http.StatusConflict {
-			return fmt.Errorf("%w: status %d: %s", ErrConflict, resp.StatusCode, truncateBody(body, 256))
-		}
 		// Accept any 2xx status code as success
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			return fmt.Errorf("http request failed with status %d: %s", resp.StatusCode, truncateBody(body, 256))
+			return mapStatusToError(resp.StatusCode, truncateBody(body, 256))
 		}
 
 		// Parse response if requested
@@ -317,13 +307,19 @@ func checkStreamResponseStatus(resp *http.Response) error {
 	// Read a snippet of the body for error context
 	snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 256))
 
-	switch {
-	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
-		return fmt.Errorf("%w: status %d: %s", ErrUnauthorized, resp.StatusCode, string(snippet))
-	case resp.StatusCode == http.StatusNotFound:
-		return fmt.Errorf("%w: status %d: %s", ErrSessionNotFound, resp.StatusCode, string(snippet))
+	return mapStatusToError(resp.StatusCode, string(snippet))
+}
+
+func mapStatusToError(status int, body string) error {
+	switch status {
+	case http.StatusUnauthorized, http.StatusForbidden:
+		return fmt.Errorf("%w: status %d: %s", ErrUnauthorized, status, body)
+	case http.StatusNotFound:
+		return fmt.Errorf("%w: status %d: %s", ErrSessionNotFound, status, body)
+	case http.StatusConflict:
+		return fmt.Errorf("%w: status %d: %s", ErrConflict, status, body)
 	default:
-		return fmt.Errorf("http request failed with status %d: %s", resp.StatusCode, string(snippet))
+		return fmt.Errorf("http request failed with status %d: %s", status, body)
 	}
 }
 

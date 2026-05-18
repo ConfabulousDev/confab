@@ -4,7 +4,7 @@ import (
 	"testing"
 )
 
-func TestClaudeCodeIsValidAgentID(t *testing.T) {
+func TestValidAgentID(t *testing.T) {
 	tests := []struct {
 		input string
 		want  bool
@@ -45,9 +45,9 @@ func TestClaudeCodeIsValidAgentID(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			got := ClaudeCode{}.IsValidAgentID(tt.input)
+			got := isValidAgentID(tt.input)
 			if got != tt.want {
-				t.Errorf("IsValidAgentID(%q) = %v, want %v", tt.input, got, tt.want)
+				t.Errorf("isValidAgentID(%q) = %v, want %v", tt.input, got, tt.want)
 			}
 		})
 	}

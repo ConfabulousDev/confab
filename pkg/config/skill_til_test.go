@@ -53,12 +53,10 @@ func TestInstallTilSkill_CreatesParentDirs(t *testing.T) {
 func TestUninstallTilSkill(t *testing.T) {
 	setupSkillTest(t)
 
-	// Install first
 	if err := InstallTilSkill(); err != nil {
 		t.Fatalf("InstallTilSkill() failed: %v", err)
 	}
 
-	// Uninstall
 	if err := UninstallTilSkill(); err != nil {
 		t.Fatalf("UninstallTilSkill() failed: %v", err)
 	}
@@ -68,7 +66,6 @@ func TestUninstallTilSkill(t *testing.T) {
 		t.Error("Skill file still exists after uninstall")
 	}
 
-	// Directory should also be gone
 	dir := filepath.Dir(path)
 	if _, err := os.Stat(dir); !os.IsNotExist(err) {
 		t.Error("Skill directory still exists after uninstall")
@@ -78,7 +75,6 @@ func TestUninstallTilSkill(t *testing.T) {
 func TestUninstallTilSkill_NotInstalled(t *testing.T) {
 	setupSkillTest(t)
 
-	// Uninstall when nothing is installed — should not error
 	if err := UninstallTilSkill(); err != nil {
 		t.Fatalf("UninstallTilSkill() failed on non-existent skill: %v", err)
 	}
@@ -103,19 +99,17 @@ func TestIsTilSkillInstalled(t *testing.T) {
 func TestInstallTilSkill_BackupOnUpdate(t *testing.T) {
 	setupSkillTest(t)
 
-	// Install first
 	if err := InstallTilSkill(); err != nil {
 		t.Fatalf("InstallTilSkill() failed: %v", err)
 	}
 
-	// Modify the file
 	path, _ := getTilSkillPath()
 	oldContent := "user customized content"
 	if err := os.WriteFile(path, []byte(oldContent), 0644); err != nil {
 		t.Fatalf("WriteFile failed: %v", err)
 	}
 
-	// Install again — should back up the modified file before overwriting
+	// Install again — should back up the modified file before overwriting.
 	if err := InstallTilSkill(); err != nil {
 		t.Fatalf("InstallTilSkill() failed: %v", err)
 	}

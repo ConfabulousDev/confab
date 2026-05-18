@@ -2,8 +2,6 @@
 // ABOUTME: The skill file lives at <provider>/skills/til/SKILL.md and enables the /til slash command.
 package config
 
-import "os"
-
 // tilSkillTemplate is the SKILL.md content installed for the /til slash command.
 const tilSkillTemplate = `---
 name: til
@@ -86,10 +84,9 @@ func UninstallTilSkill() error {
 
 // IsTilSkillInstalled returns true if the /til skill file exists.
 func IsTilSkillInstalled() bool {
-	path, err := getTilSkillPath()
+	claudeDir, err := GetClaudeStateDir()
 	if err != nil {
 		return false
 	}
-	_, err = os.Stat(path)
-	return err == nil
+	return IsBundledSkillInstalled(claudeDir, tilSkillName)
 }

@@ -8,8 +8,8 @@ import (
 	"time"
 )
 
-func TestNewState(t *testing.T) {
-	state := NewState("ext-123", "/path/to/transcript.jsonl", "/work/dir", 0)
+func TestNewStateForProvider(t *testing.T) {
+	state := NewStateForProvider("", "ext-123", "/path/to/transcript.jsonl", "/work/dir", 0)
 
 	if state.ExternalID != "ext-123" {
 		t.Errorf("expected ExternalID 'ext-123', got %q", state.ExternalID)
@@ -31,8 +31,8 @@ func TestNewState(t *testing.T) {
 	}
 }
 
-func TestNewState_WithParentPID(t *testing.T) {
-	state := NewState("ext-456", "/path/to/transcript.jsonl", "/work/dir", 12345)
+func TestNewStateForProvider_WithParentPID(t *testing.T) {
+	state := NewStateForProvider("", "ext-456", "/path/to/transcript.jsonl", "/work/dir", 12345)
 
 	if state.ParentPID != 12345 {
 		t.Errorf("expected ParentPID 12345, got %d", state.ParentPID)
@@ -49,7 +49,7 @@ func TestState_SaveAndLoad(t *testing.T) {
 	defer os.Setenv("HOME", origHome)
 
 	// Create and save state
-	state := NewState("test-external-id", "/path/to/transcript.jsonl", "/work/dir", 0)
+	state := NewStateForProvider("", "test-external-id", "/path/to/transcript.jsonl", "/work/dir", 0)
 
 	if err := state.Save(); err != nil {
 		t.Fatalf("failed to save state: %v", err)
@@ -62,7 +62,7 @@ func TestState_SaveAndLoad(t *testing.T) {
 	}
 
 	// Load state
-	loaded, err := LoadState("test-external-id")
+	loaded, err := LoadStateForProvider("", "test-external-id")
 	if err != nil {
 		t.Fatalf("failed to load state: %v", err)
 	}
@@ -113,7 +113,7 @@ func TestState_LoadClaudeProviderFallsBackToLegacyPath(t *testing.T) {
 	os.Setenv("HOME", tmpDir)
 	defer os.Setenv("HOME", origHome)
 
-	state := NewState("legacy-claude-id", "/path/to/transcript.jsonl", "/work/dir", 0)
+	state := NewStateForProvider("", "legacy-claude-id", "/path/to/transcript.jsonl", "/work/dir", 0)
 	if err := state.Save(); err != nil {
 		t.Fatalf("failed to save legacy state: %v", err)
 	}
@@ -142,7 +142,7 @@ func TestState_LoadClaudeProviderPrefersRunningLegacyOverStaleNamespaced(t *test
 		t.Fatalf("failed to save namespaced state: %v", err)
 	}
 
-	legacy := NewState("same-id", "/legacy", "/cwd", 0)
+	legacy := NewStateForProvider("", "same-id", "/legacy", "/cwd", 0)
 	legacy.PID = os.Getpid()
 	if err := legacy.Save(); err != nil {
 		t.Fatalf("failed to save legacy state: %v", err)
@@ -170,7 +170,7 @@ func TestState_LoadNonExistent(t *testing.T) {
 	defer os.Setenv("HOME", origHome)
 
 	// Load non-existent state
-	state, err := LoadState("non-existent-id")
+	state, err := LoadStateForProvider("", "non-existent-id")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -189,7 +189,7 @@ func TestState_Delete(t *testing.T) {
 	defer os.Setenv("HOME", origHome)
 
 	// Create and save state
-	state := NewState("delete-test-id", "/path", "/cwd", 0)
+	state := NewStateForProvider("", "delete-test-id", "/path", "/cwd", 0)
 	if err := state.Save(); err != nil {
 		t.Fatalf("failed to save state: %v", err)
 	}
@@ -212,7 +212,7 @@ func TestState_Delete(t *testing.T) {
 }
 
 func TestState_IsDaemonRunning(t *testing.T) {
-	state := NewState("ext-id", "/path", "/cwd", 0)
+	state := NewStateForProvider("", "ext-id", "/path", "/cwd", 0)
 
 	// Current process should be running
 	if !state.IsDaemonRunning() {
@@ -269,7 +269,7 @@ func TestIsProcessRunning_WithRealSubprocess(t *testing.T) {
 
 func TestState_IsParentRunning(t *testing.T) {
 	// With parent PID set to current process, should be running
-	state := NewState("ext-id", "/path", "/cwd", os.Getpid())
+	state := NewStateForProvider("", "ext-id", "/path", "/cwd", os.Getpid())
 	if !state.IsParentRunning() {
 		t.Error("expected parent to be running (current process)")
 	}
@@ -303,13 +303,13 @@ func TestListAllStates(t *testing.T) {
 	defer os.Setenv("HOME", origHome)
 
 	// Create a few states
-	state1 := NewState("list-test-1", "/path1", "/cwd1", 0)
+	state1 := NewStateForProvider("", "list-test-1", "/path1", "/cwd1", 0)
 	state1.Save()
 
-	state2 := NewState("list-test-2", "/path2", "/cwd2", 0)
+	state2 := NewStateForProvider("", "list-test-2", "/path2", "/cwd2", 0)
 	state2.Save()
 
-	state3 := NewState("list-test-3", "/path3", "/cwd3", 0)
+	state3 := NewStateForProvider("", "list-test-3", "/path3", "/cwd3", 0)
 	state3.Save()
 
 	// List all states
@@ -354,7 +354,7 @@ func TestListAllStates_EmptyDir(t *testing.T) {
 	}
 }
 
-func TestGetInboxPath(t *testing.T) {
+func TestGetInboxPathForProvider(t *testing.T) {
 	// Create temp directory for test
 	tmpDir := t.TempDir()
 
@@ -363,7 +363,7 @@ func TestGetInboxPath(t *testing.T) {
 	os.Setenv("HOME", tmpDir)
 	defer os.Setenv("HOME", origHome)
 
-	path, err := GetInboxPath("test-session-id")
+	path, err := GetInboxPathForProvider("", "test-session-id")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -374,7 +374,7 @@ func TestGetInboxPath(t *testing.T) {
 	}
 }
 
-func TestNewState_InboxPath(t *testing.T) {
+func TestNewStateForProvider_InboxPath(t *testing.T) {
 	// Create temp directory for test
 	tmpDir := t.TempDir()
 
@@ -383,7 +383,7 @@ func TestNewState_InboxPath(t *testing.T) {
 	os.Setenv("HOME", tmpDir)
 	defer os.Setenv("HOME", origHome)
 
-	state := NewState("inbox-test-id", "/path", "/cwd", 0)
+	state := NewStateForProvider("", "inbox-test-id", "/path", "/cwd", 0)
 
 	expected := filepath.Join(tmpDir, ".confab", "sync", "inbox-test-id.inbox.jsonl")
 	if state.InboxPath != expected {

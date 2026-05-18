@@ -94,12 +94,6 @@ func New(uploadCfg *config.UploadConfig, engineCfg EngineConfig) (*Engine, error
 	}, nil
 }
 
-// NewWithClient creates an engine with a pre-configured client.
-// This is useful for testing with mock clients.
-func NewWithClient(client *Client, r *redactor.Redactor, engineCfg EngineConfig) *Engine {
-	return NewWithBackend(client, r, engineCfg)
-}
-
 // NewWithBackend creates an engine with a preconfigured backend.
 // Test-facing; an invalid Provider name falls back to ClaudeCode to keep
 // historical behavior (default provider when unspecified) and avoid a
@@ -200,12 +194,7 @@ func (e *Engine) Init() error {
 	e.sessionID = resp.SessionID
 	e.initialized = true
 
-	// Initialize tracker from backend state
-	backendState := make(map[string]FileState)
-	for fileName, state := range resp.Files {
-		backendState[fileName] = FileState{LastSyncedLine: state.LastSyncedLine}
-	}
-	e.tracker.InitFromBackendState(backendState)
+	e.applyBackendFiles(resp)
 
 	// Provider-owned root-transcript metadata attachment. Claude is a
 	// no-op; Codex reads session_meta and attaches root rollout metadata
@@ -220,6 +209,14 @@ func (e *Engine) Init() error {
 	logger.Info("Sync session initialized: session_id=%s existing_files=%d", e.sessionID, len(resp.Files))
 
 	return nil
+}
+
+func (e *Engine) applyBackendFiles(resp *InitResponse) {
+	backendState := make(map[string]FileState)
+	for fileName, state := range resp.Files {
+		backendState[fileName] = FileState{LastSyncedLine: state.LastSyncedLine}
+	}
+	e.tracker.InitFromBackendState(backendState)
 }
 
 // IsInitialized returns true if Init() has been called successfully
@@ -427,12 +424,7 @@ func (e *Engine) refreshStateFromBackend() error {
 		return err
 	}
 
-	// Update tracker with backend state
-	backendState := make(map[string]FileState)
-	for fileName, state := range resp.Files {
-		backendState[fileName] = FileState{LastSyncedLine: state.LastSyncedLine}
-	}
-	e.tracker.InitFromBackendState(backendState)
+	e.applyBackendFiles(resp)
 
 	logger.Info("Refreshed sync state from backend: files=%d", len(resp.Files))
 	return nil

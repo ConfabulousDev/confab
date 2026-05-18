@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-
-	"github.com/ConfabulousDev/confab/pkg/logger"
 )
 
 const (
@@ -53,7 +51,8 @@ func InstallBundledSkills(stateDir, providerName string) error {
 }
 
 // InstallBundledSkill writes one shipped skill to stateDir, backing up a
-// customized existing SKILL.md beside the file before overwriting it.
+// customized existing SKILL.md beside the file before overwriting it. If the
+// backup write fails, the install aborts rather than overwriting user content.
 func InstallBundledSkill(stateDir, providerName, name string) error {
 	content, err := bundledSkillTemplate(providerName, name)
 	if err != nil {
@@ -64,7 +63,7 @@ func InstallBundledSkill(stateDir, providerName, name string) error {
 	existing, readErr := os.ReadFile(path)
 	if readErr == nil && string(existing) != content {
 		if writeErr := os.WriteFile(path+".bak", existing, 0o644); writeErr != nil {
-			logger.Debug("Failed to back up existing skill file: %v", writeErr)
+			return writeErr
 		}
 	}
 

@@ -16,9 +16,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/klauspost/compress/zstd"
 	"github.com/ConfabulousDev/confab/pkg/provider"
 	"github.com/ConfabulousDev/confab/pkg/sync"
+	"github.com/klauspost/compress/zstd"
 )
 
 // zstd decoder for decompressing request bodies in tests
@@ -48,7 +48,7 @@ type mockBackend struct {
 	initResponse   *sync.InitResponse
 	initError      bool
 	chunkError     bool
-	chunkStatus    int   // if non-zero, /sync/chunk returns this status code with empty body
+	chunkStatus    int // if non-zero, /sync/chunk returns this status code with empty body
 	requestCount   int32
 	failUntilCount int32 // fail requests until this count is reached
 }
@@ -2471,10 +2471,10 @@ func TestDaemonIntegration_Codex_ShutdownPath_FinalSyncIncludesChildren(t *testi
 	root := shim.addRoot("cccccccc-cccc-cccc-cccc-cccccccccccc", "r")
 
 	d := New(Config{
-		Provider:           "codex",
-		ExternalID:         root.threadUUID,
-		TranscriptPath:     root.rolloutPath,
-		CWD:                "/work",
+		Provider:       "codex",
+		ExternalID:     root.threadUUID,
+		TranscriptPath: root.rolloutPath,
+		CWD:            "/work",
 		// Long interval — we deliberately do NOT want a regular tick to fire
 		// after the late child appears. Final SyncAll on shutdown must be
 		// the one that discovers and uploads the late child.

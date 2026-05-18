@@ -76,11 +76,7 @@ func printSessionTable(p provider.Provider, sessions []provider.SessionInfo) {
 
 // formatSessionRow formats a single session for display.
 func formatSessionRow(session provider.SessionInfo) (id, title, activity string) {
-	if len(session.SessionID) >= 8 {
-		id = session.SessionID[:8]
-	} else {
-		id = session.SessionID
-	}
+	id = utils.TruncateSecret(session.SessionID, 8, 0)
 
 	displayTitle := session.Summary
 	if displayTitle == "" {

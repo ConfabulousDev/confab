@@ -3,14 +3,10 @@
 package cmd
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"text/tabwriter"
 
-	"github.com/ConfabulousDev/confab/pkg/config"
-	confabhttp "github.com/ConfabulousDev/confab/pkg/http"
-	"github.com/ConfabulousDev/confab/pkg/utils"
 	"github.com/spf13/cobra"
 )
 
@@ -35,22 +31,14 @@ func init() {
 }
 
 func runSessionListFiles(id string) error {
-	cfg, err := config.EnsureAuthenticated()
+	client, err := newAuthedClient()
 	if err != nil {
 		return err
 	}
 
-	client, err := confabhttp.NewClient(cfg, utils.DefaultHTTPTimeout)
-	if err != nil {
-		return fmt.Errorf("failed to create HTTP client: %w", err)
-	}
-
 	var filesResp sessionFilesResponse
 	if err := client.Get(buildSessionFilesPath(id), &filesResp); err != nil {
-		if errors.Is(err, confabhttp.ErrSessionNotFound) {
-			return fmt.Errorf("session not found")
-		}
-		return fmt.Errorf("failed to list session files: %w", err)
+		return translateSessionErr(err, "list session files")
 	}
 
 	if len(filesResp.Files) == 0 {

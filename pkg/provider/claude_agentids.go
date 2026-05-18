@@ -62,16 +62,6 @@ func nestedContentBlocks(message map[string]interface{}) []interface{} {
 	return content
 }
 
-// IsValidAgentID checks if a string is a valid agent ID. Agent IDs are 6+
-// characters matching [a-zA-Z0-9_-]+. Covers all observed formats:
-//   - Pure hex: "a0074ac", "a3eaf63159a07953f"
-//   - Compact: "acompact-2aaa241e456ebc94"
-//   - Prompt suggestion: "aprompt_suggestion-ba74af"
-//   - Legacy 8-char hex: "abcd1234"
-func (ClaudeCode) IsValidAgentID(s string) bool {
-	return isValidAgentID(s)
-}
-
 func isValidAgentID(s string) bool {
 	if len(s) < minAgentIDLength {
 		return false

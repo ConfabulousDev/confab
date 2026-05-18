@@ -356,14 +356,14 @@ func TestSpawnDaemonWritesState(t *testing.T) {
 
 		// Create a state as if spawner wrote it
 		expectedPID := 12345
-		state := daemon.NewState(sessionID, transcriptPath, tmpDir, 0)
+		state := daemon.NewStateForProvider("", sessionID, transcriptPath, tmpDir, 0)
 		state.PID = expectedPID
 		if err := state.Save(); err != nil {
 			t.Fatalf("failed to save state: %v", err)
 		}
 
 		// Verify state can be loaded
-		loadedState, err := daemon.LoadState(sessionID)
+		loadedState, err := daemon.LoadStateForProvider("", sessionID)
 		if err != nil {
 			t.Fatalf("failed to load state: %v", err)
 		}

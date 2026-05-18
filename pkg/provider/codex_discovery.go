@@ -28,13 +28,13 @@ type CodexSessionInfo struct {
 	// spawned subagents. The string case is passed through; the object case
 	// is collapsed to its top-level key. Empty when session_meta omits the
 	// field. Matches the backend's 64-char `codex_rollouts.source` column.
-	Source         string
-	ThreadSource   string
-	AgentPath      string
-	AgentRole      string
-	AgentNickname  string
-	ModTime   time.Time
-	SizeBytes int64
+	Source        string
+	ThreadSource  string
+	AgentPath     string
+	AgentRole     string
+	AgentNickname string
+	ModTime       time.Time
+	SizeBytes     int64
 }
 
 type codexRolloutLine struct {
@@ -166,14 +166,6 @@ func (p Codex) firstUserMessageForScan(path string) string {
 	return p.ExtractFirstUserMessageFromLines(lines)
 }
 
-// FindUserSession resolves a full or partial UUID to a user-initiated
-// rollout. Subagent rollouts are rejected. Used by the Codex-only test
-// surface; the cross-provider Provider.FindSessionByID adds a walk-up
-// step so callers can pass subagent UUIDs transparently.
-func (p Codex) FindUserSession(partialID string) (string, string, error) {
-	return p.findRolloutByID(partialID, true)
-}
-
 // FindSessionByID resolves a full or partial UUID to the ROOT thread's
 // UUID and rollout path. If partialID matches a subagent, this walks up
 // to the top-most user session via WalkUpToRoot so callers transparently
@@ -198,17 +190,6 @@ func (p Codex) FindSessionByID(partialID string) (string, string, error) {
 		}
 	}
 	return rootID, rootPath, nil
-}
-
-// FindRolloutByID is like FindUserSession but accepts subagent rollouts as
-// well as user-initiated ones, AND does not walk up. Callers that want a
-// specific subagent rollout (not its root) use this directly.
-//
-// The returned id + path refer to the rollout the partial ID resolved to;
-// they are NOT walked up to the root. Use WalkUpToRoot on the result if
-// you want the top-most user session.
-func (p Codex) FindRolloutByID(partialID string) (string, string, error) {
-	return p.findRolloutByID(partialID, false)
 }
 
 // findRolloutByID is the shared implementation: scans the sessions directory

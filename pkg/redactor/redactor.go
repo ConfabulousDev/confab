@@ -25,11 +25,6 @@ type compiledPattern struct {
 	captureGroup int
 }
 
-// NewRedactor creates a new Redactor from a config
-func NewRedactor(cfg Config) (*Redactor, error) {
-	return compilePatterns(cfg.Patterns)
-}
-
 // NewFromConfig creates a new Redactor from a config.RedactionConfig.
 // Returns nil if cfg is nil or if no patterns are configured.
 // Note: This function does NOT check cfg.Enabled - callers should check that.

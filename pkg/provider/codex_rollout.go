@@ -11,6 +11,14 @@ package provider
 // Lives in pkg/provider so both pkg/sync (wire format) and pkg/provider's
 // Codex implementation can construct one without a package import cycle.
 // pkg/sync re-exports it via `type CodexRolloutMetadata = provider.CodexRolloutMetadata`.
+//
+// Redaction: fields below are sourced from Codex's session_meta (and the
+// SQLite state DB for descendants) and ride on the first chunk unredacted.
+// Rollout *content* is redacted in pkg/sync.FileTracker.ReadChunk; these
+// metadata fields are not. Current fields are short, structured values
+// (path, model name, agent role). Before adding a field that could carry
+// free-text user content, plumb the redactor into Codex.InitTranscript /
+// Codex.DiscoverDescendants rather than extending this struct.
 type CodexRolloutMetadata struct {
 	ThreadUUID       string `json:"thread_uuid"`
 	ParentThreadUUID string `json:"parent_thread_uuid,omitempty"` // "" for roots

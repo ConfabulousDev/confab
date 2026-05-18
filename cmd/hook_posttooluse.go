@@ -79,7 +79,7 @@ func handlePostToolUse(r io.Reader, _ io.Writer) error {
 	}
 
 	// Check for gh pr create
-	if findGHPRCreatePosition(command) >= 0 {
+	if firstMatch(ghPRCreatePattern, command) >= 0 {
 		prURL := extractPRURLFromResponse(hookInput.ToolResponse)
 		if prURL == "" {
 			logger.Debug("No PR URL found in tool response")
@@ -88,21 +88,9 @@ func handlePostToolUse(r io.Reader, _ io.Writer) error {
 		return linkGitHubURL(hookInput.SessionID, prURL)
 	}
 
-	// Check for git commit
-	if findGitCommitPosition(command) >= 0 {
-		// Only link if the command succeeded (no error indicators)
+	if firstMatch(gitCommitPattern, command) >= 0 || firstMatch(gitPushPattern, command) >= 0 {
 		if !isSuccessfulBashResponse(hookInput.ToolResponse) {
-			logger.Debug("Git commit command did not succeed, skipping link")
-			return nil
-		}
-		return linkCommitToSession(hookInput.SessionID, hookInput.CWD)
-	}
-
-	// Check for git push
-	if findGitPushPosition(command) >= 0 {
-		// Only link if the command succeeded (no error indicators)
-		if !isSuccessfulBashResponse(hookInput.ToolResponse) {
-			logger.Debug("Git push command did not succeed, skipping link")
+			logger.Debug("Git command did not succeed, skipping link")
 			return nil
 		}
 		return linkCommitToSession(hookInput.SessionID, hookInput.CWD)

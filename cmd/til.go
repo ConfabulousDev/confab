@@ -10,7 +10,6 @@ import (
 	"os"
 	"strings"
 
-	"github.com/ConfabulousDev/confab/pkg/config"
 	"github.com/ConfabulousDev/confab/pkg/daemon"
 	confabhttp "github.com/ConfabulousDev/confab/pkg/http"
 	"github.com/ConfabulousDev/confab/pkg/logger"
@@ -75,14 +74,9 @@ func init() {
 }
 
 func runTil(p provider.Provider, session, title, summary string, tags []string) error {
-	cfg, err := config.EnsureAuthenticated()
+	client, err := newAuthedClient()
 	if err != nil {
 		return err
-	}
-
-	client, err := confabhttp.NewClient(cfg, utils.DefaultHTTPTimeout)
-	if err != nil {
-		return fmt.Errorf("failed to create HTTP client: %w", err)
 	}
 
 	// Look up daemon state for this session

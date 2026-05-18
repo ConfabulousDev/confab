@@ -2,8 +2,6 @@
 // ABOUTME: The skill file lives at <provider>/skills/retro/SKILL.md and enables the /retro slash command.
 package config
 
-import "os"
-
 // retroSkillTemplate is the SKILL.md content installed for the /retro slash command.
 const retroSkillTemplate = `---
 name: retro
@@ -136,10 +134,9 @@ func UninstallRetroSkill() error {
 
 // IsRetroSkillInstalled returns true if the /retro skill file exists.
 func IsRetroSkillInstalled() bool {
-	path, err := getRetroSkillPath()
+	claudeDir, err := GetClaudeStateDir()
 	if err != nil {
 		return false
 	}
-	_, err = os.Stat(path)
-	return err == nil
+	return IsBundledSkillInstalled(claudeDir, retroSkillName)
 }

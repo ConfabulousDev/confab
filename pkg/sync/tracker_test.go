@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ConfabulousDev/confab/pkg/config"
 	"github.com/ConfabulousDev/confab/pkg/redactor"
 )
 
@@ -293,53 +294,70 @@ func TestFileTracker_ReadChunk_DoesNotExtractFromOtherFields(t *testing.T) {
 }
 
 // TestFileTracker_ReadChunk_AppliesRedactor verifies ReadChunk actually
-// applies the redactor it's given. Every other ReadChunk test passes
-// nil for the redactor, so a regression that silently dropped redaction
-// at the tracker level would not be caught by unit tests.
+// applies the redactor it's given. Every other ReadChunk test passes nil
+// for the redactor, so a silent regression at this call site would slip
+// through. Table-driven across Claude transcript, Codex event_msg, and
+// Codex session_meta shapes to pin the provider-agnostic invariant the
+// backend's Redactions analytics card relies on (CF-445).
 func TestFileTracker_ReadChunk_AppliesRedactor(t *testing.T) {
-	tmpDir := t.TempDir()
-	transcriptPath := filepath.Join(tmpDir, "transcript.jsonl")
+	const secret = "SECRET-VALUE-123"
 
-	// One line with a secret to scrub, one without.
-	content := `{"type":"user","message":"my key is SECRET-VALUE-123"}
-{"type":"assistant","message":"hello"}
-`
-	if err := os.WriteFile(transcriptPath, []byte(content), 0644); err != nil {
-		t.Fatalf("failed to write test file: %v", err)
-	}
-
-	r, err := redactor.NewRedactor(redactor.Config{
-		Patterns: []redactor.Pattern{
+	useDefaults := false
+	r, err := redactor.NewFromConfig(&config.RedactionConfig{
+		UseDefaultPatterns: &useDefaults,
+		Patterns: []config.RedactionPattern{
 			{Name: "test-secret", Pattern: `SECRET-VALUE-\d+`, Type: "test"},
 		},
 	})
 	if err != nil {
-		t.Fatalf("NewRedactor: %v", err)
+		t.Fatalf("NewFromConfig: %v", err)
 	}
 
-	ft := NewFileTracker(transcriptPath)
-	ft.InitFromBackendState(map[string]FileState{
-		"transcript.jsonl": {LastSyncedLine: 0},
-	})
+	cases := []struct {
+		name string
+		line string
+	}{
+		{
+			name: "claude_user_message",
+			line: `{"type":"user","message":"my key is SECRET-VALUE-123"}`,
+		},
+		{
+			name: "codex_event_msg",
+			line: `{"type":"event_msg","payload":{"type":"user_message","message":"my key is SECRET-VALUE-123"}}`,
+		},
+		{
+			name: "codex_session_meta",
+			line: `{"type":"session_meta","payload":{"cwd":"/tmp","model":"x","note":"secret embedded: SECRET-VALUE-123"}}`,
+		},
+	}
 
-	chunk, err := ft.ReadChunk(ft.GetTranscriptFile(), r, DefaultMaxChunkBytes)
-	if err != nil {
-		t.Fatalf("ReadChunk: %v", err)
-	}
-	if chunk == nil {
-		t.Fatal("expected chunk, got nil")
-	}
-	if len(chunk.Lines) != 2 {
-		t.Fatalf("expected 2 lines, got %d", len(chunk.Lines))
-	}
-	for i, line := range chunk.Lines {
-		if strings.Contains(line, "SECRET-VALUE-123") {
-			t.Errorf("line %d still contains unredacted secret: %q", i, line)
-		}
-	}
-	// Positive: line 1 should now contain a redaction marker.
-	if !strings.Contains(chunk.Lines[0], "[REDACTED") {
-		t.Errorf("line 0 missing redaction marker after Redact: %q", chunk.Lines[0])
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			transcriptPath := filepath.Join(t.TempDir(), "transcript.jsonl")
+			if err := os.WriteFile(transcriptPath, []byte(tc.line+"\n"), 0644); err != nil {
+				t.Fatalf("write test file: %v", err)
+			}
+
+			ft := NewFileTracker(transcriptPath)
+			ft.InitFromBackendState(map[string]FileState{
+				"transcript.jsonl": {LastSyncedLine: 0},
+			})
+
+			chunk, err := ft.ReadChunk(ft.GetTranscriptFile(), r, DefaultMaxChunkBytes)
+			if err != nil {
+				t.Fatalf("ReadChunk: %v", err)
+			}
+			if chunk == nil || len(chunk.Lines) != 1 {
+				t.Fatalf("expected 1 line, got chunk=%v", chunk)
+			}
+			got := chunk.Lines[0]
+			if strings.Contains(got, secret) {
+				t.Errorf("redactor did not scrub %q: %q", secret, got)
+			}
+			if !strings.Contains(got, "[REDACTED:TEST]") {
+				t.Errorf("missing redaction marker in %q", got)
+			}
+		})
 	}
 }
 
@@ -1102,8 +1120,8 @@ func TestFileTracker_InitFromBackendState_ReadableAgentFile(t *testing.T) {
 
 	// Backend says it already has the first line of the agent file
 	ft.InitFromBackendState(map[string]FileState{
-		"transcript.jsonl":                      {LastSyncedLine: 1},
-		"agent-a3eaf63159a07953f.jsonl":         {LastSyncedLine: 1},
+		"transcript.jsonl":              {LastSyncedLine: 1},
+		"agent-a3eaf63159a07953f.jsonl": {LastSyncedLine: 1},
 	})
 
 	// Find the agent file in tracked files
