@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/ConfabulousDev/confab/pkg/config"
+	"github.com/ConfabulousDev/confab/pkg/loginit"
 	"github.com/ConfabulousDev/confab/pkg/logger"
 	"github.com/spf13/cobra"
 )
@@ -19,7 +19,7 @@ and analytics.`,
 		// Initialize logger for all commands (except --help which doesn't run this)
 		logger.Init()
 		// Apply log level from config
-		config.ApplyLogLevel()
+		loginit.ApplyLogLevel()
 	},
 	PersistentPostRun: func(cmd *cobra.Command, args []string) {
 		// Close logger after all commands

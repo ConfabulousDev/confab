@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ConfabulousDev/confab/pkg/confabpath"
 	"github.com/ConfabulousDev/confab/pkg/logger"
 	providerpkg "github.com/ConfabulousDev/confab/pkg/provider"
 )
@@ -43,11 +44,7 @@ func NewStateForProvider(provider, externalID, transcriptPath, cwd string, paren
 }
 
 func legacyStatePath(externalID string) (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("failed to get home directory: %w", err)
-	}
-	return filepath.Join(home, ".confab", "sync", externalID+".json"), nil
+	return confabpath.Subpath("sync", externalID+".json")
 }
 
 // GetStatePathForProvider returns the namespaced state file path.
@@ -55,19 +52,11 @@ func GetStatePathForProvider(provider, externalID string) (string, error) {
 	if provider == "" {
 		return legacyStatePath(externalID)
 	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("failed to get home directory: %w", err)
-	}
-	return filepath.Join(home, ".confab", "sync", provider, externalID+".json"), nil
+	return confabpath.Subpath("sync", provider, externalID+".json")
 }
 
 func legacyInboxPath(externalID string) (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("failed to get home directory: %w", err)
-	}
-	return filepath.Join(home, ".confab", "sync", externalID+".inbox.jsonl"), nil
+	return confabpath.Subpath("sync", externalID+".inbox.jsonl")
 }
 
 // GetInboxPathForProvider returns the namespaced inbox file path.
@@ -75,20 +64,12 @@ func GetInboxPathForProvider(provider, externalID string) (string, error) {
 	if provider == "" {
 		return legacyInboxPath(externalID)
 	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("failed to get home directory: %w", err)
-	}
-	return filepath.Join(home, ".confab", "sync", provider, externalID+".inbox.jsonl"), nil
+	return confabpath.Subpath("sync", provider, externalID+".inbox.jsonl")
 }
 
 // GetSyncDir returns the path to the sync state directory
 func GetSyncDir() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("failed to get home directory: %w", err)
-	}
-	return filepath.Join(home, ".confab", "sync"), nil
+	return confabpath.Subpath("sync")
 }
 
 // LoadStateForProvider reads a provider-namespaced state file. Claude Code falls

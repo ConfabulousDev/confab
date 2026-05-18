@@ -7,7 +7,7 @@ Background sync daemon that monitors a provider session transcript (Claude Code 
 | File | Role |
 |------|------|
 | `daemon.go` | `Daemon` struct, `Run` loop, sync cycles, shutdown, inbox I/O, parent monitoring |
-| `state.go` | `State` persistence (`~/.confab/sync/{provider}/{id}.json`, with legacy flat-path fallback), process liveness checks, listing |
+| `state.go` | `State` persistence (`~/.confab/sync/{provider}/{id}.json`, with legacy flat-path fallback), process liveness checks, listing. Path builders are thin wrappers over `pkg/confabpath`. |
 
 ## Lifecycle
 
@@ -104,6 +104,6 @@ Override `shutdownTimeout` (package var) in tests for fast execution. Use `CONFA
 
 ## Dependencies
 
-**Uses:** `pkg/sync`, `pkg/config`, `pkg/http`, `pkg/types`, `pkg/logger`
+**Uses:** `pkg/sync`, `pkg/config`, `pkg/confabpath`, `pkg/http`, `pkg/types`, `pkg/logger`
 
 **Used by:** `cmd/` (spawn, sync start/stop, status)

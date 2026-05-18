@@ -41,6 +41,8 @@ Confab is a CLI tool that captures Claude Code session transcripts and uploads t
 - **pkg/http/**: HTTP client with zstd compression, auth, and retry logic
 - **pkg/provider/**: `Provider` interface + Claude Code / Codex implementations. Owns session discovery (`ScanSessions`, `FindSessionByID`, `ExtractMetadata`, `DefaultCWD`), metadata extraction, Claude agent-ID parsing, hooks, paths, and Codex tree-walking. `claude_discovery.go` walks `~/.claude/projects/`; `codex_discovery.go` scans `~/.codex/sessions/`; `codex_state.go` reads Codex's local SQLite DB to walk subagent rollouts up to their root. All `cmd/` discovery dispatch routes through this interface.
 - **pkg/codextest/**: Reusable Codex SQLite + sessions-tree fixture builder used by tests in `pkg/provider`, `pkg/sync`, `pkg/daemon`, and `cmd`.
+- **pkg/confabpath/**: Stdlib-only leaf with `Dir()` / `Subpath(...)` helpers for `~/.confab`. Used everywhere local state paths get built so the home-dir lookup and join happen identically.
+- **pkg/loginit/**: Startup-time orchestration that reads `log_level` from upload config and applies it to the logger. Lives in its own package so `pkg/config` and `pkg/logger` don't have to depend on each other.
 
 ## Backend
 
