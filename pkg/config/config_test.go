@@ -9,14 +9,6 @@ import (
 	"time"
 )
 
-
-
-
-
-
-
-
-
 // TestEnsureAuthenticated guards the auth gate at upload.go:201. Every
 // command that talks to the backend depends on this; a regression that
 // green-lights an unconfigured install would surface as confusing API
@@ -638,13 +630,13 @@ func TestParseLogLevel(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			level, err := parseLogLevel(tt.input)
+			level, err := ParseLogLevel(tt.input)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("parseLogLevel(%q) error = %v, wantErr %v", tt.input, err, tt.wantErr)
+				t.Errorf("ParseLogLevel(%q) error = %v, wantErr %v", tt.input, err, tt.wantErr)
 				return
 			}
 			if level.String() != tt.wantLevel {
-				t.Errorf("parseLogLevel(%q) = %v, want %v", tt.input, level.String(), tt.wantLevel)
+				t.Errorf("ParseLogLevel(%q) = %v, want %v", tt.input, level.String(), tt.wantLevel)
 			}
 		})
 	}

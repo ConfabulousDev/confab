@@ -10,13 +10,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ConfabulousDev/confab/pkg/confabpath"
 	"gopkg.in/natefinch/lumberjack.v2"
 )
 
 const (
 	// LogDirEnv is the environment variable to override the default log directory
 	LogDirEnv   = "CONFAB_LOG_DIR"
-	logDirName  = ".confab/logs"
 	logFileName = "confab.log"
 	maxSizeMB   = 1     // 1MB per file
 	maxAgeDays  = 14    // Keep 2 weeks
@@ -97,12 +97,12 @@ func Init() error {
 		}
 
 		if logDir == "" {
-			home, homeErr := os.UserHomeDir()
-			if homeErr != nil {
-				err = fmt.Errorf("failed to get home directory: %w", homeErr)
+			dir, dirErr := confabpath.Subpath("logs")
+			if dirErr != nil {
+				err = dirErr
 				return
 			}
-			logDir = filepath.Join(home, logDirName)
+			logDir = dir
 		}
 
 		if mkdirErr := os.MkdirAll(logDir, 0700); mkdirErr != nil {

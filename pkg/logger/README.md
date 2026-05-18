@@ -43,6 +43,6 @@ logger.Get().SetSession(ext, sess)    // Set "[ext=... sess=...]" prefix
 
 ## Dependencies
 
-**Uses:** `gopkg.in/natefinch/lumberjack.v2`
+**Uses:** `gopkg.in/natefinch/lumberjack.v2`, `pkg/confabpath` (default log dir under `~/.confab/logs`)
 
 **Used by:** nearly every package (via `logger.Get()`)

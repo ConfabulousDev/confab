@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ConfabulousDev/confab/pkg/confabpath"
 	"github.com/ConfabulousDev/confab/pkg/config"
 	"github.com/ConfabulousDev/confab/pkg/logger"
 	"github.com/spf13/cobra"
@@ -380,12 +381,12 @@ func getCheckTimePath() string {
 	if testConfigPath := os.Getenv("CONFAB_CONFIG_PATH"); testConfigPath != "" {
 		return filepath.Join(filepath.Dir(testConfigPath), "last_update_check")
 	}
-	homeDir, err := os.UserHomeDir()
+	path, err := confabpath.Subpath("last_update_check")
 	if err != nil {
 		logger.Debug("Failed to get home directory for check time: %v", err)
 		return ""
 	}
-	return filepath.Join(homeDir, ".confab", "last_update_check")
+	return path
 }
 
 func readLastCheckTime() time.Time {

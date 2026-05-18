@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/ConfabulousDev/confab/pkg/confabpath"
 	"github.com/ConfabulousDev/confab/pkg/logger"
 )
 
@@ -114,13 +115,7 @@ func getConfigPath() (string, error) {
 	if testConfigPath := os.Getenv("CONFAB_CONFIG_PATH"); testConfigPath != "" {
 		return testConfigPath, nil
 	}
-
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("failed to get home directory: %w", err)
-	}
-
-	return filepath.Join(home, ".confab", "config.json"), nil
+	return confabpath.Subpath("config.json")
 }
 
 // validateBackendURL checks if the backend URL is valid
@@ -211,8 +206,9 @@ func EnsureAuthenticated() (*UploadConfig, error) {
 	return cfg, nil
 }
 
-// parseLogLevel parses a log level string and returns the corresponding logger.Level
-func parseLogLevel(level string) (logger.Level, error) {
+// ParseLogLevel parses a log level string and returns the corresponding logger.Level.
+// Empty string defaults to INFO. Unknown values return INFO plus an error.
+func ParseLogLevel(level string) (logger.Level, error) {
 	switch strings.ToLower(strings.TrimSpace(level)) {
 	case "debug":
 		return logger.DEBUG, nil
@@ -225,22 +221,6 @@ func parseLogLevel(level string) (logger.Level, error) {
 	default:
 		return logger.INFO, fmt.Errorf("invalid log level %q: must be debug, info, warn, or error", level)
 	}
-}
-
-// ApplyLogLevel reads the log level from config and applies it to the logger
-func ApplyLogLevel() {
-	cfg, err := GetUploadConfig()
-	if err != nil {
-		return // Use default level if config can't be read
-	}
-
-	level, err := parseLogLevel(cfg.LogLevel)
-	if err != nil {
-		logger.Warn("Invalid log_level in config: %v", err)
-		return
-	}
-
-	logger.Get().SetLevel(level)
 }
 
 // GetDefaultRedactionPatterns returns the default high-precision redaction patterns
