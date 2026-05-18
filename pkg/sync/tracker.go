@@ -308,7 +308,11 @@ func (t *FileTracker) ReadChunk(file *TrackedFile, r *redactor.Redactor, maxByte
 			}
 		}
 
-		// Apply redaction if enabled
+		// Apply redaction if enabled. Provider-agnostic: RedactJSONLine
+		// walks any JSON shape, so Claude transcripts, Claude agent JSONL,
+		// and Codex rollouts all flow through the same pattern set. The
+		// backend's per-provider Redactions analytics cards depend on
+		// this being the sole place lines are scrubbed before upload.
 		if r != nil {
 			line = r.RedactJSONLine(line)
 		}

@@ -66,7 +66,7 @@ SyncAll() loop:
 - **`Init()` must be called before `SyncAll()`.** The engine needs a backend session ID and initial sync state.
 - **After upload failure, state must be refreshed from backend** (`refreshStateFromBackend`). This handles the case where the server received and stored data but the client timed out before receiving the response. Without refresh, the client would re-upload duplicate lines. `applyBackendFiles` is the shared path for initial and refreshed backend file state.
 - **Agent discovery uses BFS with cycle detection.** The `knownAgentIDs` set prevents infinite loops when agents reference each other. Max 10 BFS iterations as a safety bound.
-- **Redaction must happen in `ReadChunk()` before lines leave the tracker.** Never upload unredacted content.
+- **Redaction must happen in `ReadChunk()` before lines leave the tracker.** Never upload unredacted content. The same call site covers Claude transcripts, Claude agent files, and Codex rollouts; `redactor.RedactJSONLine` is JSON-shape-agnostic, so no per-provider branching is needed.
 - **Metadata is extracted before redaction, then redacted.** Summaries and first user messages need the original text for meaningful extraction, but must be redacted before upload.
 - **Byte offsets must be maintained accurately.** `ReadChunk` returns `NewOffset` which is the byte position after the last line read. `UpdateAfterSync` stores this for the next read. Incorrect offsets cause duplicate or missing lines.
 - **Directory scan in `DiscoverNewFiles` catches agents from already-synced lines.** After a daemon restart, agent IDs from previously-synced lines are lost from memory. The directory scan recovers them.
