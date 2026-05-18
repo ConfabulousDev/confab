@@ -22,6 +22,11 @@ import (
 // maxLoginResponseSize is the maximum size of auth response bodies.
 const maxLoginResponseSize = 10 * 1024 * 1024 // 10MB
 
+// loginHTTPClient is the HTTP client used for device-code auth requests.
+// A per-request timeout prevents a hanging backend from blocking login
+// indefinitely (the default http.Post has no timeout).
+var loginHTTPClient = &http.Client{Timeout: 30 * time.Second}
+
 // doDeviceLoginFunc is the function used to perform device login.
 // It can be overridden in tests to avoid actual authentication.
 var doDeviceLoginFunc = doDeviceLoginImpl
@@ -277,7 +282,7 @@ func requestDeviceCode(backendURL, keyName string) (*DeviceCodeResponse, error) 
 		return nil, err
 	}
 
-	resp, err := http.Post(backendURL+"/auth/device/code", "application/json", bytes.NewReader(jsonBody))
+	resp, err := loginHTTPClient.Post(backendURL+"/auth/device/code", "application/json", bytes.NewReader(jsonBody))
 	if err != nil {
 		return nil, fmt.Errorf("failed to contact server: %w", err)
 	}
@@ -308,7 +313,7 @@ func pollDeviceToken(backendURL, deviceCode string) (*DeviceTokenResponse, error
 		return nil, err
 	}
 
-	resp, err := http.Post(backendURL+"/auth/device/token", "application/json", bytes.NewReader(jsonBody))
+	resp, err := loginHTTPClient.Post(backendURL+"/auth/device/token", "application/json", bytes.NewReader(jsonBody))
 	if err != nil {
 		return nil, fmt.Errorf("failed to contact server: %w", err)
 	}
