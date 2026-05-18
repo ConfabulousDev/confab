@@ -389,7 +389,11 @@ func (d *Daemon) shutdown(reason string) error {
 
 	// Clean up state and inbox files
 	if d.state != nil {
-		d.cleanupInbox()
+		if d.state.InboxPath != "" {
+			if err := os.Remove(d.state.InboxPath); err != nil && !os.IsNotExist(err) {
+				logger.Warn("Failed to delete inbox file: %v", err)
+			}
+		}
 		if err := d.state.Delete(); err != nil {
 			logger.Warn("Failed to delete state file: %v", err)
 		}
@@ -430,16 +434,6 @@ func (d *Daemon) readInboxEvents() []types.InboxEvent {
 	}
 
 	return events
-}
-
-// cleanupInbox removes the inbox file
-func (d *Daemon) cleanupInbox() {
-	if d.state == nil || d.state.InboxPath == "" {
-		return
-	}
-	if err := os.Remove(d.state.InboxPath); err != nil && !os.IsNotExist(err) {
-		logger.Warn("Failed to delete inbox file: %v", err)
-	}
 }
 
 // StopDaemon sends SIGTERM to a running daemon by external ID.

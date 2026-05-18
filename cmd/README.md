@@ -7,6 +7,7 @@ CLI command layer built on [Cobra](https://github.com/spf13/cobra). Each file de
 | File | Role |
 |------|------|
 | `root.go` | Root command, persistent pre/post hooks, logger init |
+| `helpers.go` | Shared command helpers for authenticated HTTP clients and session API error translation |
 | `hook.go` | Parent command for hook handlers (`confab hook <type>`) |
 | `hook_sessionstart.go` | `session-start` hook: spawns sync daemon. Provider-agnostic — selects via `--provider` flag and routes through `provider.Provider`. |
 | `hook_sessionend.go` | `session-end` hook: stops sync daemon (Claude only; Codex shutdown is parent-PID driven and explicitly rejects this command) |
@@ -130,6 +131,8 @@ This is a cross-cutting change spanning multiple packages:
 **`list`, `save`, `til` route discovery through the `Provider` interface (CF-398).** Adding a new provider requires only `pkg/provider/<name>.go` + `<name>_discovery.go` — no changes in `cmd/`. The remaining `provider.NameClaudeCode` / `provider.NameCodex` references in `cmd/` are flag defaults (entry-point handling) and a couple of user-facing copy gates in `cmd/list.go` for the Codex-specific "save" hint.
 
 **Hook handlers (`hook_userpromptsubmit.go`, `hook_pretooluse.go`) stay hard-bound to `provider.ClaudeCode{}`.** UserPromptSubmit and PreToolUse are Claude-only hook events; Codex doesn't install them. CF-398 deferred adding a `p.SupportsCommitLinking()` interface gate to a follow-up — see the comments in those files.
+
+**Backend session commands share auth/client setup.** `helpers.go` owns the repeated `EnsureAuthenticated` + `pkg/http.NewClient` path and the common "session not found" translation for session fetch/list/download commands. Keep endpoint-specific behavior in the command files, not in the helper.
 
 **Testable function pattern.** Hook handlers extract core logic into functions that take `io.Reader`/`io.Writer` parameters (e.g., `sessionStartFromReader(r io.Reader, w io.Writer)`). Tests call these directly without needing stdin/stdout. Some functions use overridable function variables (e.g., `spawnDaemonFunc`) for test injection.
 

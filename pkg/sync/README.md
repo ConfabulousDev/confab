@@ -64,7 +64,7 @@ SyncAll() loop:
 
 - **Chunks must not exceed 14MB** (`DefaultMaxChunkBytes`). The backend rejects larger payloads. The limit is 14MB not 16MB to leave headroom for JSON encoding overhead.
 - **`Init()` must be called before `SyncAll()`.** The engine needs a backend session ID and initial sync state.
-- **After upload failure, state must be refreshed from backend** (`refreshStateFromBackend`). This handles the case where the server received and stored data but the client timed out before receiving the response. Without refresh, the client would re-upload duplicate lines.
+- **After upload failure, state must be refreshed from backend** (`refreshStateFromBackend`). This handles the case where the server received and stored data but the client timed out before receiving the response. Without refresh, the client would re-upload duplicate lines. `applyBackendFiles` is the shared path for initial and refreshed backend file state.
 - **Agent discovery uses BFS with cycle detection.** The `knownAgentIDs` set prevents infinite loops when agents reference each other. Max 10 BFS iterations as a safety bound.
 - **Redaction must happen in `ReadChunk()` before lines leave the tracker.** Never upload unredacted content.
 - **Metadata is extracted before redaction, then redacted.** Summaries and first user messages need the original text for meaningful extraction, but must be redacted before upload.
@@ -89,7 +89,7 @@ SyncAll() loop:
 go test ./pkg/sync/...
 ```
 
-- **`NewWithClient()`** allows injecting a mock client for unit tests
+- **`NewWithBackend()`** allows injecting a mock backend/client for unit tests
 - **`engine_test.go` / `tracker_test.go`** — unit tests for incremental sync, agent discovery, byte offsets, chunking
 - **`integration_test.go`** — full engine lifecycle with mock HTTP backend: init, multi-cycle sync, agent discovery, error recovery, large files, chunk size limits
 

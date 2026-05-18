@@ -222,4 +222,3 @@ func TestStatus_BackendNotConfigured(t *testing.T) {
 		t.Fatalf("expected unconfigured backend message\noutput:\n%s", output)
 	}
 }
-

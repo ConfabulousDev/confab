@@ -90,10 +90,10 @@ func TestFormatSessionRow(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			id, title, activity := formatSessionRow(tt.session)
 
-			if len(id) != 8 {
-				t.Errorf("Expected ID length 8, got %d (%q)", len(id), id)
+			if len(id) != 11 {
+				t.Errorf("Expected truncated ID length 11, got %d (%q)", len(id), id)
 			}
-			if id != tt.wantContainsID {
+			if id != tt.wantContainsID+"..." {
 				t.Errorf("Expected ID to start with %q, got %q", tt.wantContainsID, id)
 			}
 			if title != tt.wantTitle {

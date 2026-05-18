@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/ConfabulousDev/confab/pkg/daemon"
+	"github.com/ConfabulousDev/confab/pkg/utils"
 	"github.com/spf13/cobra"
 )
 
@@ -89,11 +90,7 @@ func showSyncStatus() error {
 			status = "not running (stale)"
 		}
 
-		sessionPrefix := state.ExternalID
-		if len(sessionPrefix) > 8 {
-			sessionPrefix = sessionPrefix[:8]
-		}
-		fmt.Printf("Session: %s\n", sessionPrefix)
+		fmt.Printf("Session: %s\n", utils.TruncateSecret(state.ExternalID, 8, 0))
 		if state.Provider != "" {
 			fmt.Printf("  Provider: %s\n", state.Provider)
 		}

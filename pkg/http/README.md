@@ -48,7 +48,7 @@ Callers use `errors.Is(err, http.ErrUnauthorized)` to handle specific cases.
 
 ## How to Extend
 
-**Adding a new error type:** Define a sentinel error (`var ErrFoo = errors.New("...")`), add a case in `DoJSON`'s status code switch, and document it above.
+**Adding a new error type:** Define a sentinel error (`var ErrFoo = errors.New("...")`), add a case in `mapStatusToError`, and document it above.
 
 **Changing retry behavior:** Modify `maxRetries`, `initialBackoff`, `maxBackoff`, or `backoffMultiplier` constants. Consider that retry changes affect all API calls.
 

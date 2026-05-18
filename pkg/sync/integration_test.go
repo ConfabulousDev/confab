@@ -35,7 +35,7 @@ func TestEngine_IncrementalSync(t *testing.T) {
 `
 	os.WriteFile(transcriptPath, []byte(transcriptContent), 0644)
 
-	engine := NewWithClient(
+	engine := NewWithBackend(
 		mustNewClient(t, server.URL, tmpDir),
 		nil,
 		EngineConfig{
@@ -83,7 +83,7 @@ func TestEngine_MultipleSyncCycles(t *testing.T) {
 	// Start with initial content
 	os.WriteFile(transcriptPath, []byte(`{"type":"system","line":1}`+"\n"), 0644)
 
-	engine := NewWithClient(
+	engine := NewWithBackend(
 		mustNewClient(t, server.URL, tmpDir),
 		nil,
 		EngineConfig{
@@ -166,7 +166,7 @@ func TestEngine_MultipleAgentFiles(t *testing.T) {
 		os.WriteFile(agentPath, []byte(fmt.Sprintf(`{"agent":"%s","line":1}`+"\n", id)), 0644)
 	}
 
-	engine := NewWithClient(
+	engine := NewWithBackend(
 		mustNewClient(t, server.URL, tmpDir),
 		nil,
 		EngineConfig{
@@ -283,7 +283,7 @@ func TestEngine_BackendRollback(t *testing.T) {
 	os.WriteFile(transcriptPath, []byte(transcriptContent), 0644)
 
 	// First engine: syncs all 6 lines
-	engine1 := NewWithClient(
+	engine1 := NewWithBackend(
 		mustNewClient(t, server.URL, tmpDir),
 		nil,
 		EngineConfig{
@@ -320,7 +320,7 @@ func TestEngine_BackendRollback(t *testing.T) {
 	}
 
 	// Second engine (simulating restart) - backend reports lastSyncedLine=3
-	engine2 := NewWithClient(
+	engine2 := NewWithBackend(
 		mustNewClient(t, server.URL, tmpDir),
 		nil,
 		EngineConfig{
@@ -378,7 +378,7 @@ func TestEngine_BackendHasMoreLines(t *testing.T) {
 	}
 	os.WriteFile(transcriptPath, []byte(strings.Join(lines, "\n")+"\n"), 0644)
 
-	engine := NewWithClient(
+	engine := NewWithBackend(
 		mustNewClient(t, server.URL, tmpDir),
 		nil,
 		EngineConfig{
@@ -422,7 +422,7 @@ func TestEngine_EmptyTranscript(t *testing.T) {
 	// Create empty transcript
 	os.WriteFile(transcriptPath, []byte(""), 0644)
 
-	engine := NewWithClient(
+	engine := NewWithBackend(
 		mustNewClient(t, server.URL, tmpDir),
 		nil,
 		EngineConfig{
@@ -506,7 +506,7 @@ func TestEngine_LargeFile(t *testing.T) {
 	}
 	f.Close()
 
-	engine := NewWithClient(
+	engine := NewWithBackend(
 		mustNewClient(t, server.URL, tmpDir),
 		nil,
 		EngineConfig{
@@ -563,7 +563,7 @@ func TestEngine_RetryAfterReset(t *testing.T) {
 	}
 	client, _ := NewClient(cfg)
 
-	engine := NewWithClient(
+	engine := NewWithBackend(
 		client,
 		nil,
 		EngineConfig{

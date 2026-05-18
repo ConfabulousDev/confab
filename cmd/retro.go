@@ -8,9 +8,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/ConfabulousDev/confab/pkg/config"
-	confabhttp "github.com/ConfabulousDev/confab/pkg/http"
-	"github.com/ConfabulousDev/confab/pkg/utils"
 	"github.com/spf13/cobra"
 )
 
@@ -48,14 +45,9 @@ func init() {
 }
 
 func runRetro(id string, maxChars int, outputDir string) error {
-	cfg, err := config.EnsureAuthenticated()
+	client, err := newAuthedClient()
 	if err != nil {
 		return err
-	}
-
-	client, err := confabhttp.NewClient(cfg, utils.DefaultHTTPTimeout)
-	if err != nil {
-		return fmt.Errorf("failed to create HTTP client: %w", err)
 	}
 
 	raw, pretty, err := fetchCondensedTranscript(client, id, maxChars)

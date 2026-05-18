@@ -194,9 +194,8 @@ func ExtractGitInfoFromTranscript(transcriptPath string) (*GitInfo, error) {
 
 	// If we found git info and a cwd, try to get repo URL from that directory
 	if gitInfo != nil && cwd != "" {
-		// Try to get repo URL if the directory still exists
-		if url, err := gitCommand(cwd, "config", "--get", "remote.origin.url"); err == nil {
-			gitInfo.RepoURL = strings.TrimSpace(url)
+		if url, err := GetRepoURL(cwd); err == nil {
+			gitInfo.RepoURL = url
 		}
 	}
 

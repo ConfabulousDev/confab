@@ -84,9 +84,9 @@ func TestCodexFindSessionByIDUsesFilenameBeforeMetadata(t *testing.T) {
 		t.Fatalf("failed to write rollout: %v", err)
 	}
 
-	gotID, gotPath, err := Codex{}.FindUserSession("44444444")
+	gotID, gotPath, err := (Codex{}).findRolloutByID("44444444", true)
 	if err != nil {
-		t.Fatalf("FindUserSession() error = %v", err)
+		t.Fatalf("findRolloutByID(userOnly=true) error = %v", err)
 	}
 	if gotID != sessionID {
 		t.Fatalf("id = %q, want %q", gotID, sessionID)
@@ -545,10 +545,10 @@ func TestCodexInstallHooksWritesToConfigPath(t *testing.T) {
 	}
 }
 
-// TestCodexFindRolloutByID covers FindRolloutByID (codex_discovery.go:210)
+// TestCodexfindRolloutByIDHelper covers findRolloutByID (codex_discovery.go:210)
 // which was 0% before. Unlike FindUserSession, this accepts subagent
 // rollouts and does NOT walk up to the root.
-func TestCodexFindRolloutByID(t *testing.T) {
+func TestCodexfindRolloutByIDHelper(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv(CodexStateDirEnv, tmpDir)
 
@@ -596,24 +596,24 @@ func TestCodexFindRolloutByID(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gotID, gotPath, err := (Codex{}).FindRolloutByID(tt.partial)
+			gotID, gotPath, err := (Codex{}).findRolloutByID(tt.partial, false)
 			if tt.wantErr != "" {
 				if err == nil {
-					t.Fatalf("FindRolloutByID(%q): got no error, want substring %q", tt.partial, tt.wantErr)
+					t.Fatalf("findRolloutByID(%q): got no error, want substring %q", tt.partial, tt.wantErr)
 				}
 				if !strings.Contains(err.Error(), tt.wantErr) {
-					t.Errorf("FindRolloutByID(%q): error = %q, want substring %q", tt.partial, err, tt.wantErr)
+					t.Errorf("findRolloutByID(%q): error = %q, want substring %q", tt.partial, err, tt.wantErr)
 				}
 				return
 			}
 			if err != nil {
-				t.Fatalf("FindRolloutByID(%q): unexpected error: %v", tt.partial, err)
+				t.Fatalf("findRolloutByID(%q): unexpected error: %v", tt.partial, err)
 			}
 			if gotID != tt.wantID {
-				t.Errorf("FindRolloutByID(%q): id = %q, want %q", tt.partial, gotID, tt.wantID)
+				t.Errorf("findRolloutByID(%q): id = %q, want %q", tt.partial, gotID, tt.wantID)
 			}
 			if !strings.HasSuffix(gotPath, tt.wantID+".jsonl") {
-				t.Errorf("FindRolloutByID(%q): path = %q, want suffix %q.jsonl", tt.partial, gotPath, tt.wantID)
+				t.Errorf("findRolloutByID(%q): path = %q, want suffix %q.jsonl", tt.partial, gotPath, tt.wantID)
 			}
 		})
 	}

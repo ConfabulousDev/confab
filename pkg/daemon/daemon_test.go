@@ -345,7 +345,7 @@ func TestDaemon_ReadInboxEvents(t *testing.T) {
 	// Create a daemon with state
 	d := &Daemon{
 		externalID: "inbox-read-test",
-		state:      NewState("inbox-read-test", "/path", "/cwd", 0),
+		state:      NewStateForProvider("", "inbox-read-test", "/path", "/cwd", 0),
 	}
 
 	// Write some events to inbox
@@ -382,47 +382,13 @@ func TestDaemon_ReadInboxEvents_NoFile(t *testing.T) {
 
 	d := &Daemon{
 		externalID: "no-inbox-test",
-		state:      NewState("no-inbox-test", "/path", "/cwd", 0),
+		state:      NewStateForProvider("", "no-inbox-test", "/path", "/cwd", 0),
 	}
 
 	// Should return nil when inbox doesn't exist
 	events := d.readInboxEvents()
 	if events != nil {
 		t.Errorf("expected nil events when inbox doesn't exist, got %v", events)
-	}
-}
-
-func TestDaemon_CleanupInbox(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	origHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", origHome)
-
-	// Create sync dir
-	syncDir := filepath.Join(tmpDir, ".confab", "sync")
-	os.MkdirAll(syncDir, 0755)
-
-	d := &Daemon{
-		externalID: "cleanup-test",
-		state:      NewState("cleanup-test", "/path", "/cwd", 0),
-	}
-
-	// Create inbox file
-	hookInput := &types.ClaudeHookInput{SessionID: "test"}
-	writeInboxEvent(d.state.InboxPath, "session_end", hookInput)
-
-	// Verify it exists
-	if _, err := os.Stat(d.state.InboxPath); err != nil {
-		t.Fatalf("inbox file not created: %v", err)
-	}
-
-	// Cleanup
-	d.cleanupInbox()
-
-	// Verify it's deleted
-	if _, err := os.Stat(d.state.InboxPath); !os.IsNotExist(err) {
-		t.Error("expected inbox file to be deleted")
 	}
 }
 

@@ -5,14 +5,11 @@ package cmd
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/url"
 	"strconv"
 
-	"github.com/ConfabulousDev/confab/pkg/config"
 	confabhttp "github.com/ConfabulousDev/confab/pkg/http"
-	"github.com/ConfabulousDev/confab/pkg/utils"
 	"github.com/spf13/cobra"
 )
 
@@ -59,14 +56,9 @@ func buildSessionGetSummaryPath(id string, maxChars int) string {
 }
 
 func runSessionGetSummary(id string, maxChars int) error {
-	cfg, err := config.EnsureAuthenticated()
+	client, err := newAuthedClient()
 	if err != nil {
 		return err
-	}
-
-	client, err := confabhttp.NewClient(cfg, utils.DefaultHTTPTimeout)
-	if err != nil {
-		return fmt.Errorf("failed to create HTTP client: %w", err)
 	}
 
 	_, pretty, err := fetchCondensedTranscript(client, id, maxChars)
@@ -86,10 +78,7 @@ func fetchCondensedTranscript(client *confabhttp.Client, id string, maxChars int
 
 	var raw json.RawMessage
 	if err := client.Get(path, &raw); err != nil {
-		if errors.Is(err, confabhttp.ErrSessionNotFound) {
-			return nil, bytes.Buffer{}, fmt.Errorf("session not found")
-		}
-		return nil, bytes.Buffer{}, fmt.Errorf("failed to fetch session: %w", err)
+		return nil, bytes.Buffer{}, translateSessionErr(err, "fetch session")
 	}
 
 	var pretty bytes.Buffer

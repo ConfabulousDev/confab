@@ -48,7 +48,7 @@ func setupTestState(t *testing.T, claudeSessionID, confabSessionID string) func(
 	}
 
 	// Create state with ConfabSessionID
-	state := daemon.NewState(claudeSessionID, "/fake/transcript.jsonl", "/fake/cwd", 0)
+	state := daemon.NewStateForProvider("", claudeSessionID, "/fake/transcript.jsonl", "/fake/cwd", 0)
 	state.ConfabSessionID = confabSessionID
 	if err := state.Save(); err != nil {
 		t.Fatalf("Failed to save test state: %v", err)
@@ -84,11 +84,11 @@ func TestFindGitCommitPosition(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := findGitCommitPosition(tt.command)
+			got := firstMatch(gitCommitPattern, tt.command)
 			if tt.want < 0 && got >= 0 {
-				t.Errorf("findGitCommitPosition(%q) = %d, want not found", tt.command, got)
+				t.Errorf("firstMatch(gitCommitPattern, %q) = %d, want not found", tt.command, got)
 			} else if tt.want >= 0 && got < 0 {
-				t.Errorf("findGitCommitPosition(%q) = not found, want %d", tt.command, tt.want)
+				t.Errorf("firstMatch(gitCommitPattern, %q) = not found, want %d", tt.command, tt.want)
 			}
 		})
 	}
@@ -114,11 +114,11 @@ func TestFindGitPushPosition(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := findGitPushPosition(tt.command)
+			got := firstMatch(gitPushPattern, tt.command)
 			if tt.want < 0 && got >= 0 {
-				t.Errorf("findGitPushPosition(%q) = %d, want not found", tt.command, got)
+				t.Errorf("firstMatch(gitPushPattern, %q) = %d, want not found", tt.command, got)
 			} else if tt.want >= 0 && got < 0 {
-				t.Errorf("findGitPushPosition(%q) = not found, want %d", tt.command, tt.want)
+				t.Errorf("firstMatch(gitPushPattern, %q) = not found, want %d", tt.command, tt.want)
 			}
 		})
 	}
@@ -454,11 +454,11 @@ func TestFindGHPRCreatePosition(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := findGHPRCreatePosition(tt.command)
+			got := firstMatch(ghPRCreatePattern, tt.command)
 			if tt.want < 0 && got >= 0 {
-				t.Errorf("findGHPRCreatePosition(%q) = %d, want not found", tt.command, got)
+				t.Errorf("firstMatch(ghPRCreatePattern, %q) = %d, want not found", tt.command, got)
 			} else if tt.want >= 0 && got < 0 {
-				t.Errorf("findGHPRCreatePosition(%q) = not found, want %d", tt.command, tt.want)
+				t.Errorf("firstMatch(ghPRCreatePattern, %q) = not found, want %d", tt.command, tt.want)
 			}
 		})
 	}
@@ -514,8 +514,8 @@ func TestPositionBasedPrecedence(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			commitPos := findGitCommitPosition(tt.command)
-			prCreatePos := findGHPRCreatePosition(tt.command)
+			commitPos := firstMatch(gitCommitPattern, tt.command)
+			prCreatePos := firstMatch(ghPRCreatePattern, tt.command)
 
 			isCommit := commitPos >= 0 && (prCreatePos < 0 || commitPos < prCreatePos)
 			isPRCreate := prCreatePos >= 0 && (commitPos < 0 || prCreatePos < commitPos)

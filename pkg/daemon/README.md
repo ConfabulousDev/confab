@@ -7,7 +7,7 @@ Background sync daemon that monitors a provider session transcript (Claude Code 
 | File | Role |
 |------|------|
 | `daemon.go` | `Daemon` struct, `Run` loop, sync cycles, shutdown, inbox I/O, parent monitoring |
-| `state.go` | `State` persistence (`~/.confab/sync/{id}.json`), process liveness checks, listing |
+| `state.go` | `State` persistence (`~/.confab/sync/{provider}/{id}.json`, with legacy flat-path fallback), process liveness checks, listing |
 
 ## Lifecycle
 

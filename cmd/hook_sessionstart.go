@@ -12,6 +12,7 @@ import (
 	"github.com/ConfabulousDev/confab/pkg/daemon"
 	"github.com/ConfabulousDev/confab/pkg/logger"
 	"github.com/ConfabulousDev/confab/pkg/provider"
+	"github.com/ConfabulousDev/confab/pkg/utils"
 	"github.com/spf13/cobra"
 )
 
@@ -107,12 +108,8 @@ func sessionStartFromReader(r io.Reader, w io.Writer) error {
 		}
 	}
 
-	sessionPrefix := launch.ExternalID
-	if len(sessionPrefix) > 8 {
-		sessionPrefix = sessionPrefix[:8]
-	}
 	fmt.Fprintf(os.Stderr, "Provider: %s\nSession:  %s\nPath:     %s\n\n",
-		p.Name(), sessionPrefix, launch.TranscriptPath)
+		p.Name(), utils.TruncateSecret(launch.ExternalID, 8, 0), launch.TranscriptPath)
 
 	spawned, err := maybeSpawnDaemon(p, launch)
 	if err != nil {

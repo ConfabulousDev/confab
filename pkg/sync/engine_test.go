@@ -43,16 +43,16 @@ func readRequestBody(r *http.Request) ([]byte, error) {
 
 // mockBackend tracks requests and provides configurable responses
 type mockBackend struct {
-	t                *testing.T
-	initRequests     []InitRequest
-	chunkRequests    []ChunkRequest
-	eventRequests    []EventRequest   // POST /api/v1/sync/event
-	summaryRequests  []summaryRequest // PATCH /api/v1/sessions/{id}/summary
-	initResponse     *InitResponse
-	initError        bool
-	chunkError       bool
-	requestCount     int32
-	failUntilCount   int32 // fail requests until this count is reached
+	t               *testing.T
+	initRequests    []InitRequest
+	chunkRequests   []ChunkRequest
+	eventRequests   []EventRequest   // POST /api/v1/sync/event
+	summaryRequests []summaryRequest // PATCH /api/v1/sessions/{id}/summary
+	initResponse    *InitResponse
+	initError       bool
+	chunkError      bool
+	requestCount    int32
+	failUntilCount  int32 // fail requests until this count is reached
 }
 
 // summaryRequest captures a PATCH to /api/v1/sessions/{externalID}/summary.
@@ -199,7 +199,7 @@ func TestEngine_Init_NewSession(t *testing.T) {
 	// Create transcript
 	os.WriteFile(transcriptPath, []byte(`{"type":"system"}`+"\n"), 0644)
 
-	engine := NewWithClient(
+	engine := NewWithBackend(
 		mustNewClient(t, server.URL, tmpDir),
 		nil,
 		EngineConfig{
@@ -250,7 +250,7 @@ func TestEngine_SendSessionEnd_DispatchesEvent(t *testing.T) {
 	tmpDir, transcriptPath := setupTestEnv(t, server.URL)
 	os.WriteFile(transcriptPath, []byte(`{"type":"system"}`+"\n"), 0644)
 
-	engine := NewWithClient(
+	engine := NewWithBackend(
 		mustNewClient(t, server.URL, tmpDir),
 		nil,
 		EngineConfig{
@@ -309,7 +309,7 @@ func TestEngine_SendSessionEnd_NotInitialized(t *testing.T) {
 	defer server.Close()
 	tmpDir, transcriptPath := setupTestEnv(t, server.URL)
 	os.WriteFile(transcriptPath, []byte(`{"type":"system"}`+"\n"), 0644)
-	engine := NewWithClient(
+	engine := NewWithBackend(
 		mustNewClient(t, server.URL, tmpDir),
 		nil,
 		EngineConfig{ExternalID: "not-init", TranscriptPath: transcriptPath, CWD: tmpDir},
@@ -336,7 +336,7 @@ func TestEngine_Init_RecordsProviderField(t *testing.T) {
 	tmpDir, transcriptPath := setupTestEnv(t, server.URL)
 	os.WriteFile(transcriptPath, []byte(`{"type":"session_meta","payload":{}}`+"\n"), 0644)
 
-	engine := NewWithClient(
+	engine := NewWithBackend(
 		mustNewClient(t, server.URL, tmpDir),
 		nil,
 		EngineConfig{
@@ -377,7 +377,7 @@ func TestEngine_Init_ResumeSession(t *testing.T) {
 	}
 	os.WriteFile(transcriptPath, []byte(content), 0644)
 
-	engine := NewWithClient(
+	engine := NewWithBackend(
 		mustNewClient(t, server.URL, tmpDir),
 		nil,
 		EngineConfig{
@@ -428,7 +428,7 @@ func TestEngine_SyncAll_FirstSync(t *testing.T) {
 `
 	os.WriteFile(transcriptPath, []byte(content), 0644)
 
-	engine := NewWithClient(
+	engine := NewWithBackend(
 		mustNewClient(t, server.URL, tmpDir),
 		nil,
 		EngineConfig{
@@ -497,7 +497,7 @@ func TestEngine_SyncAll_NoChanges(t *testing.T) {
 
 	os.WriteFile(transcriptPath, []byte(`{"type":"system"}`+"\n"), 0644)
 
-	engine := NewWithClient(
+	engine := NewWithBackend(
 		mustNewClient(t, server.URL, tmpDir),
 		nil,
 		EngineConfig{
@@ -546,7 +546,7 @@ func TestEngine_SyncAll_WithAgentDiscovery(t *testing.T) {
 `
 	os.WriteFile(agentPath, []byte(agentContent), 0644)
 
-	engine := NewWithClient(
+	engine := NewWithBackend(
 		mustNewClient(t, server.URL, tmpDir),
 		nil,
 		EngineConfig{
@@ -618,7 +618,7 @@ func TestEngine_SyncAll_WithMetadata(t *testing.T) {
 `
 	os.WriteFile(transcriptPath, []byte(content), 0644)
 
-	engine := NewWithClient(
+	engine := NewWithBackend(
 		mustNewClient(t, server.URL, tmpDir),
 		nil,
 		EngineConfig{
@@ -672,7 +672,7 @@ func TestEngine_SyncAll_WithCodexFirstUserMessage(t *testing.T) {
 `
 	os.WriteFile(transcriptPath, []byte(content), 0644)
 
-	engine := NewWithClient(
+	engine := NewWithBackend(
 		mustNewClient(t, server.URL, tmpDir),
 		nil,
 		EngineConfig{
@@ -717,8 +717,10 @@ func TestEngine_SyncAll_MetadataRedaction(t *testing.T) {
 `
 	os.WriteFile(transcriptPath, []byte(content), 0644)
 
-	r, err := redactor.NewRedactor(redactor.Config{
-		Patterns: []redactor.Pattern{{
+	useDefaults := false
+	r, err := redactor.NewFromConfig(&config.RedactionConfig{
+		UseDefaultPatterns: &useDefaults,
+		Patterns: []config.RedactionPattern{{
 			Name:    "AWS Access Key",
 			Pattern: `AKIA[0-9A-Z]{16}`,
 			Type:    "aws_access_key",
@@ -728,7 +730,7 @@ func TestEngine_SyncAll_MetadataRedaction(t *testing.T) {
 		t.Fatalf("Failed to create redactor: %v", err)
 	}
 
-	engine := NewWithClient(
+	engine := NewWithBackend(
 		mustNewClient(t, server.URL, tmpDir),
 		r,
 		EngineConfig{
@@ -782,7 +784,7 @@ func TestEngine_GetSyncStats(t *testing.T) {
 `
 	os.WriteFile(transcriptPath, []byte(content), 0644)
 
-	engine := NewWithClient(
+	engine := NewWithBackend(
 		mustNewClient(t, server.URL, tmpDir),
 		nil,
 		EngineConfig{
@@ -819,7 +821,7 @@ func TestEngine_Reset(t *testing.T) {
 	tmpDir, transcriptPath := setupTestEnv(t, server.URL)
 	os.WriteFile(transcriptPath, []byte(`{"type":"system"}`+"\n"), 0644)
 
-	engine := NewWithClient(
+	engine := NewWithBackend(
 		mustNewClient(t, server.URL, tmpDir),
 		nil,
 		EngineConfig{
@@ -898,7 +900,7 @@ func TestEngine_SyncAll_TransitiveAgentDiscovery(t *testing.T) {
 `
 	os.WriteFile(agentCPath, []byte(agentCContent), 0644)
 
-	engine := NewWithClient(
+	engine := NewWithBackend(
 		mustNewClient(t, server.URL, tmpDir),
 		nil,
 		EngineConfig{
@@ -975,7 +977,7 @@ func TestEngine_SyncAll_AgentCycleDetection(t *testing.T) {
 `
 	os.WriteFile(agentBPath, []byte(agentBContent), 0644)
 
-	engine := NewWithClient(
+	engine := NewWithBackend(
 		mustNewClient(t, server.URL, tmpDir),
 		nil,
 		EngineConfig{
@@ -1054,7 +1056,7 @@ func TestEngine_SyncAll_MaxIterations(t *testing.T) {
 		os.WriteFile(agentPath, []byte(content), 0644)
 	}
 
-	engine := NewWithClient(
+	engine := NewWithBackend(
 		mustNewClient(t, server.URL, tmpDir),
 		nil,
 		EngineConfig{
@@ -1111,7 +1113,7 @@ func TestEngine_SyncAll_AgentFileAppearsLater(t *testing.T) {
 `
 	os.WriteFile(transcriptPath, []byte(transcriptContent), 0644)
 
-	engine := NewWithClient(
+	engine := NewWithBackend(
 		mustNewClient(t, server.URL, tmpDir),
 		nil,
 		EngineConfig{
@@ -1221,7 +1223,7 @@ func TestEngine_SyncAll_RefreshStateAfterUploadFailure(t *testing.T) {
 	}
 	os.WriteFile(transcriptPath, []byte(content), 0644)
 
-	engine := NewWithClient(
+	engine := NewWithBackend(
 		mustNewClient(t, server.URL, tmpDir),
 		nil,
 		EngineConfig{
@@ -1348,7 +1350,7 @@ func TestEngine_SyncAll_RefreshStateOnContiguityError(t *testing.T) {
 	}
 	os.WriteFile(transcriptPath, []byte(content), 0644)
 
-	engine := NewWithClient(
+	engine := NewWithBackend(
 		mustNewClient(t, server.URL, tmpDir),
 		nil,
 		EngineConfig{
@@ -1431,7 +1433,7 @@ func TestEngine_SyncAll_AuthErrorDuringRefreshPropagated(t *testing.T) {
 	tmpDir, transcriptPath := setupTestEnv(t, server.URL)
 	os.WriteFile(transcriptPath, []byte(`{"line":1}`+"\n"), 0644)
 
-	engine := NewWithClient(
+	engine := NewWithBackend(
 		mustNewClient(t, server.URL, tmpDir),
 		nil,
 		EngineConfig{
@@ -1488,7 +1490,7 @@ func TestEngine_SyncAll_DirScanAfterRestart(t *testing.T) {
 		[]byte(`{"type":"agent","message":"agent 2"}`+"\n"), 0644)
 
 	// --- First engine: syncs everything ---
-	engine1 := NewWithClient(
+	engine1 := NewWithBackend(
 		mustNewClient(t, server.URL, tmpDir),
 		nil,
 		EngineConfig{
@@ -1517,7 +1519,7 @@ func TestEngine_SyncAll_DirScanAfterRestart(t *testing.T) {
 		"agent-acompact-2aaa241e456ebc94.jsonl": {LastSyncedLine: 1},
 	}
 
-	engine2 := NewWithClient(
+	engine2 := NewWithBackend(
 		mustNewClient(t, server.URL, tmpDir),
 		nil,
 		EngineConfig{
@@ -1592,7 +1594,7 @@ func TestEngine_SyncAll_DirScanDiscoversUnknownAgent(t *testing.T) {
 		"transcript.jsonl": {LastSyncedLine: 0},
 	}
 
-	engine := NewWithClient(
+	engine := NewWithBackend(
 		mustNewClient(t, server.URL, tmpDir),
 		nil,
 		EngineConfig{
@@ -1660,7 +1662,7 @@ func TestEngine_SyncAll_MixedAgentIDFormats(t *testing.T) {
 		os.WriteFile(filepath.Join(subagentsDir, name), []byte(content), 0644)
 	}
 
-	engine := NewWithClient(
+	engine := NewWithBackend(
 		mustNewClient(t, server.URL, tmpDir),
 		nil,
 		EngineConfig{
@@ -1741,7 +1743,7 @@ func codexEngineSetup(t *testing.T, mock *mockBackend) (*codextest.Fixture, *Eng
 		WithSessionMeta("/workdir", "gpt-5").
 		WithUserMessage("hello codex")
 
-	engine := NewWithClient(
+	engine := NewWithBackend(
 		mustNewClient(t, server.URL, tmpDir),
 		nil,
 		EngineConfig{
@@ -1996,7 +1998,7 @@ func TestEngine_SyncAll_Claude_DoesNotEmitCodexRolloutMeta(t *testing.T) {
 	tmpDir, transcriptPath := setupTestEnv(t, server.URL)
 	os.WriteFile(transcriptPath, []byte(`{"type":"user","message":"hi"}`+"\n"), 0644)
 
-	engine := NewWithClient(
+	engine := NewWithBackend(
 		mustNewClient(t, server.URL, tmpDir),
 		nil,
 		EngineConfig{

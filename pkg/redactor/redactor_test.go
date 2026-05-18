@@ -9,6 +9,10 @@ import (
 	"github.com/ConfabulousDev/confab/pkg/config"
 )
 
+type Config struct {
+	Patterns []Pattern
+}
+
 // TestRedactSimplePattern tests redacting with a simple pattern (full match)
 func TestRedactSimplePattern(t *testing.T) {
 	config := Config{
@@ -21,7 +25,7 @@ func TestRedactSimplePattern(t *testing.T) {
 		},
 	}
 
-	redactor, err := NewRedactor(config)
+	redactor, err := compilePatterns(config.Patterns)
 	if err != nil {
 		t.Fatalf("Failed to create redactor: %v", err)
 	}
@@ -76,7 +80,7 @@ func TestRedactWithCaptureGroup(t *testing.T) {
 		},
 	}
 
-	redactor, err := NewRedactor(config)
+	redactor, err := compilePatterns(config.Patterns)
 	if err != nil {
 		t.Fatalf("Failed to create redactor: %v", err)
 	}
@@ -152,7 +156,7 @@ func TestRedactCaptureGroup_RepeatedTextInMatch(t *testing.T) {
 				},
 			}
 
-			redactor, err := NewRedactor(config)
+			redactor, err := compilePatterns(config.Patterns)
 			if err != nil {
 				t.Fatalf("Failed to create redactor: %v", err)
 			}
@@ -187,7 +191,7 @@ func TestRedactMultiplePatternTypes(t *testing.T) {
 		},
 	}
 
-	redactor, err := NewRedactor(config)
+	redactor, err := compilePatterns(config.Patterns)
 	if err != nil {
 		t.Fatalf("Failed to create redactor: %v", err)
 	}
@@ -230,7 +234,7 @@ func TestRedactEmptyString(t *testing.T) {
 		},
 	}
 
-	redactor, err := NewRedactor(config)
+	redactor, err := compilePatterns(config.Patterns)
 	if err != nil {
 		t.Fatalf("Failed to create redactor: %v", err)
 	}
@@ -253,7 +257,7 @@ func TestRedactMultilineText(t *testing.T) {
 		},
 	}
 
-	redactor, err := NewRedactor(config)
+	redactor, err := compilePatterns(config.Patterns)
 	if err != nil {
 		t.Fatalf("Failed to create redactor: %v", err)
 	}
@@ -284,7 +288,7 @@ func TestRedactWithInvalidPattern(t *testing.T) {
 		},
 	}
 
-	_, err := NewRedactor(config)
+	_, err := compilePatterns(config.Patterns)
 	if err == nil {
 		t.Error("Expected error when creating redactor with invalid pattern")
 	}
@@ -296,7 +300,7 @@ func TestRedactNoPatterns(t *testing.T) {
 		Patterns: []Pattern{},
 	}
 
-	redactor, err := NewRedactor(config)
+	redactor, err := compilePatterns(config.Patterns)
 	if err != nil {
 		t.Fatalf("Failed to create redactor: %v", err)
 	}
@@ -321,7 +325,7 @@ func TestRedactLargeText(t *testing.T) {
 		},
 	}
 
-	redactor, err := NewRedactor(config)
+	redactor, err := compilePatterns(config.Patterns)
 	if err != nil {
 		t.Fatalf("Failed to create redactor: %v", err)
 	}
@@ -362,7 +366,7 @@ func TestRedactSpecialCharacters(t *testing.T) {
 		},
 	}
 
-	redactor, err := NewRedactor(config)
+	redactor, err := compilePatterns(config.Patterns)
 	if err != nil {
 		t.Fatalf("Failed to create redactor: %v", err)
 	}
@@ -411,7 +415,7 @@ func TestRedactCaseSensitivity(t *testing.T) {
 		},
 	}
 
-	redactor, err := NewRedactor(config)
+	redactor, err := compilePatterns(config.Patterns)
 	if err != nil {
 		t.Fatalf("Failed to create redactor: %v", err)
 	}
@@ -445,8 +449,8 @@ func TestRedactOrderOfPatterns(t *testing.T) {
 		},
 	}
 
-	redactor1, _ := NewRedactor(config1)
-	redactor2, _ := NewRedactor(config2)
+	redactor1, _ := compilePatterns(config1.Patterns)
+	redactor2, _ := compilePatterns(config2.Patterns)
 
 	input := "Text with aaa and bbb"
 
@@ -471,7 +475,7 @@ func TestRedactJSONL(t *testing.T) {
 		},
 	}
 
-	redactor, err := NewRedactor(config)
+	redactor, err := compilePatterns(config.Patterns)
 	if err != nil {
 		t.Fatalf("Failed to create redactor: %v", err)
 	}
@@ -545,7 +549,7 @@ func TestRedactJSONLPreservesValidJSON(t *testing.T) {
 		},
 	}
 
-	redactor, err := NewRedactor(config)
+	redactor, err := compilePatterns(config.Patterns)
 	if err != nil {
 		t.Fatalf("Failed to create redactor: %v", err)
 	}
@@ -581,7 +585,7 @@ func TestRedactJSONLInvalidJSON(t *testing.T) {
 		},
 	}
 
-	redactor, err := NewRedactor(config)
+	redactor, err := compilePatterns(config.Patterns)
 	if err != nil {
 		t.Fatalf("Failed to create redactor: %v", err)
 	}
@@ -608,7 +612,7 @@ func TestRedactJSONLMixedValidInvalid(t *testing.T) {
 		},
 	}
 
-	redactor, err := NewRedactor(config)
+	redactor, err := compilePatterns(config.Patterns)
 	if err != nil {
 		t.Fatalf("Failed to create redactor: %v", err)
 	}
@@ -792,7 +796,7 @@ func TestRedactFieldPattern(t *testing.T) {
 			},
 		}
 
-		redactor, err := NewRedactor(cfg)
+		redactor, err := compilePatterns(cfg.Patterns)
 		if err != nil {
 			t.Fatalf("Failed to create redactor: %v", err)
 		}
@@ -826,7 +830,7 @@ func TestRedactFieldPattern(t *testing.T) {
 			},
 		}
 
-		redactor, err := NewRedactor(cfg)
+		redactor, err := compilePatterns(cfg.Patterns)
 		if err != nil {
 			t.Fatalf("Failed to create redactor: %v", err)
 		}
@@ -865,7 +869,7 @@ func TestRedactFieldPattern(t *testing.T) {
 			},
 		}
 
-		redactor, err := NewRedactor(cfg)
+		redactor, err := compilePatterns(cfg.Patterns)
 		if err != nil {
 			t.Fatalf("Failed to create redactor: %v", err)
 		}
@@ -901,7 +905,7 @@ func TestRedactFieldPattern(t *testing.T) {
 			},
 		}
 
-		redactor, err := NewRedactor(cfg)
+		redactor, err := compilePatterns(cfg.Patterns)
 		if err != nil {
 			t.Fatalf("Failed to create redactor: %v", err)
 		}
@@ -934,7 +938,7 @@ func TestRedactFieldPattern(t *testing.T) {
 			},
 		}
 
-		redactor, err := NewRedactor(cfg)
+		redactor, err := compilePatterns(cfg.Patterns)
 		if err != nil {
 			t.Fatalf("Failed to create redactor: %v", err)
 		}
@@ -978,7 +982,7 @@ func TestRedactFieldPattern(t *testing.T) {
 			},
 		}
 
-		redactor, err := NewRedactor(cfg)
+		redactor, err := compilePatterns(cfg.Patterns)
 		if err != nil {
 			t.Fatalf("Failed to create redactor: %v", err)
 		}
@@ -1019,9 +1023,9 @@ func TestRedactor_UnicodeFieldName(t *testing.T) {
 			},
 		},
 	}
-	r, err := NewRedactor(cfg)
+	r, err := compilePatterns(cfg.Patterns)
 	if err != nil {
-		t.Fatalf("NewRedactor: %v", err)
+		t.Fatalf("compilePatterns: %v", err)
 	}
 
 	cases := []struct {

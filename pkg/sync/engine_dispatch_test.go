@@ -86,7 +86,7 @@ func engineWithStub(t *testing.T) (*Engine, *stubProvider, *mockBackend, string)
 	tmpDir, transcriptPath := setupTestEnv(t, server.URL)
 
 	stub := &stubProvider{}
-	engine := NewWithClient(
+	engine := NewWithBackend(
 		mustNewClient(t, server.URL, tmpDir),
 		nil,
 		EngineConfig{

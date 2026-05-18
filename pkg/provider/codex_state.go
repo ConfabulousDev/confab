@@ -313,28 +313,25 @@ func (p Codex) lookupThreadSource(ctx context.Context, db *sql.DB, threadUUID st
 
 func (p Codex) lookupParent(ctx context.Context, db *sql.DB, childUUID string) (string, bool, error) {
 	const q = `SELECT parent_thread_id FROM thread_spawn_edges WHERE child_thread_id = ? LIMIT 1`
-	var parent string
-	err := db.QueryRowContext(ctx, q, childUUID).Scan(&parent)
+	return queryString(ctx, db, q, childUUID)
+}
+
+func (p Codex) lookupRolloutPath(ctx context.Context, db *sql.DB, threadUUID string) (string, error) {
+	const q = `SELECT rollout_path FROM threads WHERE id = ? LIMIT 1`
+	path, _, err := queryString(ctx, db, q, threadUUID)
+	return path, err
+}
+
+func queryString(ctx context.Context, db *sql.DB, query, arg string) (string, bool, error) {
+	var value string
+	err := db.QueryRowContext(ctx, query, arg).Scan(&value)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", false, nil
 	}
 	if err != nil {
 		return "", false, err
 	}
-	return parent, true, nil
-}
-
-func (p Codex) lookupRolloutPath(ctx context.Context, db *sql.DB, threadUUID string) (string, error) {
-	const q = `SELECT rollout_path FROM threads WHERE id = ? LIMIT 1`
-	var path string
-	err := db.QueryRowContext(ctx, q, threadUUID).Scan(&path)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", nil
-	}
-	if err != nil {
-		return "", err
-	}
-	return path, nil
+	return value, true, nil
 }
 
 // ListSubtree returns every descendant of rootThreadUUID, at any depth, via

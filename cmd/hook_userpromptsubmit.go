@@ -37,7 +37,7 @@ func init() {
 func handleUserPromptSubmit(r io.Reader, w io.Writer) error {
 	logger.Info("UserPromptSubmit hook triggered")
 
-	defer writeUserPromptSubmitResponse(w)
+	defer writeClaudeHookResponse(w, true)
 
 	claude := provider.ClaudeCode{}
 	hookInput, err := claude.ReadHookInput(r)
@@ -65,8 +65,4 @@ func handleUserPromptSubmit(r io.Reader, w io.Writer) error {
 		logger.Info("Spawned daemon from UserPromptSubmit (teleport case)")
 	}
 	return nil
-}
-
-func writeUserPromptSubmitResponse(w io.Writer) {
-	writeClaudeHookResponse(w, true)
 }

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ConfabulousDev/confab/pkg/config"
 	"github.com/ConfabulousDev/confab/pkg/redactor"
 )
 
@@ -308,13 +309,15 @@ func TestFileTracker_ReadChunk_AppliesRedactor(t *testing.T) {
 		t.Fatalf("failed to write test file: %v", err)
 	}
 
-	r, err := redactor.NewRedactor(redactor.Config{
-		Patterns: []redactor.Pattern{
+	useDefaults := false
+	r, err := redactor.NewFromConfig(&config.RedactionConfig{
+		UseDefaultPatterns: &useDefaults,
+		Patterns: []config.RedactionPattern{
 			{Name: "test-secret", Pattern: `SECRET-VALUE-\d+`, Type: "test"},
 		},
 	})
 	if err != nil {
-		t.Fatalf("NewRedactor: %v", err)
+		t.Fatalf("compilePatterns: %v", err)
 	}
 
 	ft := NewFileTracker(transcriptPath)
@@ -1102,8 +1105,8 @@ func TestFileTracker_InitFromBackendState_ReadableAgentFile(t *testing.T) {
 
 	// Backend says it already has the first line of the agent file
 	ft.InitFromBackendState(map[string]FileState{
-		"transcript.jsonl":                      {LastSyncedLine: 1},
-		"agent-a3eaf63159a07953f.jsonl":         {LastSyncedLine: 1},
+		"transcript.jsonl":              {LastSyncedLine: 1},
+		"agent-a3eaf63159a07953f.jsonl": {LastSyncedLine: 1},
 	})
 
 	// Find the agent file in tracked files

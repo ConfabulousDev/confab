@@ -102,8 +102,8 @@ func handlePreToolUse(r io.Reader, w io.Writer) error {
 	// Check if this is a command we care about.
 	// Use match position to determine primary command - earlier match wins.
 	// This handles cases like: git commit -m "mentions gh pr create"
-	commitPos := findGitCommitPosition(command)
-	prCreatePos := findGHPRCreatePosition(command)
+	commitPos := firstMatch(gitCommitPattern, command)
+	prCreatePos := firstMatch(ghPRCreatePattern, command)
 
 	if commitPos < 0 && prCreatePos < 0 {
 		return nil
@@ -131,7 +131,7 @@ func handlePreToolUse(r io.Reader, w io.Writer) error {
 	// Check if session URL is already present
 	if containsSessionURL(command, confabSessionID) {
 		logger.Info("Confab link already present in command")
-		outputAllow(w, "Session URL already present")
+		outputPreToolUseDecision(w, "allow", "Session URL already present")
 		return nil
 	}
 
@@ -145,20 +145,13 @@ func handlePreToolUse(r io.Reader, w io.Writer) error {
 				"IMPORTANT: Copy this line verbatim. The value is a URL, NOT a ticket ID like CF-123.",
 			trailerLine,
 		)
-		outputDeny(w, reason)
+		outputPreToolUseDecision(w, "deny", reason)
 		return nil
 	}
 
 	// Handle gh pr create
 	logger.Info("Requesting Confab link for PR -> session %s", confabSessionID)
-	prLink := formatPRLink(sessionURL)
-	reason := fmt.Sprintf(
-		"✓ Confab is linking this PR to your session. "+
-			"Add this line at the bottom of the PR body (just above the \"Generated with Claude Code\" line, if present):\n\n    %s\n\n"+
-			"IMPORTANT: Copy this line verbatim. The value is a URL, NOT a ticket ID like CF-123.",
-		prLink,
-	)
-	outputDeny(w, reason)
+	outputPreToolUseDecision(w, "deny", formatPRDenyReason(sessionURL))
 	return nil
 }
 
@@ -181,21 +174,14 @@ func handleMCPPRCreate(hookInput *types.ClaudeHookInput, w io.Writer) error {
 	if body, ok := hookInput.ToolInput["body"].(string); ok {
 		if strings.Contains(body, sessionURL) {
 			logger.Info("Confab link already present in MCP PR body")
-			outputAllow(w, "Session URL already present")
+			outputPreToolUseDecision(w, "allow", "Session URL already present")
 			return nil
 		}
 	}
 
 	// Deny and ask Claude to add the link
 	logger.Info("Requesting Confab link for MCP PR -> session %s", confabSessionID)
-	prLink := formatPRLink(sessionURL)
-	reason := fmt.Sprintf(
-		"✓ Confab is linking this PR to your session. "+
-			"Add this line at the bottom of the PR body (just above the \"Generated with Claude Code\" line, if present):\n\n    %s\n\n"+
-			"IMPORTANT: Copy this line verbatim. The value is a URL, NOT a ticket ID like CF-123.",
-		prLink,
-	)
-	outputDeny(w, reason)
+	outputPreToolUseDecision(w, "deny", formatPRDenyReason(sessionURL))
 	return nil
 }
 
@@ -212,27 +198,8 @@ func getConfabSessionID(claudeSessionID string) (string, error) {
 	return state.ConfabSessionID, nil
 }
 
-// findGitCommitPosition returns the position of a git commit command, or -1 if not found
-func findGitCommitPosition(command string) int {
-	loc := gitCommitPattern.FindStringIndex(command)
-	if loc == nil {
-		return -1
-	}
-	return loc[0]
-}
-
-// findGHPRCreatePosition returns the position of a gh pr create command, or -1 if not found
-func findGHPRCreatePosition(command string) int {
-	loc := ghPRCreatePattern.FindStringIndex(command)
-	if loc == nil {
-		return -1
-	}
-	return loc[0]
-}
-
-// findGitPushPosition returns the position of a git push command, or -1 if not found
-func findGitPushPosition(command string) int {
-	loc := gitPushPattern.FindStringIndex(command)
+func firstMatch(re *regexp.Regexp, s string) int {
+	loc := re.FindStringIndex(s)
 	if loc == nil {
 		return -1
 	}
@@ -272,30 +239,24 @@ func formatPRLink(sessionURL string) string {
 	return prLinkPrefix + sessionURL + prLinkSuffix
 }
 
-// outputAllow outputs a PreToolUse response allowing the tool call
-func outputAllow(w io.Writer, reason string) {
-	response := types.ClaudePreToolUseResponse{
-		HookSpecificOutput: &types.ClaudePreToolUseOutput{
-			HookEventName:            "PreToolUse",
-			PermissionDecision:       "allow",
-			PermissionDecisionReason: reason,
-		},
-	}
-	if err := json.NewEncoder(w).Encode(response); err != nil {
-		logger.Debug("Failed to write allow response: %v", err)
-	}
+func formatPRDenyReason(sessionURL string) string {
+	return fmt.Sprintf(
+		"✓ Confab is linking this PR to your session. "+
+			"Add this line at the bottom of the PR body (just above the \"Generated with Claude Code\" line, if present):\n\n    %s\n\n"+
+			"IMPORTANT: Copy this line verbatim. The value is a URL, NOT a ticket ID like CF-123.",
+		formatPRLink(sessionURL),
+	)
 }
 
-// outputDeny outputs a PreToolUse response denying the tool call
-func outputDeny(w io.Writer, reason string) {
+func outputPreToolUseDecision(w io.Writer, decision, reason string) {
 	response := types.ClaudePreToolUseResponse{
 		HookSpecificOutput: &types.ClaudePreToolUseOutput{
 			HookEventName:            "PreToolUse",
-			PermissionDecision:       "deny",
+			PermissionDecision:       decision,
 			PermissionDecisionReason: reason,
 		},
 	}
 	if err := json.NewEncoder(w).Encode(response); err != nil {
-		logger.Debug("Failed to write deny response: %v", err)
+		logger.Debug("Failed to write %s response: %v", decision, err)
 	}
 }

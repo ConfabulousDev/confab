@@ -7,7 +7,7 @@ JSON-aware sensitive data redaction engine. Applies regex patterns to transcript
 | File | Role |
 |------|------|
 | `redactor.go` | Core redaction engine: `Redactor`, `Redact`, `RedactJSONL`, JSON walking |
-| `types.go` | `Config`, `Pattern` type definitions |
+| `types.go` | `Pattern` type definition |
 
 ## Two Pattern Modes
 
@@ -26,7 +26,6 @@ redacted := redactor.Redact(plainText)                // text-only fallback
 ```
 
 - **`NewFromConfig(cfg)`** — Creates redactor from config. Includes default patterns if `use_default_patterns` is true. Returns `nil` if no patterns (callers must nil-check).
-- **`NewRedactor(cfg)`** — Lower-level constructor from redactor's own config type.
 - **`RedactJSONL([]byte)`** — Processes JSONL: parses each line as JSON, recursively walks the structure, redacts string values, re-serializes. Falls back to text-mode `Redact()` for invalid JSON lines.
 - **`Redact(input)`** — Plain text redaction. Only applies value-based patterns (field-based patterns need JSON context).
 

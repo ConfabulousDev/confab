@@ -83,18 +83,13 @@ func (t *FileTracker) InitFromBackendState(backendFiles map[string]FileState) {
 
 	// Add transcript
 	transcriptState := backendFiles[transcriptName]
-	var existingTranscriptRollout *CodexRolloutMetadata
-	if prev, ok := t.files[transcriptName]; ok {
-		existingTranscriptRollout = prev.CodexRollout
-	}
-	t.files[transcriptName] = &TrackedFile{
+	t.files[transcriptName] = t.buildTrackedFromState(TrackedFile{
 		Path:           t.transcriptPath,
 		Name:           transcriptName,
 		Type:           "transcript",
 		LastSyncedLine: transcriptState.LastSyncedLine,
 		ByteOffset:     0, // Will be set on first read
-		CodexRollout:   existingTranscriptRollout,
-	}
+	})
 
 	// Add any other files from backend state (agent files)
 	for fileName, state := range backendFiles {
@@ -102,13 +97,10 @@ func (t *FileTracker) InitFromBackendState(backendFiles map[string]FileState) {
 			continue
 		}
 
-		var existingRollout *CodexRolloutMetadata
-		var existingPath string
+		path := ""
 		if prev, ok := t.files[fileName]; ok {
-			existingRollout = prev.CodexRollout
-			existingPath = prev.Path
+			path = prev.Path
 		}
-		path := existingPath
 		if path == "" {
 			// First time we've seen this file; default to subagents dir.
 			// Codex children, when present in the tracker, already have an
@@ -116,15 +108,21 @@ func (t *FileTracker) InitFromBackendState(backendFiles map[string]FileState) {
 			// only taken for genuinely-new Claude agent files.
 			path = filepath.Join(t.subagentsDir, fileName)
 		}
-		t.files[fileName] = &TrackedFile{
+		t.files[fileName] = t.buildTrackedFromState(TrackedFile{
 			Path:           path,
 			Name:           fileName,
 			Type:           "agent",
 			LastSyncedLine: state.LastSyncedLine,
 			ByteOffset:     0, // Will be set on first read
-			CodexRollout:   existingRollout,
-		}
+		})
 	}
+}
+
+func (t *FileTracker) buildTrackedFromState(next TrackedFile) *TrackedFile {
+	if prev, ok := t.files[next.Name]; ok {
+		next.CodexRollout = prev.CodexRollout
+	}
+	return &next
 }
 
 // SetCodexRollout assigns Codex rollout metadata to this tracked file, used
@@ -472,4 +470,3 @@ func (t *FileTracker) AddCodexRollout(path, fileName string, isRoot bool, meta C
 	t.files[fileName] = tracked
 	return tracked
 }
-
