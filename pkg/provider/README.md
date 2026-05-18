@@ -98,6 +98,7 @@ Methods every provider must implement:
 - `CLIBinaryName()` is the OS binary name (`"claude"`, `"codex"`) — never the canonical provider name. The two diverge for Claude Code (`claude-code` vs `claude`).
 - `Codex.InstallHooks` installs only `SessionStart`. Daemon shutdown is driven by parent-PID liveness, never by Codex `Stop`.
 - `CodexRolloutMetadata` JSON tags are wire-format pins. Existing rows in the backend's `codex_rollouts` table were written against these tags; renaming any field is a backwards-incompatible change. Adding new optional fields (with `omitempty`) is safe.
+- `CodexRolloutMetadata` string fields (cwd, model, agent_*) ride on the first chunk unredacted. Rollout *content* is redacted in `pkg/sync.FileTracker.ReadChunk`; this struct is not. Before adding a field that could carry free-text user content, plumb the redactor into `Codex.InitTranscript` / `Codex.DiscoverDescendants` — see the struct doc in `codex_rollout.go`.
 - Sync-loop providers (`InitTranscript`, `DiscoverDescendants`, `AnnotateChunk`) are called from a single goroutine inside the engine's sync loop. Implementations may mutate the passed `TranscriptRegistrar` / `DescendantRegistrar` / `ChunkView` without locking; the engine does not call them concurrently for the same engine instance.
 
 ## Used By
