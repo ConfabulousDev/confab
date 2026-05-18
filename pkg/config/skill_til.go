@@ -1,15 +1,7 @@
-// ABOUTME: Manages the /til Claude Code skill — install and uninstall.
+// ABOUTME: Defines the /til Claude Code skill — template + thin public wrappers around the generic skill installer.
 // ABOUTME: The skill file lives at ~/.claude/skills/til/SKILL.md and enables the /til slash command.
 package config
 
-import (
-	"os"
-	"path/filepath"
-
-	"github.com/ConfabulousDev/confab/pkg/logger"
-)
-
-// tilSkillTemplate is the SKILL.md content installed for the /til slash command.
 const tilSkillTemplate = `---
 name: til
 description: Capture a TIL (Today I Learned) from this session
@@ -34,63 +26,13 @@ confab til --session "${CLAUDE_SESSION_ID}" --title "<the title>" --summary "<yo
 4. Briefly confirm to the user that the TIL was saved
 `
 
-// tilSkillRelPath is the path to the skill file relative to the Claude state directory.
-const tilSkillRelPath = "skills/til/SKILL.md"
+var tilSkill = skill{name: "til", template: tilSkillTemplate}
 
-// getTilSkillPath returns the absolute path to the /til skill file.
-func getTilSkillPath() (string, error) {
-	claudeDir, err := GetClaudeStateDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(claudeDir, tilSkillRelPath), nil
-}
+// InstallTilSkill writes the /til skill file. See skill.Install for backup semantics.
+func InstallTilSkill() error { return tilSkill.Install() }
 
-// InstallTilSkill writes the /til skill file to ~/.claude/skills/til/SKILL.md.
-// If an existing file differs from the template, it is backed up as SKILL.md.bak.
-func InstallTilSkill() error {
-	path, err := getTilSkillPath()
-	if err != nil {
-		return err
-	}
-
-	// Back up existing file if it differs from template
-	existing, readErr := os.ReadFile(path)
-	if readErr == nil && string(existing) != tilSkillTemplate {
-		bakPath := path + ".bak"
-		if writeErr := os.WriteFile(bakPath, existing, 0644); writeErr != nil {
-			logger.Debug("Failed to back up existing skill file: %v", writeErr)
-		}
-	}
-
-	// Ensure parent directory exists
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-		return err
-	}
-
-	return os.WriteFile(path, []byte(tilSkillTemplate), 0644)
-}
-
-// UninstallTilSkill removes the /til skill directory (~/.claude/skills/til/).
-func UninstallTilSkill() error {
-	path, err := getTilSkillPath()
-	if err != nil {
-		return err
-	}
-
-	dir := filepath.Dir(path)
-	if err := os.RemoveAll(dir); err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	return nil
-}
+// UninstallTilSkill removes the /til skill directory.
+func UninstallTilSkill() error { return tilSkill.Uninstall() }
 
 // IsTilSkillInstalled returns true if the /til skill file exists.
-func IsTilSkillInstalled() bool {
-	path, err := getTilSkillPath()
-	if err != nil {
-		return false
-	}
-	_, err = os.Stat(path)
-	return err == nil
-}
+func IsTilSkillInstalled() bool { return tilSkill.Installed() }

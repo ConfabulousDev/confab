@@ -11,8 +11,9 @@ Hook install/uninstall logic lives in `pkg/hookconfig`. This package owns the ge
 | `config.go` | `ClaudeSettings` struct + `AtomicUpdateSettings` (read/modify/write `~/.claude/settings.json` with mtime-based optimistic locking). Generic accessor helpers: `GetHooksMap`, `GetEventHooks`, `SetEventHooks`. Tool-name constants used by `pkg/hookconfig`. |
 | `upload.go` | Confab config: read/write `~/.confab/config.json`, validation, default redaction patterns |
 | `paths.go` | Path resolution with environment variable overrides |
-| `skill_til.go` | `/til` Claude Code skill: install/uninstall/ensure SKILL.md in `~/.claude/skills/til/` |
-| `skill_retro.go` | `/retro` Claude Code skill: install/uninstall/ensure SKILL.md in `~/.claude/skills/retro/` |
+| `skill.go` | Generic skill installer (`skill` struct + `path`/`Install`/`Uninstall`/`Installed`). Each skill file in this package collapses to a template + a `var` of this type + three thin wrappers. |
+| `skill_til.go` | `/til` Claude Code skill: template + thin wrappers around `skill.Install/Uninstall/Installed`. Installs to `~/.claude/skills/til/`. |
+| `skill_retro.go` | `/retro` Claude Code skill: template + thin wrappers around `skill.Install/Uninstall/Installed`. Installs to `~/.claude/skills/retro/`. |
 
 ## Two Config Systems
 
@@ -23,7 +24,7 @@ Managed by `upload.go`. Contains backend URL, API key, log level, auto-update fl
 Managed by `config.go`. Contains hooks that Claude Code reads to fire events. We install/uninstall hooks here, but Claude Code owns the file and other tools may write to it concurrently.
 
 ### Claude Code skills (`~/.claude/skills/`)
-Managed by `skill_til.go`, `skill_retro.go` (and future `skill_*.go` files). Skills are SKILL.md files that extend Claude Code with custom slash commands. Unlike hooks (which live in settings.json), skills are standalone files in the skills directory.
+Managed by `skill.go` (generic installer) plus one `skill_<name>.go` per skill (`skill_til.go`, `skill_retro.go`, and future ones). Skills are SKILL.md files that extend Claude Code with custom slash commands. Unlike hooks (which live in settings.json), skills are standalone files in the skills directory. If an existing SKILL.md has been customized by the user, `Install` backs it up to `SKILL.md.bak` before overwriting; if the backup write fails, the install aborts rather than silently overwrite.
 
 ## Key Types
 
@@ -42,6 +43,11 @@ Managed by `skill_til.go`, `skill_retro.go` (and future `skill_*.go` files). Ski
 
 ### Adding a new hook type
 Hook install/uninstall lives in `pkg/hookconfig` — see that package's README. The wiring into `cmd/` flows through `pkg/provider`'s `Provider` interface: `cmd/hooks.go` and `cmd/setup.go` call `p.InstallHooks()`, which delegates to `hookconfig` per provider.
+
+### Adding a new Claude Code skill
+1. Create `pkg/config/skill_<name>.go` with the SKILL.md template constant and `var <name>Skill = skill{name: "<name>", template: <name>SkillTemplate}`.
+2. Add three public wrappers: `Install<Name>Skill() error { return <name>Skill.Install() }`, `Uninstall<Name>Skill() error { return <name>Skill.Uninstall() }`, `Is<Name>SkillInstalled() bool { return <name>Skill.Installed() }`.
+3. Wire those wrappers into `cmd/skills.go` (add/remove), `cmd/announce.go` (setup step), `cmd/status.go` (status check), and `pkg/provider/claude.go` (install during provider setup).
 
 ## Invariants
 

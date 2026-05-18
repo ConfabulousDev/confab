@@ -1,15 +1,7 @@
-// ABOUTME: Manages the /retro Claude Code skill — install and uninstall.
+// ABOUTME: Defines the /retro Claude Code skill — template + thin public wrappers around the generic skill installer.
 // ABOUTME: The skill file lives at ~/.claude/skills/retro/SKILL.md and enables the /retro slash command.
 package config
 
-import (
-	"os"
-	"path/filepath"
-
-	"github.com/ConfabulousDev/confab/pkg/logger"
-)
-
-// retroSkillTemplate is the SKILL.md content installed for the /retro slash command.
 const retroSkillTemplate = `---
 name: retro
 description: Review and discuss a session transcript
@@ -59,63 +51,13 @@ transcript if available. The condensed transcript is good for overview; the
 raw JSONL has the full detail.
 `
 
-// retroSkillRelPath is the path to the skill file relative to the Claude state directory.
-const retroSkillRelPath = "skills/retro/SKILL.md"
+var retroSkill = skill{name: "retro", template: retroSkillTemplate}
 
-// getRetroSkillPath returns the absolute path to the /retro skill file.
-func getRetroSkillPath() (string, error) {
-	claudeDir, err := GetClaudeStateDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(claudeDir, retroSkillRelPath), nil
-}
+// InstallRetroSkill writes the /retro skill file. See skill.Install for backup semantics.
+func InstallRetroSkill() error { return retroSkill.Install() }
 
-// InstallRetroSkill writes the /retro skill file to ~/.claude/skills/retro/SKILL.md.
-// If an existing file differs from the template, it is backed up as SKILL.md.bak.
-func InstallRetroSkill() error {
-	path, err := getRetroSkillPath()
-	if err != nil {
-		return err
-	}
-
-	// Back up existing file if it differs from template
-	existing, readErr := os.ReadFile(path)
-	if readErr == nil && string(existing) != retroSkillTemplate {
-		bakPath := path + ".bak"
-		if writeErr := os.WriteFile(bakPath, existing, 0644); writeErr != nil {
-			logger.Debug("Failed to back up existing skill file: %v", writeErr)
-		}
-	}
-
-	// Ensure parent directory exists
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-		return err
-	}
-
-	return os.WriteFile(path, []byte(retroSkillTemplate), 0644)
-}
-
-// UninstallRetroSkill removes the /retro skill directory (~/.claude/skills/retro/).
-func UninstallRetroSkill() error {
-	path, err := getRetroSkillPath()
-	if err != nil {
-		return err
-	}
-
-	dir := filepath.Dir(path)
-	if err := os.RemoveAll(dir); err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	return nil
-}
+// UninstallRetroSkill removes the /retro skill directory.
+func UninstallRetroSkill() error { return retroSkill.Uninstall() }
 
 // IsRetroSkillInstalled returns true if the /retro skill file exists.
-func IsRetroSkillInstalled() bool {
-	path, err := getRetroSkillPath()
-	if err != nil {
-		return false
-	}
-	_, err = os.Stat(path)
-	return err == nil
-}
+func IsRetroSkillInstalled() bool { return retroSkill.Installed() }
