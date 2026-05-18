@@ -88,9 +88,11 @@ type Provider interface {
 	UninstallHooks() (string, error)
 	IsHooksInstalled() (bool, error)
 
-	// InstallSkills installs provider-specific Claude Code skills. No-op
-	// for providers that don't ship skills.
+	// InstallSkills installs the bundled skills for this provider's local
+	// skill layout.
 	InstallSkills() error
+	UninstallSkills() error
+	IsSkillInstalled(name string) bool
 
 	// WalkUpToRoot returns the root session ID and its rollout path. For
 	// providers without a separate root file identifier (Claude Code),

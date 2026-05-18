@@ -80,6 +80,15 @@ func runTil(p provider.Provider, session, title, summary string, tags []string) 
 	}
 
 	// Look up daemon state for this session
+	if session != "" {
+		rootID, _, err := p.WalkUpToRoot(session)
+		if err != nil {
+			return fmt.Errorf("failed to resolve session root: %w", err)
+		}
+		if rootID != "" {
+			session = rootID
+		}
+	}
 	state, err := daemon.LoadStateForProvider(p.Name(), session)
 	if err != nil {
 		return fmt.Errorf("failed to load session state: %w", err)

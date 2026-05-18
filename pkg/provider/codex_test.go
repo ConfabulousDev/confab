@@ -304,9 +304,23 @@ func TestCodexWriteHookResponse(t *testing.T) {
 	}
 }
 
-func TestCodexInstallSkillsIsNoOp(t *testing.T) {
+func TestCodexInstallSkillsInstallsBundledSkills(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv(CodexStateDirEnv, tmpDir)
+
 	if err := (Codex{}).InstallSkills(); err != nil {
-		t.Fatalf("Codex.InstallSkills() error = %v, want nil (no-op)", err)
+		t.Fatalf("Codex.InstallSkills() error = %v", err)
+	}
+
+	for _, skill := range []string{"til", "retro"} {
+		path := filepath.Join(tmpDir, "skills", skill, "SKILL.md")
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("expected Codex %s skill at %s: %v", skill, path, err)
+		}
+		if !strings.Contains(string(data), "name: "+skill) {
+			t.Fatalf("Codex %s skill missing name metadata:\n%s", skill, data)
+		}
 	}
 }
 

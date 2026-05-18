@@ -1,25 +1,27 @@
-// ABOUTME: CLI commands for managing Claude Code skills installed by confab.
+// ABOUTME: CLI commands for managing bundled provider skills installed by confab.
 // ABOUTME: confab skills add/remove — analogous to confab hooks add/remove but for skill files.
 package cmd
 
 import (
 	"fmt"
 
-	"github.com/ConfabulousDev/confab/pkg/config"
 	"github.com/ConfabulousDev/confab/pkg/logger"
+	"github.com/ConfabulousDev/confab/pkg/provider"
 	"github.com/spf13/cobra"
 )
 
+var skillsProviderName string
+
 var skillsCmd = &cobra.Command{
 	Use:   "skills",
-	Short: "Manage Claude Code skills",
-	Long:  `Add or remove confab skills from Claude Code. Skills are Claude Code only — this command is a no-op for Codex.`,
+	Short: "Manage Confab skills",
+	Long:  `Add or remove bundled confab skills from supported providers.`,
 }
 
 var skillsAddCmd = &cobra.Command{
 	Use:   "add",
 	Short: "Install skills",
-	Long: `Installs confab skills in ~/.claude/skills/ (Claude Code only).
+	Long: `Installs bundled confab skills for detected providers by default.
 
 Installs:
 - /til skill for capturing TILs (Today I Learned) during sessions
@@ -27,24 +29,27 @@ Installs:
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger.Info("Running skills add command")
 
-		fmt.Println("Installing /til skill...")
-		if err := config.InstallTilSkill(); err != nil {
-			logger.Error("Failed to install /til skill: %v", err)
-			return fmt.Errorf("failed to install /til skill: %w", err)
-		}
-
-		fmt.Println("Installing /retro skill...")
-		if err := config.InstallRetroSkill(); err != nil {
-			logger.Error("Failed to install /retro skill: %v", err)
-			return fmt.Errorf("failed to install /retro skill: %w", err)
-		}
-
-		claudeDir, err := config.GetClaudeStateDir()
+		targets, err := skillsAddTargets()
 		if err != nil {
-			return fmt.Errorf("failed to get Claude state directory: %w", err)
+			return err
 		}
-		logger.Info("Skills installed in %s/skills/", claudeDir)
-		fmt.Printf("✓ Skills installed in %s/skills/\n", claudeDir)
+		if len(targets) == 0 {
+			fmt.Println("No supported provider CLIs detected; no skills installed.")
+			return nil
+		}
+		for _, p := range targets {
+			fmt.Printf("Installing %s skills...\n", p.Name())
+			if err := p.InstallSkills(); err != nil {
+				logger.Error("Failed to install %s skills: %v", p.Name(), err)
+				return fmt.Errorf("failed to install %s skills: %w", p.Name(), err)
+			}
+			stateDir, err := p.StateDir()
+			if err != nil {
+				return fmt.Errorf("failed to get %s state directory: %w", p.Name(), err)
+			}
+			logger.Info("%s skills installed in %s/skills/", p.Name(), stateDir)
+			fmt.Printf("✓ %s skills installed in %s/skills/\n", p.Name(), stateDir)
+		}
 		fmt.Println()
 		fmt.Println("Available skills:")
 		fmt.Println("  /til   — capture TILs during your session")
@@ -57,18 +62,20 @@ Installs:
 var skillsRemoveCmd = &cobra.Command{
 	Use:   "remove",
 	Short: "Remove skills",
-	Long:  `Removes all confab skills from ~/.claude/skills/ (Claude Code only).`,
+	Long:  `Removes bundled confab skills from all supported providers by default.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger.Info("Running skills remove command")
 
-		fmt.Println("Removing skills...")
-		if err := config.UninstallTilSkill(); err != nil {
-			logger.Error("Failed to remove /til skill: %v", err)
-			return fmt.Errorf("failed to remove /til skill: %w", err)
+		targets, err := skillsRemoveTargets()
+		if err != nil {
+			return err
 		}
-		if err := config.UninstallRetroSkill(); err != nil {
-			logger.Error("Failed to remove /retro skill: %v", err)
-			return fmt.Errorf("failed to remove /retro skill: %w", err)
+		for _, p := range targets {
+			fmt.Printf("Removing %s skills...\n", p.Name())
+			if err := p.UninstallSkills(); err != nil {
+				logger.Error("Failed to remove %s skills: %v", p.Name(), err)
+				return fmt.Errorf("failed to remove %s skills: %w", p.Name(), err)
+			}
 		}
 
 		fmt.Println("✓ Skills removed.")
@@ -77,7 +84,48 @@ var skillsRemoveCmd = &cobra.Command{
 	},
 }
 
+func skillsAddTargets() ([]provider.Provider, error) {
+	if skillsProviderName != "" {
+		p, err := provider.Get(skillsProviderName)
+		if err != nil {
+			return nil, err
+		}
+		return []provider.Provider{p}, nil
+	}
+	detected := provider.DetectInstalled()
+	targets := make([]provider.Provider, 0, len(detected))
+	for _, name := range detected {
+		p, err := provider.Get(name)
+		if err != nil {
+			return nil, err
+		}
+		targets = append(targets, p)
+	}
+	return targets, nil
+}
+
+func skillsRemoveTargets() ([]provider.Provider, error) {
+	if skillsProviderName != "" {
+		p, err := provider.Get(skillsProviderName)
+		if err != nil {
+			return nil, err
+		}
+		return []provider.Provider{p}, nil
+	}
+	names := []string{provider.NameClaudeCode, provider.NameCodex}
+	targets := make([]provider.Provider, 0, len(names))
+	for _, name := range names {
+		p, err := provider.Get(name)
+		if err != nil {
+			return nil, err
+		}
+		targets = append(targets, p)
+	}
+	return targets, nil
+}
+
 func init() {
+	skillsCmd.PersistentFlags().StringVar(&skillsProviderName, "provider", "", "Provider to manage skills for (claude-code or codex); defaults to detected providers for add and all providers for remove")
 	rootCmd.AddCommand(skillsCmd)
 	skillsCmd.AddCommand(skillsAddCmd)
 	skillsCmd.AddCommand(skillsRemoveCmd)

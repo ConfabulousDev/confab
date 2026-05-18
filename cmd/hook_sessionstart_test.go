@@ -347,11 +347,10 @@ func TestCodexHook_StateDBAbsent_DegradesToFiringSessionAsRoot(t *testing.T) {
 // the resolved root's daemon is already running. We don't assert on the
 // response body (the Codex hook is fire-and-forget), only that no panic
 // or hang occurs.
-// TestCodexHook_DoesNotInstallClaudeSkills guards against a regression
-// where Codex SessionStart routed through the unified handler would
-// silently call RunAnnouncements() and write ~/.claude/skills/{til,retro}/
-// for Codex-only users.
-func TestCodexHook_DoesNotInstallClaudeSkills(t *testing.T) {
+// TestCodexHook_EnsuresCodexSkills guards the adoption path: when Codex
+// hooks are installed, SessionStart should keep bundled Codex skills present
+// without leaking Claude skill files for Codex-only users.
+func TestCodexHook_EnsuresCodexSkills(t *testing.T) {
 	origSpawn := spawnDaemonFunc
 	defer func() { spawnDaemonFunc = origSpawn }()
 	spawnDaemonFunc = func(launch *daemonLaunchInput) error { return nil }
@@ -365,9 +364,14 @@ func TestCodexHook_DoesNotInstallClaudeSkills(t *testing.T) {
 	}
 
 	for _, skill := range []string{"til", "retro"} {
-		path := filepath.Join(tmpHome, ".claude", "skills", skill)
-		if _, err := os.Stat(path); err == nil {
-			t.Errorf("Codex SessionStart leaked Claude skill into %s", path)
+		claudePath := filepath.Join(tmpHome, ".claude", "skills", skill)
+		if _, err := os.Stat(claudePath); err == nil {
+			t.Errorf("Codex SessionStart leaked Claude skill into %s", claudePath)
+		}
+
+		codexPath := filepath.Join(fixture.Dir, "skills", skill, "SKILL.md")
+		if _, err := os.Stat(codexPath); err != nil {
+			t.Errorf("Codex SessionStart did not install Codex skill %s: %v", codexPath, err)
 		}
 	}
 }

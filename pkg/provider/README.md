@@ -13,11 +13,11 @@ The package defines a `Provider` interface and a `HookInput` interface (Phase 1 
 | `session.go` | `SessionInfo` and `SessionMetadata` — cross-provider shapes returned by the discovery interface methods. Also defines `maxLinesForExtraction` and the shared `readHeadLines` helper. |
 | `codex_rollout.go` | `CodexRolloutMetadata` — wire-format metadata transmitted on the first chunk of every Codex rollout. Lives here (not pkg/sync) so the Codex implementation can construct one without a cycle; pkg/sync aliases it. |
 | `hookinput.go` | `claudeHookInputAdapter` and `codexHookInputAdapter` — wrap the typed structs in `pkg/types` so they satisfy `HookInput`. Required because the structs' existing exported `SessionID` field collides with a `SessionID()` method |
-| `claude.go` | `ClaudeCode` — paths, transcript validation, parent-process detection, and the `Provider` methods. Sync-loop methods are no-ops except `AnnotateChunk`, which delegates to `ExtractMetadata` to extract summary + first user message + summary links from transcript chunks. Hook install/uninstall delegates to `pkg/hookconfig`; skill install delegates to `pkg/config` |
+| `claude.go` | `ClaudeCode` — paths, transcript validation, parent-process detection, and the `Provider` methods. Sync-loop methods are no-ops except `AnnotateChunk`, which delegates to `ExtractMetadata` to extract summary + first user message + summary links from transcript chunks. Hook install/uninstall delegates to `pkg/hookconfig`; skill install/uninstall/status delegates to `pkg/config` |
 | `claude_discovery.go` | Claude session scanning (`ScanSessions`, `FindSessionByID`) and metadata extraction (`ExtractMetadata`, `DefaultCWD`). Walks `~/.claude/projects/`, parses Claude transcript JSONL for summaries + first user messages, sanitizes HTML, truncates to `maxMetadataFieldSize/2` bytes. |
-| `claude_agentids.go` | `ClaudeCode.ExtractAgentIDsFromMessage` — Claude-only transcript-schema parsing for sidechain agent file discovery. Called from `pkg/sync/tracker.go` during chunk reads. |
-| `codex.go` | `Codex` — paths, transcript validation, parent-process detection, hook handling, and the `Provider` methods. `InitTranscript` attaches root rollout metadata from session_meta; `DiscoverDescendants` walks the SQLite subtree; `AnnotateChunk` attaches codex_rollout on FirstLine==1 and extracts first_user_message once per session via `ExtractMetadata`. Hook install/uninstall delegates to `pkg/hookconfig` |
-| `codex_discovery.go` | Codex rollout discovery: `ScanSessions` (interface), `ScanCodexSessions` (rich type), `FindSessionByID` (walks subagent UUIDs up to the root), `ReadSessionInfo`, `ExtractFirstUserMessageFromLines`, `ExtractMetadata`, `DefaultCWD`. Also houses `CodexSessionInfo` and the rollout-filename regex. |
+| `claude_agentids.go` | `ClaudeCode.ExtractAgentIDsFromMessage` and `IsValidAgentID` — Claude-only transcript-schema parsing for sidechain agent file discovery. Called from `pkg/sync/tracker.go` during chunk reads. |
+| `codex.go` | `Codex` — paths, transcript validation, parent-process detection, hook handling, and the `Provider` methods. `InitTranscript` attaches root rollout metadata from session_meta; `DiscoverDescendants` walks the SQLite subtree; `AnnotateChunk` attaches codex_rollout on FirstLine==1 and extracts first_user_message once per session via `ExtractMetadata`. Hook install/uninstall delegates to `pkg/hookconfig`; skill install/uninstall/status delegates to `pkg/config` |
+| `codex_discovery.go` | Codex rollout discovery: `ScanSessions` (interface), `ScanCodexSessions` (rich type), `FindSessionByID` (walks subagent UUIDs up to the root), package-private rollout resolution, `ReadSessionInfo`, `ExtractFirstUserMessageFromLines`, `ExtractMetadata`, `DefaultCWD`. Also houses `CodexSessionInfo` and the rollout-filename regex. |
 | `codex_state.go` | Codex local SQLite reader: `StateDBPath()`, `WalkUpToRoot(threadUUID)`, `ListSubtree(rootUUID)`. Used by the hook handler, `confab save` (via `FindSessionByID`'s walk-up), and `Codex.DiscoverDescendants` to discover subagent rollouts and route them to the top-most root |
 
 ## Provider surfaces
@@ -26,7 +26,7 @@ The package defines a `Provider` interface and a `HookInput` interface (Phase 1 
 - Paths: `StateDir`, `SettingsPath`, `ProjectsDir`, transcript path validation against `CONFAB_CLAUDE_DIR`.
 - Discovery: `ScanSessions`, `FindSessionByID`, `ExtractMetadata`, `DefaultCWD` (the four `Provider` interface methods); plus `ExtractAgentIDsFromMessage` for sidechain agent file discovery.
 - Hooks: `ReadHookInput`, `ReadSessionHookInput`, `InstallHooks`/`UninstallHooks`/`IsHooksInstalled` (delegate to `pkg/hookconfig`, which edits `~/.claude/settings.json`).
-- Skills: `InstallSkills` installs `/til` and `/retro` Claude Code skills (delegates to `pkg/config`).
+- Skills: `InstallSkills` installs `/til` and `/retro` under `~/.claude/skills/`; `UninstallSkills` removes bundled skills; `IsSkillInstalled` reports per-skill state (delegates to `pkg/config`).
 - Hook response: `WriteHookResponse` writes a `types.ClaudeHookResponse`.
 - Parent detection: parent PID monitoring helpers, Claude-specific.
 
@@ -36,7 +36,7 @@ The package defines a `Provider` interface and a `HookInput` interface (Phase 1 
 - Additional rollout helpers: `ScanCodexSessions` (rich `CodexSessionInfo` form), `ReadSessionInfo`, `SessionIDFromRolloutPath`, `ExtractFirstUserMessageFromLines`, internal `walkRollouts` helper.
 - Filtering: `CodexSessionInfo.IsUserSession()` excludes subagents/memory rollouts by `thread_source` and `agent_*` metadata.
 - Hooks: `ReadHookInput`, `ReadSessionHookInput`, `InstallHooks`/`UninstallHooks`/`IsHooksInstalled` (delegate to `pkg/hookconfig`, which edits `~/.codex/config.toml`). Only `SessionStart` is installed — see [Codex daemon shutdown](#codex-daemon-shutdown).
-- Skills: `InstallSkills` is a no-op for Codex.
+- Skills: `InstallSkills` installs `/til` and `/retro` under `~/.codex/skills/`; `UninstallSkills` removes bundled skills; `IsSkillInstalled` reports per-skill state (delegates to `pkg/config`).
 - Hook response: `WriteHookResponse` writes a `types.CodexHookResponse`.
 - Parent detection: `FindParentPID`, `IsProcess`, `MatchesProcess` (regex `(?i)\bcodex\b`) for daemon parent-liveness monitoring, mirroring `ClaudeCode`.
 - Transcript metadata: `ExtractFirstUserMessageFromLines` reads the first `event_msg.user_message` from rollout lines, trims whitespace, and truncates to `types.MaxFirstUserMessageLength` on a UTF-8 boundary.
@@ -62,7 +62,7 @@ Methods every provider must implement:
 - `FindParentPID() int`, `IsProcess(pid int) bool` — parent-process detection.
 - `ParseSessionHook(io.Reader) (HookInput, error)` — read a SessionStart hook payload and return the provider-agnostic view.
 - `InstallHooks() (string, error)` / `UninstallHooks() (string, error)` / `IsHooksInstalled() (bool, error)` — install/check the full hook set the provider requires (Claude: 4 bundles; Codex: SessionStart only). Both methods delegate to `pkg/hookconfig`.
-- `InstallSkills() error` — install provider-specific Claude Code skills. No-op for Codex.
+- `InstallSkills() error` / `UninstallSkills() error` / `IsSkillInstalled(name string) bool` — manage bundled Confab skills in the provider's local skill layout.
 - `WalkUpToRoot(sessionID string) (rootID, rootPath string, error)` — Codex walks `thread_spawn_edges`; Claude is identity with empty `rootPath`.
 - `ShouldSpawnForInput(in HookInput) bool` — Codex returns false for subagent rollouts and for unreadable rollout files; Claude always returns true. `os.IsNotExist` is treated as a race-tolerance "spawn anyway" case.
 - `WriteHookResponse(w, suppressOutput, systemMessage) error` — write the provider-specific hook response JSON (`ClaudeHookResponse` vs `CodexHookResponse`).
@@ -97,6 +97,7 @@ Methods every provider must implement:
 - `DetectInstalled()` returns names in fixed `detectOrder` (`claude-code` first, then `codex`) regardless of `LookPath` lookup order. This determinism is load-bearing for setup output and tests.
 - `CLIBinaryName()` is the OS binary name (`"claude"`, `"codex"`) — never the canonical provider name. The two diverge for Claude Code (`claude-code` vs `claude`).
 - `Codex.InstallHooks` installs only `SessionStart`. Daemon shutdown is driven by parent-PID liveness, never by Codex `Stop`.
+- `Codex.InstallSkills` writes only `SKILL.md` files under `~/.codex/skills/<name>/`; optional Codex UI metadata such as `agents/openai.yaml` is not generated for Confab's bundled skills.
 - `CodexRolloutMetadata` JSON tags are wire-format pins. Existing rows in the backend's `codex_rollouts` table were written against these tags; renaming any field is a backwards-incompatible change. Adding new optional fields (with `omitempty`) is safe.
 - `CodexRolloutMetadata` string fields (cwd, model, agent_*) ride on the first chunk unredacted. Rollout *content* is redacted in `pkg/sync.FileTracker.ReadChunk`; this struct is not. Before adding a field that could carry free-text user content, plumb the redactor into `Codex.InitTranscript` / `Codex.DiscoverDescendants` — see the struct doc in `codex_rollout.go`.
 - Sync-loop providers (`InitTranscript`, `DiscoverDescendants`, `AnnotateChunk`) are called from a single goroutine inside the engine's sync loop. Implementations may mutate the passed `TranscriptRegistrar` / `DescendantRegistrar` / `ChunkView` without locking; the engine does not call them concurrently for the same engine instance.

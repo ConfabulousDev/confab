@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/ConfabulousDev/confab/pkg/config"
 	"github.com/ConfabulousDev/confab/pkg/logger"
@@ -110,15 +111,13 @@ func printProviderBlock(p provider.Provider) bool {
 	return orphaned
 }
 
-// printSkillsRow renders the per-provider Skills line. Only Claude Code
-// ships skills today; other providers are omitted to avoid noise.
+// printSkillsRow renders the per-provider Skills line for shipped skills.
 func printSkillsRow(p provider.Provider) {
-	if p.Name() != provider.NameClaudeCode {
-		return
+	var parts []string
+	for _, name := range config.BundledSkillNames() {
+		parts = append(parts, fmt.Sprintf("/%s %s", name, checkmark(p.IsSkillInstalled(name))))
 	}
-	til := config.IsTilSkillInstalled()
-	retro := config.IsRetroSkillInstalled()
-	fmt.Printf("  Skills: /til %s, /retro %s\n", checkmark(til), checkmark(retro))
+	fmt.Printf("  Skills: %s\n", strings.Join(parts, ", "))
 }
 
 func checkmark(b bool) string {

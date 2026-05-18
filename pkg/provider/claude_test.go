@@ -153,13 +153,15 @@ func TestClaudeCodeInstallSkills(t *testing.T) {
 	if err := (ClaudeCode{}).InstallSkills(); err != nil {
 		t.Fatalf("InstallSkills() error = %v", err)
 	}
-	// At least one skill file must have been written under the skills dir.
-	entries, err := os.ReadDir(filepath.Join(tmpDir, "skills"))
-	if err != nil {
-		t.Fatalf("skills dir missing: %v", err)
-	}
-	if len(entries) == 0 {
-		t.Fatal("InstallSkills() wrote no skill files")
+	for _, skill := range []string{"til", "retro"} {
+		path := filepath.Join(tmpDir, "skills", skill, "SKILL.md")
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("expected Claude %s skill at %s: %v", skill, path, err)
+		}
+		if !strings.Contains(string(data), "name: "+skill) {
+			t.Fatalf("Claude %s skill missing name metadata:\n%s", skill, data)
+		}
 	}
 }
 

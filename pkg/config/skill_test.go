@@ -1,5 +1,5 @@
-// ABOUTME: Tests for the generic skill installer (install, uninstall, backup, idempotency).
-// ABOUTME: Exercises the skill type directly via a dummy skill, independent of /til and /retro.
+// ABOUTME: Tests for the provider-aware bundled skill installer.
+// ABOUTME: Exercises install, uninstall, backup, idempotency, and failure safety.
 package config
 
 import (
@@ -8,38 +8,49 @@ import (
 	"testing"
 )
 
-var dummyTestSkill = skill{
-	name:     "test-dummy",
-	template: "---\nname: test-dummy\n---\n\ndummy skill for tests\n",
-}
+func TestInstallBundledSkill(t *testing.T) {
+	stateDir := t.TempDir()
 
-func TestSkill_Install(t *testing.T) {
-	setupSkillTest(t)
-
-	if err := dummyTestSkill.Install(); err != nil {
-		t.Fatalf("Install() failed: %v", err)
+	if err := InstallBundledSkill(stateDir, SkillProviderClaude, tilSkillName); err != nil {
+		t.Fatalf("InstallBundledSkill() failed: %v", err)
 	}
 
-	path, _ := dummyTestSkill.path()
+	path := SkillPath(stateDir, tilSkillName)
 	content, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("Failed to read installed skill: %v", err)
 	}
 
-	if string(content) != dummyTestSkill.template {
+	if string(content) != tilSkillTemplate {
 		t.Error("Installed skill content doesn't match template")
 	}
 }
 
-func TestSkill_Install_CreatesParentDirs(t *testing.T) {
-	setupSkillTest(t)
+func TestInstallBundledSkill_CodexTemplate(t *testing.T) {
+	stateDir := t.TempDir()
 
-	if err := dummyTestSkill.Install(); err != nil {
-		t.Fatalf("Install() failed: %v", err)
+	if err := InstallBundledSkill(stateDir, SkillProviderCodex, tilSkillName); err != nil {
+		t.Fatalf("InstallBundledSkill() failed: %v", err)
 	}
 
-	path, _ := dummyTestSkill.path()
-	dir := filepath.Dir(path)
+	content, err := os.ReadFile(SkillPath(stateDir, tilSkillName))
+	if err != nil {
+		t.Fatalf("Failed to read installed skill: %v", err)
+	}
+
+	if string(content) != codexTilSkillTemplate {
+		t.Error("Installed Codex skill content doesn't match template")
+	}
+}
+
+func TestInstallBundledSkill_CreatesParentDirs(t *testing.T) {
+	stateDir := t.TempDir()
+
+	if err := InstallBundledSkill(stateDir, SkillProviderClaude, tilSkillName); err != nil {
+		t.Fatalf("InstallBundledSkill() failed: %v", err)
+	}
+
+	dir := filepath.Dir(SkillPath(stateDir, tilSkillName))
 	info, err := os.Stat(dir)
 	if err != nil {
 		t.Fatalf("Parent dir doesn't exist: %v", err)
@@ -49,18 +60,18 @@ func TestSkill_Install_CreatesParentDirs(t *testing.T) {
 	}
 }
 
-func TestSkill_Uninstall(t *testing.T) {
-	setupSkillTest(t)
+func TestUninstallBundledSkill(t *testing.T) {
+	stateDir := t.TempDir()
 
-	if err := dummyTestSkill.Install(); err != nil {
-		t.Fatalf("Install() failed: %v", err)
+	if err := InstallBundledSkill(stateDir, SkillProviderClaude, tilSkillName); err != nil {
+		t.Fatalf("InstallBundledSkill() failed: %v", err)
 	}
 
-	if err := dummyTestSkill.Uninstall(); err != nil {
-		t.Fatalf("Uninstall() failed: %v", err)
+	if err := UninstallBundledSkill(stateDir, tilSkillName); err != nil {
+		t.Fatalf("UninstallBundledSkill() failed: %v", err)
 	}
 
-	path, _ := dummyTestSkill.path()
+	path := SkillPath(stateDir, tilSkillName)
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Error("Skill file still exists after uninstall")
 	}
@@ -71,49 +82,48 @@ func TestSkill_Uninstall(t *testing.T) {
 	}
 }
 
-func TestSkill_Uninstall_NotInstalled(t *testing.T) {
-	setupSkillTest(t)
+func TestUninstallBundledSkill_NotInstalled(t *testing.T) {
+	stateDir := t.TempDir()
 
-	if err := dummyTestSkill.Uninstall(); err != nil {
-		t.Fatalf("Uninstall() failed on non-existent skill: %v", err)
+	if err := UninstallBundledSkill(stateDir, tilSkillName); err != nil {
+		t.Fatalf("UninstallBundledSkill() failed on non-existent skill: %v", err)
 	}
 }
 
-func TestSkill_Installed(t *testing.T) {
-	setupSkillTest(t)
+func TestIsBundledSkillInstalled(t *testing.T) {
+	stateDir := t.TempDir()
 
-	if dummyTestSkill.Installed() {
-		t.Error("Installed() = true before install")
+	if IsBundledSkillInstalled(stateDir, tilSkillName) {
+		t.Error("IsBundledSkillInstalled() = true before install")
 	}
 
-	if err := dummyTestSkill.Install(); err != nil {
-		t.Fatalf("Install() failed: %v", err)
+	if err := InstallBundledSkill(stateDir, SkillProviderClaude, tilSkillName); err != nil {
+		t.Fatalf("InstallBundledSkill() failed: %v", err)
 	}
 
-	if !dummyTestSkill.Installed() {
-		t.Error("Installed() = false after install")
+	if !IsBundledSkillInstalled(stateDir, tilSkillName) {
+		t.Error("IsBundledSkillInstalled() = false after install")
 	}
 }
 
-func TestSkill_BackupOnUpdate(t *testing.T) {
-	setupSkillTest(t)
+func TestInstallBundledSkill_BackupOnUpdate(t *testing.T) {
+	stateDir := t.TempDir()
 
-	if err := dummyTestSkill.Install(); err != nil {
-		t.Fatalf("Install() failed: %v", err)
+	if err := InstallBundledSkill(stateDir, SkillProviderClaude, tilSkillName); err != nil {
+		t.Fatalf("InstallBundledSkill() failed: %v", err)
 	}
 
-	path, _ := dummyTestSkill.path()
+	path := SkillPath(stateDir, tilSkillName)
 	oldContent := "user customized content"
-	if err := os.WriteFile(path, []byte(oldContent), 0644); err != nil {
+	if err := os.WriteFile(path, []byte(oldContent), 0o644); err != nil {
 		t.Fatalf("WriteFile failed: %v", err)
 	}
 
-	if err := dummyTestSkill.Install(); err != nil {
-		t.Fatalf("Install() failed: %v", err)
+	if err := InstallBundledSkill(stateDir, SkillProviderClaude, tilSkillName); err != nil {
+		t.Fatalf("InstallBundledSkill() failed: %v", err)
 	}
 
-	bakPath := path + ".bak"
-	bakContent, err := os.ReadFile(bakPath)
+	bakContent, err := os.ReadFile(path + ".bak")
 	if err != nil {
 		t.Fatalf("Backup file not created: %v", err)
 	}
@@ -122,38 +132,27 @@ func TestSkill_BackupOnUpdate(t *testing.T) {
 	}
 }
 
-// TestSkill_Install_FailsWhenBackupFails asserts that Install returns an error
-// (rather than silently continuing) when the .bak write cannot succeed. This
-// locks in the behavior change from CF-461: previously a backup-write failure
-// was logged at debug and the install proceeded, which is data-loss-adjacent.
-func TestSkill_Install_FailsWhenBackupFails(t *testing.T) {
-	setupSkillTest(t)
+func TestInstallBundledSkill_FailsWhenBackupFails(t *testing.T) {
+	stateDir := t.TempDir()
 
-	// Install once so the skill file exists.
-	if err := dummyTestSkill.Install(); err != nil {
-		t.Fatalf("Install() failed: %v", err)
+	if err := InstallBundledSkill(stateDir, SkillProviderClaude, tilSkillName); err != nil {
+		t.Fatalf("InstallBundledSkill() failed: %v", err)
 	}
 
-	path, _ := dummyTestSkill.path()
-	// Modify the installed file so the next Install() will try to back it up.
+	path := SkillPath(stateDir, tilSkillName)
 	customContent := "user customized content"
-	if err := os.WriteFile(path, []byte(customContent), 0644); err != nil {
+	if err := os.WriteFile(path, []byte(customContent), 0o644); err != nil {
 		t.Fatalf("WriteFile failed: %v", err)
 	}
 
-	// Make the .bak path a pre-existing *directory*; os.WriteFile cannot
-	// overwrite a directory, so the backup-write will fail.
-	bakPath := path + ".bak"
-	if err := os.Mkdir(bakPath, 0755); err != nil {
+	if err := os.Mkdir(path+".bak", 0o755); err != nil {
 		t.Fatalf("Mkdir(bakPath) failed: %v", err)
 	}
 
-	if err := dummyTestSkill.Install(); err == nil {
-		t.Fatal("Install() returned nil, want error when backup write fails")
+	if err := InstallBundledSkill(stateDir, SkillProviderClaude, tilSkillName); err == nil {
+		t.Fatal("InstallBundledSkill() returned nil, want error when backup write fails")
 	}
 
-	// And the user's customized file must NOT have been overwritten — that's
-	// the entire reason we abort rather than continue.
 	got, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("ReadFile(path) failed: %v", err)

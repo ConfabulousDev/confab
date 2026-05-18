@@ -66,13 +66,11 @@ func sessionStartFromReader(r io.Reader, w io.Writer) error {
 
 	AutoUpdateIfNeeded()
 
-	// Announcements are Claude-only: they install Claude skill files under
-	// ~/.claude/skills/ and surface Claude-only slash commands. Showing
-	// them on Codex SessionStart would silently write Claude config files
-	// for users who never installed Claude Code.
 	var systemMessage string
 	if p.Name() == provider.NameClaudeCode {
 		systemMessage = RunAnnouncements()
+	} else if err := p.InstallSkills(); err != nil {
+		logger.Warn("Failed to ensure %s skills on SessionStart: %v", p.Name(), err)
 	}
 
 	defer func() { _ = p.WriteHookResponse(w, false, systemMessage) }()

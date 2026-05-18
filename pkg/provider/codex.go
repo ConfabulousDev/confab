@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/ConfabulousDev/confab/pkg/config"
 	"github.com/ConfabulousDev/confab/pkg/hookconfig"
 	"github.com/ConfabulousDev/confab/pkg/logger"
 	"github.com/ConfabulousDev/confab/pkg/types"
@@ -57,8 +58,32 @@ func (p Codex) ShouldSpawnForInput(in HookInput) bool {
 	return info.IsUserSession()
 }
 
-// InstallSkills is a no-op for Codex (no skill files shipped).
-func (Codex) InstallSkills() error { return nil }
+// InstallSkills installs the Codex skills shipped with confab (/til and /retro).
+func (p Codex) InstallSkills() error {
+	stateDir, err := p.StateDir()
+	if err != nil {
+		return err
+	}
+	return config.InstallBundledSkills(stateDir, config.SkillProviderCodex)
+}
+
+// UninstallSkills removes the Codex skills shipped with confab.
+func (p Codex) UninstallSkills() error {
+	stateDir, err := p.StateDir()
+	if err != nil {
+		return err
+	}
+	return config.UninstallBundledSkills(stateDir)
+}
+
+// IsSkillInstalled reports whether a shipped Codex skill exists.
+func (p Codex) IsSkillInstalled(name string) bool {
+	stateDir, err := p.StateDir()
+	if err != nil {
+		return false
+	}
+	return config.IsBundledSkillInstalled(stateDir, name)
+}
 
 // InitTranscript reads the root rollout's session_meta and attaches the
 // resulting CodexRolloutMetadata to the transcript file so the very first

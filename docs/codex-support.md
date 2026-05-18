@@ -50,13 +50,13 @@ Current rollout TODOs:
 
 - [ ] Run an end-to-end manual QA cycle against a real `confab-web` backend with `confab setup --provider codex`, Codex hooks, daemon sync, and web transcript viewing.
 - [ ] Update public/user-facing docs once Codex support is ready to advertise.
-- [x] Clean up compatibility shims after provider ownership is stable: `pkg/discovery` has been removed; `pkg/config/paths.go` keeps only the real `ClaudeStateDirEnv` constant + `GetClaudeStateDir` (still called from the skills installers in `pkg/config/skill_*.go` and `cmd/skills.go`).
+- [x] Clean up compatibility shims after provider ownership is stable: `pkg/discovery` has been removed; `pkg/config/paths.go` keeps only the real `ClaudeStateDirEnv` constant + `GetClaudeStateDir`.
 
 ## Later Checkpoints
 
 - [ ] Transcript normalization: add backend and frontend normalization keyed by provider before enabling analytics/Smart Recap for Codex.
 - [ ] Codex subagents: quick-follow TODO after root Codex backend upload. Model separate rollout files and parent relationships from Codex SQLite relationship state plus rollout `session_meta`.
-- [ ] Skills: revisit `/til` and `/retro` separately; Claude slash-command skills should remain Claude-specific until Codex has a well-defined surface.
+- [x] Skills: bundled `/til` and `/retro` install into both Claude Code and Codex provider skill dirs. Claude `/til` uses `CLAUDE_SESSION_ID`; Codex `/til` uses `CODEX_THREAD_ID`.
 - [ ] Post-rollout backend cleanup in `../confab-web`: backfill legacy `sessions.session_type='Claude Code'` to `claude-code`, then remove temporary dual-value lookup/normalization code.
 
 ## Decisions
@@ -105,7 +105,7 @@ Likely backend shape for subagents:
 Earlier checkpoints kept a `pkg/discovery` package and several `pkg/config/paths.go` forwarders to `provider.ClaudeCode{}` so the provider-extraction diffs stayed focused. Those shims are gone:
 
 - `pkg/discovery` was removed entirely; hook parsing and session scanning now live on the provider types (`pkg/provider/claude*.go`, `pkg/provider/codex*.go`).
-- `pkg/config/paths.go` keeps only the real `ClaudeStateDirEnv` constant (mirrored from `pkg/provider/claude.go`, must stay in sync) and `GetClaudeStateDir`, which the skills installers (`cmd/skills.go`, `pkg/config/skill_til.go`, `pkg/config/skill_retro.go`) still call. The previously-forwarded `GetProjectsDir` / `GetClaudeSettingsPath` are gone — call `provider.ClaudeCode{}` directly.
+- `pkg/config/paths.go` keeps only the real `ClaudeStateDirEnv` constant (mirrored from `pkg/provider/claude.go`, must stay in sync) and `GetClaudeStateDir` for legacy Claude helper wrappers. Provider clients own skill layout and pass their state directories into `pkg/config`'s bundled-skill installer. The previously-forwarded `GetProjectsDir` / `GetClaudeSettingsPath` are gone — call `provider.ClaudeCode{}` directly.
 
 ## Risks
 

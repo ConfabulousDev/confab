@@ -21,7 +21,7 @@ func TestInstallTilSkill(t *testing.T) {
 		t.Fatalf("InstallTilSkill() failed: %v", err)
 	}
 
-	path, _ := tilSkill.path()
+	path, _ := getTilSkillPath()
 	content, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("Failed to read installed skill: %v", err)
@@ -39,7 +39,7 @@ func TestInstallTilSkill_CreatesParentDirs(t *testing.T) {
 		t.Fatalf("InstallTilSkill() failed: %v", err)
 	}
 
-	path, _ := tilSkill.path()
+	path, _ := getTilSkillPath()
 	dir := filepath.Dir(path)
 	info, err := os.Stat(dir)
 	if err != nil {
@@ -61,7 +61,7 @@ func TestUninstallTilSkill(t *testing.T) {
 		t.Fatalf("UninstallTilSkill() failed: %v", err)
 	}
 
-	path, _ := tilSkill.path()
+	path, _ := getTilSkillPath()
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Error("Skill file still exists after uninstall")
 	}
@@ -103,7 +103,7 @@ func TestInstallTilSkill_BackupOnUpdate(t *testing.T) {
 		t.Fatalf("InstallTilSkill() failed: %v", err)
 	}
 
-	path, _ := tilSkill.path()
+	path, _ := getTilSkillPath()
 	oldContent := "user customized content"
 	if err := os.WriteFile(path, []byte(oldContent), 0644); err != nil {
 		t.Fatalf("WriteFile failed: %v", err)

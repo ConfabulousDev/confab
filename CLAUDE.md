@@ -36,7 +36,7 @@ Confab is a CLI tool that captures Claude Code session transcripts and uploads t
 - **pkg/daemon/**: Background sync daemon with state management and parent process monitoring
 - **pkg/sync/**: Sync engine with client, tracker, and file management (handles incremental uploads)
 - **pkg/redactor/**: JSON-aware redaction of sensitive data before upload
-- **pkg/config/**: Configuration (Confab + Claude `settings.json` plumbing) and skill management (`~/.claude/skills/`)
+- **pkg/config/**: Configuration (Confab + Claude `settings.json` plumbing) and bundled skill templates installed into provider-local skill dirs (`~/.claude/skills/`, `~/.codex/skills/`)
 - **pkg/hookconfig/**: Per-provider hook install/uninstall — edits Claude `~/.claude/settings.json` and Codex `~/.codex/config.toml`. `pkg/provider`'s `InstallHooks` / `UninstallHooks` delegate here.
 - **pkg/http/**: HTTP client with zstd compression, auth, and retry logic
 - **pkg/provider/**: `Provider` interface + Claude Code / Codex implementations. Owns session discovery (`ScanSessions`, `FindSessionByID`, `ExtractMetadata`, `DefaultCWD`), metadata extraction, Claude agent-ID parsing, hooks, paths, and Codex tree-walking. `claude_discovery.go` walks `~/.claude/projects/`; `codex_discovery.go` scans `~/.codex/sessions/`; `codex_state.go` reads Codex's local SQLite DB to walk subagent rollouts up to their root. All `cmd/` discovery dispatch routes through this interface.
@@ -76,9 +76,9 @@ The daemon also monitors its parent PID and shuts down if Claude Code exits unex
 
 ## Skills
 
-Confab installs Claude Code skills in `~/.claude/skills/`:
-- `/til`: Capture TILs (Today I Learned) during sessions — user types `/til "what I learned"`, Claude generates a summary from conversation context, and `confab til` posts it to the backend with the transcript position (message UUID)
-- `/retro`: Review and discuss session transcripts — user types `/retro <session-id> [question]`, Claude fetches the condensed transcript via `confab retro`, optionally reads local raw JSONL for richer data, and engages in discussion about the session
+Confab installs bundled skills for every configured provider: Claude Code uses `~/.claude/skills/`, and Codex uses `~/.codex/skills/`.
+- `/til`: Capture TILs (Today I Learned) during sessions — user types `/til "what I learned"`, the harness generates a summary from conversation context, and `confab til` posts it to the backend with the transcript position (message UUID when available). Claude uses `CLAUDE_SESSION_ID`; Codex uses `CODEX_THREAD_ID` and normalizes subagent threads to the root.
+- `/retro`: Review and discuss session transcripts — user types `/retro <session-id> [question]`, the harness fetches the condensed transcript via `confab retro`, optionally reads local raw JSONL for richer data, and engages in discussion about the session.
 
 Skills are managed separately from hooks: `confab skills add/remove` (vs `confab hooks add/remove`).
 
