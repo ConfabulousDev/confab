@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ConfabulousDev/confab/pkg/codextest"
 	"github.com/ConfabulousDev/confab/pkg/config"
 	"github.com/ConfabulousDev/confab/pkg/daemon"
 	confabhttp "github.com/ConfabulousDev/confab/pkg/http"
@@ -316,6 +317,56 @@ func TestRunTil_LoadsStateFromCorrectProviderNamespace(t *testing.T) {
 	}
 	if claudeLoaded != nil {
 		t.Errorf("claude-code namespace returned non-nil for a codex-only session")
+	}
+}
+
+func TestRunTil_CodexSubagentSessionNormalizesToRootState(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	var received tilRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/tils" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(tilResponse{ID: 1, Title: received.Title})
+	}))
+	defer server.Close()
+
+	configPath := filepath.Join(tmpHome, ".confab", "config.json")
+	t.Setenv("CONFAB_CONFIG_PATH", configPath)
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o700); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	cfg := config.UploadConfig{BackendURL: server.URL, APIKey: "cfb_codex-til-test-key"}
+	cfgData, _ := json.Marshal(cfg)
+	if err := os.WriteFile(configPath, cfgData, 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	fixture := codextest.NewFixture(t)
+	root := fixture.AddRoot("11111111-1111-1111-1111-111111111111").
+		WithRawLine(`{"type":"user","uuid":"root-msg"}`)
+	child := fixture.AddSubagent(root.ThreadUUID(), "22222222-2222-2222-2222-222222222222",
+		codextest.SubagentOpts{AgentRole: "tester"})
+
+	state := daemon.NewStateForProvider(provider.NameCodex, root.ThreadUUID(), root.Path(), "/work", 0)
+	state.ConfabSessionID = "backend-root-session"
+	if err := state.Save(); err != nil {
+		t.Fatalf("save root state: %v", err)
+	}
+
+	if err := runTil(provider.Codex{}, child.ThreadUUID(), "Subagent TIL", "Summary", nil); err != nil {
+		t.Fatalf("runTil with child thread should resolve root state: %v", err)
+	}
+	if received.SessionID != "backend-root-session" {
+		t.Fatalf("request session_id = %q, want backend-root-session", received.SessionID)
 	}
 }
 

@@ -457,6 +457,12 @@ func TestRunSetupCodexProviderOutput(t *testing.T) {
 	if !strings.Contains(content, "hook session-start --provider codex") {
 		t.Fatal("expected Codex session-start hook command")
 	}
+	for _, skill := range []string{"til", "retro"} {
+		path := filepath.Join(codexDir, "skills", skill, "SKILL.md")
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("expected Codex %s skill after setup: %v", skill, err)
+		}
+	}
 }
 
 func captureStdout(t *testing.T, fn func()) string {
@@ -998,6 +1004,17 @@ func TestRunSetup_AutoDetect_Both(t *testing.T) {
 	if !strings.Contains(string(data), "hook session-start --provider codex") {
 		t.Fatal("expected Codex session-start hook in config.toml")
 	}
+	for _, base := range []string{
+		filepath.Join(tmpDir, ".claude"),
+		codexDir,
+	} {
+		for _, skill := range []string{"til", "retro"} {
+			path := filepath.Join(base, "skills", skill, "SKILL.md")
+			if _, err := os.Stat(path); err != nil {
+				t.Fatalf("expected %s skill after auto-detect setup: %v", path, err)
+			}
+		}
+	}
 }
 
 func TestRunSetup_AutoDetect_ClaudeOnly(t *testing.T) {
@@ -1078,6 +1095,12 @@ func TestRunSetup_AutoDetect_CodexOnly(t *testing.T) {
 	codexCfg := filepath.Join(codexDir, "config.toml")
 	if _, err := os.Stat(codexCfg); err != nil {
 		t.Fatalf("expected Codex config.toml: %v", err)
+	}
+	for _, skill := range []string{"til", "retro"} {
+		path := filepath.Join(codexDir, "skills", skill, "SKILL.md")
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("expected Codex %s skill after Codex-only setup: %v", skill, err)
+		}
 	}
 
 	// Claude settings.json must not exist

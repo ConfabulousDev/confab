@@ -1,8 +1,8 @@
 # pkg/config
 
-Configuration management for two separate config systems: Confab's own config and Claude Code's settings file.
+Configuration management for Confab's own config, Claude Code's settings file, and bundled skill file content.
 
-Hook install/uninstall logic lives in `pkg/hookconfig`. This package owns the generic plumbing — atomic settings updates, settings struct, paths — and the Claude Code skill files.
+Hook install/uninstall logic lives in `pkg/hookconfig`. This package owns the generic plumbing — atomic settings updates, settings struct, paths — and the bundled skill templates installed by provider clients.
 
 ## Files
 
@@ -11,8 +11,9 @@ Hook install/uninstall logic lives in `pkg/hookconfig`. This package owns the ge
 | `config.go` | `ClaudeSettings` struct + `AtomicUpdateSettings` (read/modify/write `~/.claude/settings.json` with mtime-based optimistic locking). Generic accessor helpers: `GetHooksMap`, `GetEventHooks`, `SetEventHooks`. Tool-name constants used by `pkg/hookconfig`. |
 | `upload.go` | Confab config: read/write `~/.confab/config.json`, validation, default redaction patterns |
 | `paths.go` | Path resolution with environment variable overrides |
-| `skill_til.go` | `/til` Claude Code skill: install/uninstall/ensure SKILL.md in `~/.claude/skills/til/` |
-| `skill_retro.go` | `/retro` Claude Code skill: install/uninstall/ensure SKILL.md in `~/.claude/skills/retro/` |
+| `bundled_skills.go` | Shared bundled-skill registry and install/uninstall/check helpers for provider-local `skills/<name>/SKILL.md` layouts |
+| `skill_til.go` | `/til` templates for Claude Code and Codex plus legacy Claude helper wrappers |
+| `skill_retro.go` | `/retro` templates for Claude Code and Codex plus legacy Claude helper wrappers |
 
 ## Two Config Systems
 
@@ -22,8 +23,8 @@ Managed by `upload.go`. Contains backend URL, API key, log level, auto-update fl
 ### Claude Code settings (`~/.claude/settings.json`)
 Managed by `config.go`. Contains hooks that Claude Code reads to fire events. We install/uninstall hooks here, but Claude Code owns the file and other tools may write to it concurrently.
 
-### Claude Code skills (`~/.claude/skills/`)
-Managed by `skill_til.go`, `skill_retro.go` (and future `skill_*.go` files). Skills are SKILL.md files that extend Claude Code with custom slash commands. Unlike hooks (which live in settings.json), skills are standalone files in the skills directory.
+### Bundled provider skills
+Managed by `bundled_skills.go`, `skill_til.go`, and `skill_retro.go` (and future `skill_*.go` files). Skills are standalone `SKILL.md` files installed by provider clients into their local skill layouts: Claude uses `~/.claude/skills/<name>/SKILL.md`; Codex uses `~/.codex/skills/<name>/SKILL.md`.
 
 ## Key Types
 
@@ -43,6 +44,12 @@ Managed by `skill_til.go`, `skill_retro.go` (and future `skill_*.go` files). Ski
 ### Adding a new hook type
 Hook install/uninstall lives in `pkg/hookconfig` — see that package's README. The wiring into `cmd/` flows through `pkg/provider`'s `Provider` interface: `cmd/hooks.go` and `cmd/setup.go` call `p.InstallHooks()`, which delegates to `hookconfig` per provider.
 
+### Adding a new bundled skill
+1. Add the provider-rendered template content in `skill_<name>.go`.
+2. Add the skill name to `bundledSkillNames` and route it in `bundledSkillTemplate`.
+3. Keep path/layout decisions in `pkg/provider`; `pkg/config` only receives a state directory and provider name.
+4. Add/update tests for Claude and Codex installs so both provider paths stay covered.
+
 ## Invariants
 
 - **Settings writes must use `AtomicUpdateSettings()`.** This provides read-modify-write with mtime-based optimistic locking and exponential backoff retry (max 10 attempts). Never read + write separately — concurrent Claude Code sessions will clobber each other.
@@ -56,6 +63,8 @@ Hook install/uninstall lives in `pkg/hookconfig` — see that package's README. 
 
 **Mtime-based optimistic locking instead of flock.** `AtomicUpdateSettings()` checks that the file's mtime hasn't changed between read and write. If it has, it retries with backoff. This is simpler than file locking, works cross-platform, and is sufficient for the infrequent writes that hooks installation involves.
 
+**Bundled skills use provider-rendered templates.** The shipped skills share a registry, but content can differ where the harnesses expose different session IDs or local transcript layouts. Claude `/til` uses `CLAUDE_SESSION_ID`; Codex `/til` uses `CODEX_THREAD_ID`.
+
 
 ## Testing
 
@@ -63,10 +72,10 @@ Hook install/uninstall lives in `pkg/hookconfig` — see that package's README. 
 go test ./pkg/config/...
 ```
 
-Tests cover atomic settings updates under concurrency, field preservation across round-trips, and config validation. Hook install/uninstall tests live in `pkg/hookconfig`.
+Tests cover atomic settings updates under concurrency, field preservation across round-trips, config validation, and bundled skill install/uninstall behavior. Hook install/uninstall tests live in `pkg/hookconfig`.
 
 ## Dependencies
 
 **Uses:** `pkg/logger` (logging). `paths.go` deliberately does not import `pkg/provider` even though it owns parallel constants — `pkg/provider` imports `pkg/hookconfig`, which imports `pkg/config`. The duplicated `ClaudeStateDirEnv` constant must stay in sync between the two packages.
 
-**Used by:** `cmd/` (setup, login, hooks, status), `pkg/daemon/` (state dir), `pkg/hookconfig/` (settings struct, atomic update, tool-name constants), `pkg/http/` (upload config), `pkg/provider/` (Claude paths, skills install), `pkg/redactor/` (redaction patterns), `pkg/sync/` (upload config)
+**Used by:** `cmd/` (setup, login, hooks, status), `pkg/daemon/` (state dir), `pkg/hookconfig/` (settings struct, atomic update, tool-name constants), `pkg/http/` (upload config), `pkg/provider/` (provider paths, skills install), `pkg/redactor/` (redaction patterns), `pkg/sync/` (upload config)

@@ -89,11 +89,14 @@ Run this checklist after every significant Codex-support change. The main goal i
 
 ## Skills
 
-- [ ] Confirm `/til` is still installed:
+- [ ] Confirm bundled skills install for detected providers:
   ```sh
   ./confab skills add
   ```
+- [ ] Confirm Claude has `~/.claude/skills/til/SKILL.md` and `~/.claude/skills/retro/SKILL.md`.
+- [ ] Confirm Codex has `~/.codex/skills/til/SKILL.md` and `~/.codex/skills/retro/SKILL.md` when Codex is detected or set up.
 - [ ] In Claude Code, run a small `/til` flow and confirm the TIL posts to the backend.
+- [ ] In Codex, run a small `/til` flow and confirm the TIL posts to the backend for the root thread.
 - [ ] Run a small `/retro <session-id>` flow and confirm output is unchanged.
 
 ## Path Override Smoke Test

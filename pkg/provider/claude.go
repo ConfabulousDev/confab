@@ -87,11 +87,30 @@ func (p ClaudeCode) UninstallHooks() (string, error) {
 
 // InstallSkills installs the Claude Code skills shipped with confab
 // (/til and /retro).
-func (ClaudeCode) InstallSkills() error {
-	if err := config.InstallTilSkill(); err != nil {
+func (p ClaudeCode) InstallSkills() error {
+	stateDir, err := p.StateDir()
+	if err != nil {
 		return err
 	}
-	return config.InstallRetroSkill()
+	return config.InstallBundledSkills(stateDir, config.SkillProviderClaude)
+}
+
+// UninstallSkills removes the Claude Code skills shipped with confab.
+func (p ClaudeCode) UninstallSkills() error {
+	stateDir, err := p.StateDir()
+	if err != nil {
+		return err
+	}
+	return config.UninstallBundledSkills(stateDir)
+}
+
+// IsSkillInstalled reports whether a shipped Claude Code skill exists.
+func (p ClaudeCode) IsSkillInstalled(name string) bool {
+	stateDir, err := p.StateDir()
+	if err != nil {
+		return false
+	}
+	return config.IsBundledSkillInstalled(stateDir, name)
 }
 
 // WriteHookResponse writes a ClaudeHookResponse to w.

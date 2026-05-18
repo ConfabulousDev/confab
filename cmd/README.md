@@ -18,20 +18,20 @@ CLI command layer built on [Cobra](https://github.com/spf13/cobra). Each file de
 | `spawn.go` | Generic `maybeSpawnDaemon(p, *daemonLaunchInput)` — single dispatch for Claude and Codex daemon spawn. `daemonLaunchInput` is the canonical wire format between the hook and the freshly-spawned daemon process. |
 | `login.go` | Device code auth flow and API key login |
 | `logout.go` | Clear stored credentials |
-| `setup.go` | One-command setup: auth + hooks. Bare `confab setup --backend-url ...` auto-detects every provider CLI on `PATH` (via `provider.DetectInstalled`) and installs hooks for each. `--provider X` overrides to single-provider mode. Best-effort across providers: per-provider failure is reported in a summary but doesn't abort the loop. |
+| `setup.go` | One-command setup: auth + hooks + bundled skills. Bare `confab setup --backend-url ...` auto-detects every provider CLI on `PATH` (via `provider.DetectInstalled`) and installs hooks/skills for each. `--provider X` overrides to single-provider mode. Best-effort across providers: per-provider failure is reported in a summary but doesn't abort the loop. |
 | `status.go` | Show backend auth + per-provider hook/skill state for every supported provider. No `--provider` flag — output always covers all providers, with orphan-hook detection (hooks installed but CLI missing) and a remediation footer. |
 | `list.go` | List local sessions (dispatches through `provider.Provider.ScanSessions`) |
 | `list_utils.go` | Duration parsing, session filtering — fully provider-agnostic |
 | `save.go` | Manual session upload by ID (dispatches through `provider.Provider.FindSessionByID` + `DefaultCWD`) |
 | `install.go` | Copy binary to `~/.local/bin/` |
 | `update.go` | Check/install updates from GitHub Releases |
-| `til.go` | `confab til` — save a TIL to the backend (invoked by /til skill). Accepts `--provider` to pick the daemon-state namespace. |
+| `til.go` | `confab til` — save a TIL to the backend (invoked by /til skill). Accepts `--provider` to pick the daemon-state namespace and normalizes Codex subagent thread IDs to the root thread before loading state. |
 | `retro.go` | `confab retro` — fetch session transcript for retrospective (invoked by /retro skill) |
 | `session.go` | Parent command for session subcommands (`confab session <cmd>`) |
 | `session_get_summary.go` | `confab session get-summary` — fetch condensed session transcript from backend |
 | `session_download.go` | `confab session download` — download raw JSONL transcript files from backend |
 | `session_list_files.go` | `confab session list-files` — list transcript file metadata for a session |
-| `skills.go` | `confab skills add/remove` — install/uninstall Claude Code skills |
+| `skills.go` | `confab skills add/remove` — install/uninstall bundled skills for supported providers. `add` defaults to detected providers; `remove` defaults to all supported provider dirs. |
 | `announce.go` | General announcement system for post-update feature notifications |
 | `autoupdate.go` | Enable/disable auto-update |
 | `version.go` | Print version info |
@@ -96,11 +96,10 @@ This is a cross-cutting change spanning multiple packages:
 
 ### Adding a new skill
 
-1. **`pkg/config/skill_<name>.go`** — Add template constant, `Install<Name>Skill()`, `Uninstall<Name>Skill()`, `Is<Name>SkillInstalled()`, `Ensure<Name>Skill()`
-2. **`cmd/skills.go`** — Add install/uninstall calls in `skillsAddCmd` and `skillsRemoveCmd`
-3. **`cmd/announce.go`** — Add an `Announcement` entry for auto-rollout on update
-4. **`cmd/status.go`** — Add status check for the new skill
-5. **`cmd/setup.go`** — Add to the setup flow
+1. **`pkg/config/skill_<name>.go`** — Add provider-rendered template constants/snippets.
+2. **`pkg/config/bundled_skills.go`** — Add the skill name to `bundledSkillNames` and `bundledSkillTemplate`.
+3. **`cmd/announce.go`** — Add an `Announcement` entry for Claude auto-rollout on update if the skill should be announced.
+4. **Provider methods** — `Provider.InstallSkills()` / `UninstallSkills()` / `IsSkillInstalled()` automatically pick up the bundled registry when they call `pkg/config`.
 
 ## Invariants
 
@@ -125,7 +124,7 @@ This is a cross-cutting change spanning multiple packages:
 
 **SessionStart routes every firing through `p.WalkUpToRoot`.** Identity for Claude; thread-edge walk for Codex. For Codex, every subagent SessionStart that lands in an already-running root tree becomes a no-op via state-file dedup. `confab save --provider codex <subagent-uuid>` performs the same walk-up so manual saves of any UUID in a tree always sync the whole tree.
 
-**Announcements (`/til`, `/retro` skill auto-install) only run for Claude.** They write to `~/.claude/skills/` and surface Claude-only slash commands; running them on Codex SessionStart would silently install Claude config files for users who never installed Claude Code.
+**SessionStart keeps bundled skills aligned with hooks.** Claude runs announcements, which install missing skills and return a visible system message. Codex silently ensures bundled skills under `~/.codex/skills/` so users who installed hooks get the same Confab skills without extra setup.
 
 **`list`, `save`, `til` route discovery through the `Provider` interface (CF-398).** Adding a new provider requires only `pkg/provider/<name>.go` + `<name>_discovery.go` — no changes in `cmd/`. The remaining `provider.NameClaudeCode` / `provider.NameCodex` references in `cmd/` are flag defaults (entry-point handling) and a couple of user-facing copy gates in `cmd/list.go` for the Codex-specific "save" hint.
 

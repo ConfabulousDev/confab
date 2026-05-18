@@ -20,7 +20,7 @@ var setupCmd = &cobra.Command{
 This command:
 1. Authenticates with the backend (if not already logged in)
 2. Detects installed provider CLIs (claude, codex) and installs hooks for each
-3. Installs provider-specific skills (Claude only; no-op for Codex)
+3. Installs provider-specific skills
 
 If --provider is set, only that provider is configured. If unset, hooks
 are installed for every provider whose CLI is on PATH.
