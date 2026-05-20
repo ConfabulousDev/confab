@@ -54,10 +54,11 @@ Leaf packages (no confab dependencies):
 ## Data Flow
 
 ```
-Claude Code writes transcript
+Claude Code / Codex writes transcript
         │
         ▼
-  ~/.claude/projects/<path>/<session-id>.jsonl
+  ~/.claude/projects/<path>/<session-id>.jsonl   (Claude Code)
+  ~/.codex/sessions/<yyyy>/<mm>/<dd>/rollout-*.jsonl   (Codex)
         │
         ▼
   daemon (pkg/daemon) watches file

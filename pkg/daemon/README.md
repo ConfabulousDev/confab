@@ -100,7 +100,7 @@ Full lifecycle tests with mock HTTP backend. Key scenarios:
 - File truncation resilience
 - Large files and chunk size limits
 
-Override `shutdownTimeout` (package var) in tests for fast execution. Use `CONFAB_CLAUDE_DIR` to isolate test directories.
+Override `shutdownTimeout` (package var) in tests for fast execution. Use `CONFAB_CLAUDE_DIR` / `CONFAB_CODEX_DIR` to isolate test directories per provider.
 
 ## Dependencies
 

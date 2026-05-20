@@ -14,10 +14,10 @@ go test -run TestName ./pkg/daemon/...  # Run a single test
 
 ## Architecture Overview
 
-Confab is a CLI tool that captures Claude Code session transcripts and uploads them to a backend. It operates in two modes:
+Confab is a CLI tool that captures Claude Code session transcripts and Codex session rollouts and uploads them to a backend. It operates in two modes:
 
 ### Sync Mode (Primary)
-- **Daemon-based incremental sync**: When a Claude Code session starts, the `SessionStart` hook spawns a background daemon (`confab sync start`)
+- **Daemon-based incremental sync**: When a Claude Code or Codex session starts, the `SessionStart` hook spawns a background daemon (`confab sync start`)
 - The daemon (`pkg/daemon/`) monitors the transcript file and uploads chunks periodically (30s intervals with jitter)
 - On session end, the `SessionEnd` hook signals the daemon to do a final sync and shut down
 - The daemon is resilient to backend unavailability and will retry on each sync interval
@@ -50,7 +50,7 @@ The backend API lives in the sibling repo `../confab-web`. When implementing CLI
 
 ## Data Flow
 
-1. Claude Code writes transcripts to `~/.claude/projects/<path>/<session-id>.jsonl`
+1. Claude Code writes transcripts to `~/.claude/projects/<path>/<session-id>.jsonl`; Codex writes rollouts to `~/.codex/sessions/<yyyy>/<mm>/<dd>/rollout-*.jsonl` (see Codex provider differences below)
 2. Daemon watches transcript file, reads new lines, applies redaction, uploads as chunks
 3. Backend tracks `last_synced_line` per file; daemon syncs only new content
 4. Agent sidechain files (`agent-*.jsonl`) are synced alongside the main transcript
@@ -94,7 +94,7 @@ git push origin v0.X.Y
 ## Testing Notes
 
 - Integration tests in `pkg/daemon/integration_test.go` test the full sync lifecycle
-- Use `CONFAB_CLAUDE_DIR` env var to override Claude directory for testing
+- Use `CONFAB_CLAUDE_DIR` / `CONFAB_CODEX_DIR` env vars to override Claude / Codex state directories for testing
 
 ## Development Practices
 
