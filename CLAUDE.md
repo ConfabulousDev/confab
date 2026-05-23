@@ -117,6 +117,10 @@ This is software that runs on user machines. Users trust us with their local env
 - **Updates are costly**: Patches require users to update. Getting it right the first time is far better than shipping fixes. Think through failure modes carefully before implementing.
 - **Correctness over cleverness**: A simple, obviously correct solution beats an elegant but subtle one.
 
+### AI provider wire formats
+
+Before adding or changing a struct that decodes Claude Code / Codex payloads (hook stdin, transcript JSONL, rollout JSONL), verify the shape — don't assume. Sources: official docs, real local samples under `~/.claude` / `~/.codex`, and upstream source (Codex is open source at `openai/codex`). Same field name across providers is not the same shape; if upstream declares `any` / `true` / `oneOf`, use `json.RawMessage` or `any`, not `map[string]any`.
+
 ### Code Hygiene
 
 - **DRY**: Extract shared logic into reusable functions. Check for existing utilities before adding new code.
