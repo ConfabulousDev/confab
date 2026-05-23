@@ -47,12 +47,10 @@ func (p Codex) ParseSessionHook(r io.Reader) (HookInput, error) {
 func (p Codex) ShouldSpawnForInput(in HookInput) bool {
 	info, err := p.ReadSessionInfo(in.TranscriptPath())
 	if err != nil {
-		// Codex SessionStart can fire before Codex finishes writing the
-		// rollout file (~5–50ms race on a fresh session). For os.IsNotExist
-		// we err toward over-spawning rather than missing a user session;
-		// the daemon's per-cycle DiscoverCodexDescendants catches the rest.
-		// Other errors (permission, malformed JSON) signal a real problem,
-		// so refuse — matches the pre-CF-396 behavior.
+		// Codex SessionStart can fire before the rollout exists (roughly
+		// 5-50ms on a fresh session). Missing files spawn optimistically;
+		// the sync loop's descendant discovery catches later subagents.
+		// Other errors mean the rollout is unreadable, so refuse.
 		if os.IsNotExist(err) {
 			return true
 		}

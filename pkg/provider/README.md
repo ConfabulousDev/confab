@@ -1,6 +1,6 @@
 # pkg/provider
 
-Provider-specific local behavior for the tools Confab integrates with (currently Claude Code and Codex). Each provider is a concrete type that owns its paths, hook parsing, session discovery, and transcript metadata extraction.
+Provider-specific local behavior for Confab integrations. Current providers: Claude Code and Codex. Each concrete provider owns paths, hook parsing, session discovery, and transcript metadata extraction.
 
 The package defines a `Provider` interface and a `HookInput` interface (Phase 1 + 2 of the abstraction work — see CF-394). Both concrete provider types satisfy `Provider`; hook-input adapters in `hookinput.go` satisfy `HookInput`. As of CF-397 (Phase 3), `pkg/sync/engine.go` dispatches sync-loop behavior (root metadata, descendant discovery, chunk annotation) through the interface; as of CF-398 (Phase 4), session discovery (`ScanSessions`, `FindSessionByID`, `ExtractMetadata`, `DefaultCWD`) is also routed through the interface. `cmd/` has no discovery-related provider-name branches.
 
@@ -35,7 +35,7 @@ The package defines a `Provider` interface and a `HookInput` interface (Phase 1 
 - Discovery: `ScanSessions`, `FindSessionByID` (walks subagent UUIDs up to the root), `ExtractMetadata`, `DefaultCWD` (the four `Provider` interface methods).
 - Additional rollout helpers: `ScanCodexSessions` (rich `CodexSessionInfo` form), `ReadSessionInfo`, `SessionIDFromRolloutPath`, `ExtractFirstUserMessageFromLines`, internal `walkRollouts` helper.
 - Filtering: `CodexSessionInfo.IsUserSession()` excludes subagents/memory rollouts by `thread_source` and `agent_*` metadata.
-- Hooks: `ReadHookInput`, `ReadSessionHookInput`, `InstallHooks`/`UninstallHooks`/`IsHooksInstalled` (delegate to `pkg/hookconfig`, which edits `~/.codex/config.toml`). Only `SessionStart` is installed — see [Codex daemon shutdown](#codex-daemon-shutdown).
+- Hooks: `ReadHookInput`, `ReadSessionHookInput`, `InstallHooks`/`UninstallHooks`/`IsHooksInstalled` (delegate to `pkg/hookconfig`, which edits `~/.codex/config.toml`). Installs `SessionStart`, `PreToolUse`, and `PostToolUse`; shutdown remains parent-PID driven.
 - Skills: `InstallSkills` installs `/til` and `/retro` under `~/.codex/skills/`; `UninstallSkills` removes bundled skills; `IsSkillInstalled` reports per-skill state (delegates to `pkg/config`).
 - Hook response: `WriteHookResponse` writes a `types.CodexHookResponse`.
 - Parent detection: `FindParentPID`, `IsProcess`, `MatchesProcess` (regex `(?i)\bcodex\b`) for daemon parent-liveness monitoring, mirroring `ClaudeCode`.
@@ -46,7 +46,7 @@ The package defines a `Provider` interface and a `HookInput` interface (Phase 1 
 
 Codex fires `Stop` at every agent/turn boundary, including root rollout stops while the interactive Codex session is still alive. Wiring `confab hook session-end` to `[[hooks.Stop]]` would therefore kill the root sync daemon prematurely. Instead:
 
-- `Codex.InstallHooks` writes only `[[hooks.SessionStart]]` into the managed block.
+- `Codex.InstallHooks` writes `[[hooks.SessionStart]]`, `[[hooks.PreToolUse]]`, and `[[hooks.PostToolUse]]` into the managed block.
 - `cmd/spawn.go` stores `Codex.FindParentPID()` on the daemon at spawn time.
 - The daemon's main loop (`pkg/daemon/daemon.go`) monitors that PID and shuts down when the interactive Codex process exits — same mechanism Claude Code uses.
 - `confab hook session-end --provider codex` is rejected with an explicit error pointing users at their `~/.codex/config.toml`.
@@ -97,7 +97,7 @@ Methods every provider must implement:
 - `Codex.FindSessionByID` returns the ROOT thread for any partial UUID matching a subagent. The package-private `findRolloutByID` helper resolves concrete rollout files before the walk-up step.
 - `DetectInstalled()` returns names in fixed `detectOrder` (`claude-code` first, then `codex`) regardless of `LookPath` lookup order. This determinism is load-bearing for setup output and tests.
 - `CLIBinaryName()` is the OS binary name (`"claude"`, `"codex"`) — never the canonical provider name. The two diverge for Claude Code (`claude-code` vs `claude`).
-- `Codex.InstallHooks` installs only `SessionStart`. Daemon shutdown is driven by parent-PID liveness, never by Codex `Stop`.
+- `Codex.InstallHooks` installs `SessionStart`, `PreToolUse`, and `PostToolUse`. Daemon shutdown is driven by parent-PID liveness, never by Codex `Stop`.
 - `Codex.InstallSkills` writes only `SKILL.md` files under `~/.codex/skills/<name>/`; optional Codex UI metadata such as `agents/openai.yaml` is not generated for Confab's bundled skills.
 - `CodexRolloutMetadata` JSON tags are wire-format pins. Existing rows in the backend's `codex_rollouts` table were written against these tags; renaming any field is a backwards-incompatible change. Adding new optional fields (with `omitempty`) is safe.
 - `CodexRolloutMetadata` string fields (cwd, model, agent_*) ride on the first chunk unredacted. Rollout *content* is redacted in `pkg/sync.FileTracker.ReadChunk`; this struct is not. Before adding a field that could carry free-text user content, plumb the redactor into `Codex.InitTranscript` / `Codex.DiscoverDescendants` — see the struct doc in `codex_rollout.go`.

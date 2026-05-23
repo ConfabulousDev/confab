@@ -1,13 +1,13 @@
 ---
 status: living-checklist
 scope: Manual QA cycle for Codex-support changes
-intent: Provide a repeatable sanity check that Claude Code behavior remains unchanged while Confab moves toward Codex support.
-last_reviewed: 2026-05-12
+intent: Provide a repeatable sanity check for Claude compatibility and current Codex behavior.
+last_reviewed: 2026-05-23
 ---
 
 # Codex Support Manual QA
 
-Run this checklist after every significant Codex-support change. The main goal is to catch regressions in the existing Claude Code experience before adding or enabling Codex behavior.
+Run this checklist after significant provider changes. The goal is to preserve Claude Code compatibility while verifying the current Codex surface.
 
 ## Preflight
 
@@ -32,9 +32,13 @@ Run this checklist after every significant Codex-support change. The main goal i
   ```sh
   cp ~/.claude/settings.json ~/.claude/settings.json.confab-qa-backup
   ```
-- [ ] Run hook installation:
+- [ ] Run Claude hook installation:
   ```sh
-  ./confab hooks add
+  ./confab hooks add --provider claude-code
+  ```
+- [ ] Run Codex hook installation if Codex is available:
+  ```sh
+  ./confab hooks add --provider codex
   ```
 - [ ] Verify `~/.claude/settings.json` still uses the existing command names:
   - `confab hook session-start`
@@ -42,9 +46,10 @@ Run this checklist after every significant Codex-support change. The main goal i
   - `confab hook pre-tool-use`
   - `confab hook post-tool-use`
   - `confab hook user-prompt-submit`
-- [ ] Verify `PreToolUse` and `PostToolUse` still include both matchers:
+- [ ] Verify Claude `PreToolUse` and `PostToolUse` still include both matchers:
   - `Bash`
   - `mcp__github__create_pull_request`
+- [ ] Verify Codex config includes Confab `SessionStart`, `PreToolUse`, and `PostToolUse` hooks, and does not include Confab `Stop` or `UserPromptSubmit` hooks.
 - [ ] Diff the settings file against the backup:
   ```sh
   diff -u ~/.claude/settings.json.confab-qa-backup ~/.claude/settings.json
@@ -141,4 +146,4 @@ Run this checklist after every significant Codex-support change. The main goal i
 - Daemon lifecycle is unchanged.
 - Git commit and PR linking still work.
 - `/til` and `/retro` still work.
-- No Codex-specific behavior is exposed unless the current checkpoint explicitly intends it.
+- Codex setup, hook install, skills, root sync, subagent sync, and Bash-based GitHub linking work when Codex is available.

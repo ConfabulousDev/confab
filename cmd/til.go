@@ -1,5 +1,5 @@
 // ABOUTME: CLI command for saving TILs (Today I Learned) to the backend.
-// ABOUTME: Invoked by the /til Claude Code skill — looks up daemon state, extracts message UUID, POSTs to API.
+// ABOUTME: Invoked by bundled /til skills; looks up daemon state, extracts message UUID, POSTs to API.
 package cmd
 
 import (
@@ -42,8 +42,7 @@ type tilResponse struct {
 var tilCmd = &cobra.Command{
 	Use:   "til",
 	Short: "Save a TIL (Today I Learned) to the backend",
-	Long: `Save a TIL captured during a Claude Code session. The /til skill that
-invokes this command is Claude Code only today.
+	Long: `Save a TIL captured during a Claude Code or Codex session.
 
 This command is typically invoked by the /til skill, not directly by users.
 It looks up the active daemon state for the given session, extracts the

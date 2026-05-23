@@ -154,7 +154,7 @@ func TestCodexExtractFirstUserMessageFromLinesTruncatesAtUTF8Boundary(t *testing
 // v0.130.0 writes for spawned subagents: `source` is a nested object, not a
 // string. Earlier struct typing (Source string) caused json.Unmarshal to fail
 // and ReadSessionInfo silently returned an empty CodexSessionInfo, which then
-// looked like a user-session and got skipped by DiscoverCodexDescendants.
+// looked like a user-session and got skipped by provider descendant discovery.
 // The flattening also has to fit the backend's 64-char `source` cap.
 func TestCodexReadSessionInfoParsesNestedSourceObject(t *testing.T) {
 	tmpDir := t.TempDir()

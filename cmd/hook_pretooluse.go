@@ -84,9 +84,8 @@ func handlePreToolUse(r io.Reader, w io.Writer) error {
 		return nil // Exit silently, don't block the firing provider.
 	}
 
-	// MCP GitHub PR matcher is Claude-only today (not in Codex managed
-	// block); the dispatch here is harmless for Codex because Codex won't
-	// invoke this branch.
+	// MCP GitHub PR matcher is Claude-only. Codex managed hooks use
+	// Bash for PR creation, so Codex never invokes this branch.
 	if hookInput.ToolName == config.ToolNameMCPGitHubCreatePR {
 		return handleMCPPRCreate(p, hookInput, w)
 	}

@@ -24,7 +24,8 @@ var hooksAddCmd = &cobra.Command{
 For Claude Code: SessionStart/End, PreToolUse, PostToolUse, and
 UserPromptSubmit hooks are installed in ~/.claude/settings.json.
 
-For Codex: SessionStart hook is installed in ~/.codex/config.toml.`,
+For Codex: SessionStart, PreToolUse, and PostToolUse hooks are installed
+in ~/.codex/config.toml. Shutdown stays parent-PID driven.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger.Info("Running hooks add command")
 		providerName, err := provider.NormalizeName(hooksProviderName)

@@ -1,6 +1,6 @@
 # pkg/daemon
 
-Background sync daemon that monitors a provider session transcript (Claude Code transcript or Codex rollout) and uploads it incrementally to the backend. One daemon runs per active session (one per Codex root tree for Codex).
+Background sync daemon for provider transcripts: Claude Code transcript JSONL or Codex rollout JSONL. One daemon runs per active Claude session or Codex root tree.
 
 ## Files
 
@@ -61,7 +61,7 @@ spawn ──> waitForTranscript (poll 2s, timeout 60s)
 - **`Stop()` is idempotent** (uses `sync.Once`). Multiple callers (signal handler, parent monitor, explicit stop) can all call `Stop()` safely.
 - **Consecutive 404 detection.** After 3 consecutive 404 errors (`maxConsecutiveNotFound`), the daemon shuts down — the session was deleted from the backend.
 - **Auth recovery.** On `ErrUnauthorized`, the engine is reset to force config re-read on the next cycle. This allows users to fix their API key without restarting the daemon.
-- **Codex: one daemon per root tree, not per rollout.** The hook handler walks every Codex SessionStart event up to its top-most root before calling `maybeSpawnCodexDaemon`, so state files are always keyed by root UUID. Subagent rollouts are picked up by the running root daemon's per-cycle `tracker.DiscoverCodexDescendants` call and uploaded as sidechain files. Subagent SessionStart events for an already-running root tree become no-ops.
+- **Codex: one daemon per root tree, not per rollout.** The hook handler walks every Codex `SessionStart` event up to its top-most root before spawning, so state files are keyed by root UUID. The running root daemon calls provider descendant discovery each sync cycle and uploads verified subagent rollouts as sidechain files. `SessionStart` events for already-running trees become no-ops.
 
 ## Design Decisions
 

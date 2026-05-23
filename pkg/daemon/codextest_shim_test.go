@@ -38,7 +38,7 @@ func (s *codextestFixtureShim) addRoot(uuid, firstUserMsg string) codexShimEntry
 
 // addChild inserts a subagent thread with the given parent UUID and
 // agent_role, plus a user message line. The fixture creates the rollout
-// JSONL file on disk so the engine's per-cycle DiscoverCodexDescendants
+// JSONL file on disk so the engine's per-cycle provider descendant discovery
 // validates the path.
 func (s *codextestFixtureShim) addChild(parentUUID, uuid, firstUserMsg, agentRole string) codexShimEntry {
 	b := s.AddSubagent(parentUUID, uuid, codextest.SubagentOpts{AgentRole: agentRole}).

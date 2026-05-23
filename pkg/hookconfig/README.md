@@ -15,7 +15,7 @@ Before CF-396 (Phase 2), hook install logic lived in `pkg/config` (Claude side) 
 | File | Role |
 |------|------|
 | `claude.go` | Claude Code hook install/uninstall: sync (`SessionStart`/`SessionEnd`), `PreToolUse`, `PostToolUse`, `UserPromptSubmit`. Edits `~/.claude/settings.json` via `config.AtomicUpdateSettings`. |
-| `codex.go` | Codex hook install/uninstall: writes a confab-managed `[features]` + `[[hooks.SessionStart]]` block in `~/.codex/config.toml`. Preserves user config; atomic write with backup. |
+| `codex.go` | Codex hook install/uninstall: writes a confab-managed `[features]` block plus `SessionStart`, `PreToolUse`, and `PostToolUse` hooks in `~/.codex/config.toml`. Preserves user config; atomic write with backup. |
 
 ## Public API
 
@@ -55,7 +55,7 @@ The hash blob covers `{event_name, hooks: [{async, command, statusMessage, timeo
 
 - **Atomic writes.** Both providers use `config.AtomicUpdateSettings` (Claude) or a `.bak` + atomic rename (Codex) so a crashed install never leaves a half-edited config.
 - **Idempotent.** Calling `Install...` twice produces the same file as calling it once. Tests pin this for both providers.
-- **Preserves user config.** Neither provider rewrites unmanaged config. Codex only touches `[features]` + the managed `[[hooks.SessionStart]]` block.
+- **Preserves user config.** Neither provider rewrites unmanaged config. Codex only touches `[features]` and the managed Confab hook block.
 - **No `[[hooks.Stop]]` / `[[hooks.UserPromptSubmit]]` for Codex.** Codex fires `Stop` at every agent/turn boundary (Stop-driven shutdown would kill the root daemon prematurely), and parent-PID monitoring already covers the Claude `UserPromptSubmit` teleport case.
 - **Trusted-hash positional keys.** Codex's `[hooks.state."<configPath>:<event>:<group_idx>:<hook_idx>"]` key uses the hook's actual position in the existing `[[hooks.<Event>]]` list. `countCodexHookMatcherGroups` runs **per event** and on the post-strip config so re-installs interleave correctly with any unmanaged user-authored blocks at any of the three event types.
 

@@ -1,8 +1,8 @@
 # confab
 
-Sync and explore your Claude Code and Codex sessions. Connect `confab` to your Confab backend to capture transcripts in real-time for exploration, sharing, and analysis.
+Sync and explore Claude Code and Codex sessions. Connect `confab` to your Confab backend to capture transcripts in real time for exploration, sharing, and analysis.
 
-Works seamlessly — your `claude` and `codex` workflows stay exactly the same.
+Your `claude` and `codex` workflows stay unchanged.
 
 ![How Confab works](docs/how-it-works.svg)
 
@@ -16,12 +16,12 @@ curl -fsSL https://raw.githubusercontent.com/ConfabulousDev/confab/main/install.
 confab setup --backend-url https://confab.yourcompany.com
 ```
 
-`confab setup` auto-detects whichever provider CLIs (`claude`, `codex`) are on your `PATH` and wires hooks for each. Both Claude Code and Codex sessions sync to the backend in the same setup pass.
+`confab setup` detects provider CLIs (`claude`, `codex`) on `PATH` and wires hooks for each. Claude Code and Codex sessions sync in the same setup pass.
 
 ## Connect to Your Backend
 
 ```bash
-# Initial setup — configures backend, authenticates, and installs hooks
+# Initial setup: backend, auth, hooks, bundled skills
 confab setup --backend-url https://confab.yourcompany.com
 
 # Login separately (if already set up)
@@ -55,7 +55,7 @@ confab sync status
 confab hooks remove
 ```
 
-The sync daemon uploads transcript data periodically during your session, so data isn't lost if the session ends unexpectedly.
+The sync daemon uploads transcript chunks while you work, reducing data loss if the session exits unexpectedly.
 
 ### List Sessions
 
@@ -68,7 +68,7 @@ confab list -d 5d    # Sessions from last 5 days
 confab list -d 12h   # Sessions from last 12 hours
 ```
 
-Copy a session ID from the list to use with `confab save`.
+Use a listed session ID with `confab save`.
 
 ### Manual Upload
 
@@ -90,7 +90,7 @@ See [Redaction](REDACTION.md) for configuration details.
 
 ## Codex
 
-Confab supports Codex sessions alongside Claude Code. `confab setup` auto-detects the `codex` binary on your `PATH` and wires Codex hooks automatically — no extra invocation needed. Pass `--provider codex` explicitly to limit setup to Codex only.
+Confab supports Codex alongside Claude Code. `confab setup` detects `codex` on `PATH` and wires Codex hooks automatically. Use `--provider codex` to configure only Codex.
 
 ```bash
 # Auto-detect: installs hooks for every provider CLI on PATH
@@ -106,13 +106,13 @@ confab list --provider codex
 confab save --provider codex <id>
 ```
 
-Codex stores session rollouts under `~/.codex/sessions/<yyyy>/<mm>/<dd>/rollout-*.jsonl`. Subagent rollouts are discovered automatically via Codex's local state database and synced as sidechain files under their root session.
+Codex stores rollouts under `~/.codex/sessions/<yyyy>/<mm>/<dd>/rollout-*.jsonl`. Confab uses Codex's local SQLite state to walk subagent trees and sync descendant rollouts as sidechain files under the root session.
 
 ### Caveats
 
-- Skills (`/til`, `/retro`) are Claude Code only.
-- PR/commit linking hooks (PreToolUse, PostToolUse) are Claude Code only.
-- Codex sync daemons shut down via parent-process liveness, not a SessionEnd hook.
+- Bundled skills (`/til`, `/retro`) install for both Claude Code and Codex.
+- GitHub commit/PR linking is wired for Claude Code and Codex. Claude also supports the GitHub MCP PR matcher; Codex uses Bash hooks.
+- Codex sync daemons shut down via parent-process liveness, not a `SessionEnd`/`Stop` hook.
 
 ## Configuration
 

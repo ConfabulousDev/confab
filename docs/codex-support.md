@@ -1,14 +1,14 @@
 ---
-status: living-plan
+status: historical-plan
 linear: CF-342
 scope: Add Codex support without disrupting Claude Code users
-intent: Track checkpoints, invariants, risks, and decisions for the multi-phase Codex support work.
-last_reviewed: 2026-05-14
+intent: Preserve Codex-support decisions and stale-risk notes.
+last_reviewed: 2026-05-23
 ---
 
 # Codex Support Plan
 
-This document tracks the incremental path to Codex support. It is intentionally broader than any single PR, but each checkpoint must remain small enough to verify without changing existing Claude Code behavior.
+This document records the path to Codex support. Treat it as project history plus risk notes, not the current user-facing contract.
 
 ## Core Invariant
 
@@ -22,9 +22,9 @@ In particular, existing Claude Code users must continue to use commands such as:
 - `confab hook post-tool-use`
 - `confab hook user-prompt-submit`
 
-## Current Phase: Codex Root Session Rollout
+## Current State
 
-Goal: ship root Codex session upload and transcript viewing while preserving Claude Code behavior. Backend provider support and frontend Codex transcript rendering are already merged in `../confab-web`; the CLI implementation has shipped via the CF-348 PR and the preceding direct-pushed Codex rollout commits.
+Codex support now covers root rollout upload, descendant rollout sync through Codex SQLite state, bundled skills, and Bash-based GitHub commit/PR linking. Claude Code behavior remains the compatibility baseline.
 
 Completed checkpoints:
 
@@ -46,16 +46,16 @@ Completed checkpoints:
 - [x] Populate `first_user_message` metadata on Codex chunk uploads so freshly-uploaded Codex sessions appear in the web session list (CF-348).
 - [x] Ship the local CLI Codex commits to `origin/main` (CF-348 PR for `first_user_message`, direct push for the preceding Codex provider/daemon/backend-sync/dry-run/doc commits).
 
-Current rollout TODOs:
+Open rollout TODOs:
 
 - [ ] Run an end-to-end manual QA cycle against a real `confab-web` backend with `confab setup --provider codex`, Codex hooks, daemon sync, and web transcript viewing.
-- [ ] Update public/user-facing docs once Codex support is ready to advertise.
+- [x] Update public/user-facing docs for advertised Codex support.
 - [x] Clean up compatibility shims after provider ownership is stable: `pkg/discovery` has been removed; `pkg/config/paths.go` keeps only the real `ClaudeStateDirEnv` constant + `GetClaudeStateDir`.
 
 ## Later Checkpoints
 
 - [ ] Transcript normalization: add backend and frontend normalization keyed by provider before enabling analytics/Smart Recap for Codex.
-- [ ] Codex subagents: quick-follow TODO after root Codex backend upload. Model separate rollout files and parent relationships from Codex SQLite relationship state plus rollout `session_meta`.
+- [x] Codex subagents: discover descendant rollouts from Codex SQLite state and upload them as sidechain files under the root Confab session.
 - [x] Skills: bundled `/til` and `/retro` install into both Claude Code and Codex provider skill dirs. Claude `/til` uses `CLAUDE_SESSION_ID`; Codex `/til` uses `CODEX_THREAD_ID`.
 - [ ] Post-rollout backend cleanup in `../confab-web`: backfill legacy `sessions.session_type='Claude Code'` to `claude-code`, then remove temporary dual-value lookup/normalization code.
 
@@ -64,14 +64,14 @@ Current rollout TODOs:
 - Provider work started as concrete Claude extraction, not a premature multi-provider abstraction.
 - Hook payload formats are provider-specific. Do not introduce a generic normalized hook input until Codex requirements are confirmed.
 - `ClaudeSettings` remains Claude-specific because it wraps `~/.claude/settings.json`.
-- Parent PID monitoring remains Claude-specific implementation detail for now.
-- `/til` and `/retro` remain Claude-specific for this phase.
-- Documentation visible to users should remain Claude-specific until root Codex sync has passed manual QA and the CLI work is pushed.
+- Parent PID monitoring is provider-owned. Codex uses it for shutdown because `Stop` fires too often for daemon lifecycle.
+- `/til` and `/retro` install for both Claude Code and Codex.
+- Public docs advertise Codex support.
 - Codex support starts CLI-first but includes the full local lifecycle: discovery, `list`, `save`, daemon sync, and hook installation.
 - Codex root session backend upload is enabled after backend provider support in CF-347. Codex sync init sends top-level `provider="codex"`.
 - Codex session identity is parsed from rollout filenames matching `rollout-<timestamp>-<uuid>.jsonl`.
 - Codex rollout `session_meta` is parsed for metadata and top-level filtering. `confab list --provider codex` includes user sessions only: missing/`user` `thread_source`, and no `agent_path`, `agent_role`, or `agent_nickname`.
-- Codex local discovery reads rollout JSONL files only. Do not read Codex SQLite state in the first Codex CLI slice.
+- Codex local discovery reads rollout JSONL files. Subagent tree traversal reads Codex SQLite state.
 - Codex backend init should send top-level `provider`. Missing provider on backend requests must default to `claude-code` for old clients.
 - Backend session uniqueness should be `(user_id, provider, external_id)`. Session files inherit provider from their parent session.
 - Codex root rollout files should continue using `file_type="transcript"` for first backend integration.
@@ -82,9 +82,9 @@ Current rollout TODOs:
 
 ## Codex Subagent Notes
 
-Subagent upload is postponed until after root Codex backend upload works.
+Codex subagent upload now uses root-owned sidechain files.
 
-Codex subagents differ from Claude Code sidechains. Claude Code stores subagents as files under the parent session directory, so Confab can upload them as `file_type="agent"` on the same backend session. Codex subagents are separate rollout-backed threads with their own session IDs. They should eventually be uploaded as separate backend sessions linked to their parent, not forced into Claude's agent-file shape.
+Codex subagents differ from Claude Code sidechains. Claude Code stores subagents as files under the parent session directory. Codex subagents are separate rollout-backed threads with their own session IDs. The current CLI uploads verified descendant rollouts as `file_type="agent"` sidechain files under the root backend session.
 
 For Codex subagents, SQLite should be treated as the relationship index and rollout JSONL as the transcript source of truth:
 
@@ -94,7 +94,7 @@ For Codex subagents, SQLite should be treated as the relationship index and roll
 - Do not infer parent-child relationships from parent conversation text or `spawn_agent` tool output.
 - Do not upload guessed relationships. If the SQLite relationship or child rollout cannot be verified, skip the relationship and log locally.
 
-Likely backend shape for subagents:
+Possible future backend shape for richer subagent modeling:
 
 - Root and child Codex rollouts both create sessions with `provider="codex"`.
 - Child sessions carry optional relationship metadata such as `parent_external_id`, `thread_source`, `agent_path`, `agent_role`, `agent_nickname`, and depth if available.
@@ -112,4 +112,4 @@ Earlier checkpoints kept a `pkg/discovery` package and several `pkg/config/paths
 - Mechanical hook type renames can hide JSON wire changes. Protect with exact response and hook settings tests.
 - Provider constructor injection can sprawl. Limit command constructor changes to touched hook/status flows.
 - Daemon state and inbox files are operationally sensitive. Do not change their filenames or JSON shape in this phase.
-- Codex assumptions can drift quickly. Re-check Codex hook config, transcript layout, and subagent metadata before expanding beyond root rollout upload.
+- Codex assumptions can drift quickly. Re-check Codex hook config, transcript layout, and subagent metadata before expanding the Codex surface.

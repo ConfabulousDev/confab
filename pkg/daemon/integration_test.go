@@ -2162,7 +2162,7 @@ func TestDaemonSessionDeletedRecovery(t *testing.T) {
 // These exercise the daemon end-to-end with a Codex root rollout + an
 // in-memory SQLite fixture for descendant discovery. The daemon should:
 //   - upload the root rollout as file_type=transcript
-//   - discover descendants on each cycle via DiscoverCodexDescendants
+//   - discover descendants on each cycle via provider descendant discovery
 //   - upload children as file_type=agent under the root's session
 //   - attach codex_rollout metadata to the FIRST chunk of every rollout
 // =================================================================================================
