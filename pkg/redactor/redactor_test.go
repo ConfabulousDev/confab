@@ -1112,11 +1112,12 @@ func TestRedact_NoCatastrophicBacktracking(t *testing.T) {
 		t.Fatal("expected non-nil redactor")
 	}
 
-	// 5MB of `A` after a private-key opening marker, no closing marker.
-	// On a backtracking engine this would explore O(2^n) paths.
+	// 256KB of `A` after a private-key opening marker, no closing marker.
+	// On a backtracking engine this would explore O(2^n) paths while
+	// keeping the linear-time RE2 case fast enough under the race detector.
 	var b strings.Builder
 	b.WriteString("-----BEGIN RSA PRIVATE KEY-----\n")
-	for i := 0; i < 5*1024*1024; i++ {
+	for i := 0; i < 256*1024; i++ {
 		b.WriteByte('A')
 	}
 	input := b.String()
