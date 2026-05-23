@@ -299,7 +299,51 @@ func TestCodexHookInputUnmarshalsToolUseFields(t *testing.T) {
 	if got.ToolUseID != "tu_abc" {
 		t.Errorf("ToolUseID = %q, want %q", got.ToolUseID, "tu_abc")
 	}
-	if code, _ := got.ToolResponse["exit_code"].(float64); code != 0 {
-		t.Errorf("ToolResponse[exit_code] = %v, want 0", got.ToolResponse["exit_code"])
+	resp := got.ToolResponseMap()
+	if code, _ := resp["exit_code"].(float64); code != 0 {
+		t.Errorf("ToolResponseMap[exit_code] = %v, want 0", resp["exit_code"])
+	}
+}
+
+// TestCodexHookInputToolResponseString covers the Codex shell-tool case
+// where tool_response is a plain JSON string (the aggregated exec output
+// from format_exec_output_str in codex-rs). The struct must unmarshal
+// without error and ToolResponseMap must wrap the string under "stdout"
+// so the PR-URL extractor and other downstream consumers keep working.
+func TestCodexHookInputToolResponseString(t *testing.T) {
+	payload := `{
+		"session_id": "01234567-89ab-cdef-0123-456789abcdef",
+		"hook_event_name": "PostToolUse",
+		"tool_name": "Bash",
+		"tool_input": {"command": "gh pr create"},
+		"tool_response": "https://github.com/o/r/pull/42\n"
+	}`
+
+	var got CodexHookInput
+	if err := json.Unmarshal([]byte(payload), &got); err != nil {
+		t.Fatalf("Unmarshal CodexHookInput with string tool_response: %v", err)
+	}
+	resp := got.ToolResponseMap()
+	if stdout, _ := resp["stdout"].(string); stdout != "https://github.com/o/r/pull/42\n" {
+		t.Errorf("ToolResponseMap[stdout] = %q, want PR URL", stdout)
+	}
+}
+
+// TestCodexHookInputToolResponseNullOrEmpty pins the nil-return contract
+// for absent / null tool_response so callers don't need their own guard.
+func TestCodexHookInputToolResponseNullOrEmpty(t *testing.T) {
+	for name, payload := range map[string]string{
+		"missing": `{"session_id":"sid","hook_event_name":"PostToolUse"}`,
+		"null":    `{"session_id":"sid","hook_event_name":"PostToolUse","tool_response":null}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			var got CodexHookInput
+			if err := json.Unmarshal([]byte(payload), &got); err != nil {
+				t.Fatalf("Unmarshal: %v", err)
+			}
+			if resp := got.ToolResponseMap(); resp != nil {
+				t.Errorf("ToolResponseMap = %v, want nil", resp)
+			}
+		})
 	}
 }

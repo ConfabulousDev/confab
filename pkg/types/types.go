@@ -74,10 +74,36 @@ type CodexHookInput struct {
 	// tool's tool_name to "Bash" in hook stdin (HookToolName::bash() in
 	// codex-rs/core/src/tools/hook_names.rs), so our Bash matcher and
 	// gitCommit/ghPRCreate regexes work without per-provider tweaks.
-	ToolName     string         `json:"tool_name,omitempty"`
-	ToolInput    map[string]any `json:"tool_input,omitempty"`
-	ToolUseID    string         `json:"tool_use_id,omitempty"`
-	ToolResponse map[string]any `json:"tool_response,omitempty"` // PostToolUse only
+	//
+	// ToolResponse is json.RawMessage rather than map[string]any because
+	// Codex's PostToolUse schema types tool_response as `any` JSON value:
+	// the shell tool emits a plain JSON string (the aggregated exec output
+	// from format_exec_output_str), while other tools emit objects. Use
+	// ToolResponseMap to get a normalized map[string]any for either shape.
+	ToolName     string          `json:"tool_name,omitempty"`
+	ToolInput    map[string]any  `json:"tool_input,omitempty"`
+	ToolUseID    string          `json:"tool_use_id,omitempty"`
+	ToolResponse json.RawMessage `json:"tool_response,omitempty"` // PostToolUse only
+}
+
+// ToolResponseMap normalizes the Codex tool_response value into a
+// map[string]any so downstream provider-agnostic code can use a single
+// shape. Codex's shell tool sends a plain string; other tools send
+// objects. Strings get wrapped under "stdout" because that's how our
+// PR-URL extractor and success heuristics read shell output.
+func (c *CodexHookInput) ToolResponseMap() map[string]any {
+	if len(c.ToolResponse) == 0 {
+		return nil
+	}
+	var obj map[string]any
+	if err := json.Unmarshal(c.ToolResponse, &obj); err == nil {
+		return obj
+	}
+	var s string
+	if err := json.Unmarshal(c.ToolResponse, &s); err == nil {
+		return map[string]any{"stdout": s}
+	}
+	return nil
 }
 
 // CodexHookResponse is the JSON response sent back to Codex hooks.

@@ -93,7 +93,7 @@ func TestHandlePostToolUse_CodexPRCreateWalksUpAndLinks(t *testing.T) {
 		HookEventName: "PostToolUse",
 		ToolName:      config.ToolNameBash,
 		ToolInput:     map[string]any{"command": "gh pr create --title 'subagent PR'"},
-		ToolResponse:  map[string]any{"stdout": prURL + "\n", "exit_code": float64(0)},
+		ToolResponse:  json.RawMessage(`"` + prURL + `\n"`),
 	}
 	body, _ := json.Marshal(input)
 
@@ -130,7 +130,7 @@ func TestHandlePostToolUse_CodexNoState_SilentNoOp(t *testing.T) {
 		HookEventName: "PostToolUse",
 		ToolName:      config.ToolNameBash,
 		ToolInput:     map[string]any{"command": "gh pr create"},
-		ToolResponse:  map[string]any{"stdout": prURL, "exit_code": float64(0)},
+		ToolResponse:  json.RawMessage(`"` + prURL + `"`),
 	}
 	body, _ := json.Marshal(input)
 
@@ -158,7 +158,7 @@ func TestHandlePostToolUse_CodexNonBashTool(t *testing.T) {
 		HookEventName: "PostToolUse",
 		ToolName:      "Read",
 		ToolInput:     map[string]any{"file_path": "/tmp/x"},
-		ToolResponse:  map[string]any{"stdout": "ok"},
+		ToolResponse:  json.RawMessage(`"ok"`),
 	}
 	body, _ := json.Marshal(input)
 

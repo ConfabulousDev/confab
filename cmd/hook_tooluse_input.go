@@ -46,7 +46,7 @@ func readToolUseHookInput(p provider.Provider, r io.Reader) (*toolUseHookInput, 
 			SessionID:    in.SessionID,
 			ToolName:     in.ToolName,
 			ToolInput:    in.ToolInput,
-			ToolResponse: in.ToolResponse,
+			ToolResponse: in.ToolResponseMap(),
 			CWD:          in.CWD,
 		}, nil
 	default:
