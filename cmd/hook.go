@@ -34,8 +34,8 @@ not directly by users.
 Available handlers:
   session-start       Handle SessionStart events (starts sync daemon)
   session-end         Handle SessionEnd events (Claude Code only)
-  pre-tool-use        Handle PreToolUse events (Claude Code only)
-  post-tool-use       Handle PostToolUse events (Claude Code only)
+  pre-tool-use        Handle PreToolUse events
+  post-tool-use       Handle PostToolUse events
   user-prompt-submit  Handle UserPromptSubmit events (Claude Code only)`,
 }
 

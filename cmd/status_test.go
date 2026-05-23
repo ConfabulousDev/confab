@@ -145,10 +145,11 @@ func TestStatus_OrphanCodexHooks(t *testing.T) {
 		t.Fatalf("config: %v", err)
 	}
 
-	// Pre-populate ~/.codex/config.toml with a `confab`-named hook so
-	// IsHooksInstalled returns true. (Test binaries aren't named
-	// `confab`, so the hookconfig pkg's isConfabCommand wouldn't match
-	// hooks installed by the test binary itself.)
+	// Pre-populate ~/.codex/config.toml with all three confab-named hooks
+	// so IsHooksInstalled returns true (CF-492 requires SessionStart +
+	// PreToolUse + PostToolUse). Test binaries aren't named `confab`, so
+	// the hookconfig pkg's isConfabCommand wouldn't match hooks installed
+	// by the test binary itself.
 	if err := os.MkdirAll(codexDir, 0700); err != nil {
 		t.Fatalf("mkdir codex: %v", err)
 	}
@@ -161,6 +162,18 @@ matcher = "startup|resume|clear"
 [[hooks.SessionStart.hooks]]
 type = "command"
 command = "/usr/local/bin/confab hook session-start --provider codex"
+
+[[hooks.PreToolUse]]
+matcher = "Bash"
+[[hooks.PreToolUse.hooks]]
+type = "command"
+command = "/usr/local/bin/confab hook pre-tool-use --provider codex"
+
+[[hooks.PostToolUse]]
+matcher = "Bash"
+[[hooks.PostToolUse.hooks]]
+type = "command"
+command = "/usr/local/bin/confab hook post-tool-use --provider codex"
 `
 	if err := os.WriteFile(codexCfg, []byte(confabCodexCfg), 0600); err != nil {
 		t.Fatalf("write codex config: %v", err)

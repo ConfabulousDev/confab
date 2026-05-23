@@ -32,6 +32,10 @@ func (ClaudeCode) Name() string { return NameClaudeCode }
 // the Claude Code installer.
 func (ClaudeCode) CLIBinaryName() string { return "claude" }
 
+// SupportsCommitLinking reports that Claude Code installs PreToolUse +
+// PostToolUse hooks that drive bidirectional GitHub linking.
+func (ClaudeCode) SupportsCommitLinking() bool { return true }
+
 // ParseSessionHook reads a Claude SessionStart hook payload and returns
 // the provider-agnostic view.
 func (p ClaudeCode) ParseSessionHook(r io.Reader) (HookInput, error) {

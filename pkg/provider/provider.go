@@ -80,6 +80,13 @@ type Provider interface {
 	FindParentPID() int
 	IsProcess(pid int) bool
 
+	// SupportsCommitLinking reports whether this provider's hook system
+	// can drive bidirectional GitHub linking (commit-trailer + PR-body
+	// injection via PreToolUse; commit/PR URL linking via PostToolUse).
+	// Used by cmd/ handlers to silently no-op for providers that don't
+	// install those events.
+	SupportsCommitLinking() bool
+
 	// ParseSessionHook reads a SessionStart-style hook payload from r and
 	// returns the provider-agnostic view.
 	ParseSessionHook(r io.Reader) (HookInput, error)

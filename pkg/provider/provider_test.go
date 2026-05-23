@@ -85,3 +85,25 @@ var (
 	_ Provider = ClaudeCode{}
 	_ Provider = Codex{}
 )
+
+// TestSupportsCommitLinking pins the contract that both currently-shipped
+// providers advertise GitHub-link support. Adding a new provider that
+// returns false here is fine — cmd/ handlers no-op cleanly for it — but
+// the two existing providers must both stay true.
+func TestSupportsCommitLinking(t *testing.T) {
+	tests := []struct {
+		name string
+		p    Provider
+		want bool
+	}{
+		{"claude-code", ClaudeCode{}, true},
+		{"codex", Codex{}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.p.SupportsCommitLinking(); got != tt.want {
+				t.Errorf("%s.SupportsCommitLinking() = %v, want %v", tt.name, got, tt.want)
+			}
+		})
+	}
+}

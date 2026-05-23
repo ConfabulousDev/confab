@@ -52,9 +52,8 @@ Confab session link (📝 [Confab link]({backend_url}/sessions/{session_id})).
 
 For all other tool calls, exits silently (code 0) to allow normal flow.
 
-This command is typically invoked by Claude Code, not directly by users.
-
-Claude Code only — Codex does not fire PreToolUse.`,
+This command is typically invoked by the provider runtime (Claude Code or
+Codex), not directly by users. Provider is selected via --provider.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return handlePreToolUse(os.Stdin, os.Stdout)
 	},
@@ -68,56 +67,50 @@ func init() {
 // Errors are logged but not printed to stderr - tool hooks run frequently
 // and visible errors would be too noisy. See SessionStart hook for visible errors.
 func handlePreToolUse(r io.Reader, w io.Writer) error {
-	// Check if GitHub linking is disabled
 	if config.IsLinkFromGitHubDisabled() {
 		logger.Info("GitHub linking disabled via %s", config.DisableLinkFromGitHubEnv)
 		return nil
 	}
 
-	// PreToolUse is Claude-only today (Codex doesn't install this hook event),
-	// so we hard-bind to ClaudeCode here. CF-398 deferred adding a
-	// p.SupportsCommitLinking() gate to a follow-up.
-	hookInput, err := provider.ClaudeCode{}.ReadHookInput(r)
+	p, err := resolveCommitLinkingProvider()
+	if err != nil {
+		logger.Warn("PreToolUse skipped: %v", err)
+		return nil
+	}
+
+	hookInput, err := readToolUseHookInput(p, r)
 	if err != nil {
 		logger.Warn("Failed to read hook input: %v", err)
-		return nil // Exit silently, don't block Claude
+		return nil // Exit silently, don't block the firing provider.
 	}
 
-	// Check for MCP GitHub PR creation tool
+	// MCP GitHub PR matcher is Claude-only today (not in Codex managed
+	// block); the dispatch here is harmless for Codex because Codex won't
+	// invoke this branch.
 	if hookInput.ToolName == config.ToolNameMCPGitHubCreatePR {
-		return handleMCPPRCreate(hookInput, w)
+		return handleMCPPRCreate(p, hookInput, w)
 	}
 
-	// Only process Bash tool calls from here
 	if hookInput.ToolName != config.ToolNameBash {
 		return nil
 	}
 
-	// Extract command from tool_input
 	command, ok := hookInput.ToolInput["command"].(string)
 	if !ok || command == "" {
 		return nil
 	}
 
-	// Check if this is a command we care about.
-	// Use match position to determine primary command - earlier match wins.
-	// This handles cases like: git commit -m "mentions gh pr create"
+	// Earlier match wins so "git commit -m 'mentions gh pr create'" is treated
+	// as a commit, not a PR.
 	commitPos := firstMatch(gitCommitPattern, command)
 	prCreatePos := firstMatch(ghPRCreatePattern, command)
-
 	if commitPos < 0 && prCreatePos < 0 {
 		return nil
 	}
-
-	// Determine which command type based on earliest match position.
-	// If not commit and we got here, it must be PR create (at least one matched).
 	isCommit := commitPos >= 0 && (prCreatePos < 0 || commitPos < prCreatePos)
 
-	// Get the Confab session ID from daemon state
-	confabSessionID, err := getConfabSessionID(hookInput.SessionID)
+	confabSessionID, err := getConfabSessionID(p, hookInput.SessionID)
 	if err != nil || confabSessionID == "" {
-		// No Confab session ID available - allow without link
-		// This can happen if daemon hasn't initialized yet or sync is not set up
 		logger.Warn("Confab link skipped: no session ID available (err=%v)", err)
 		return nil
 	}
@@ -128,14 +121,12 @@ func handlePreToolUse(r io.Reader, w io.Writer) error {
 		return nil
 	}
 
-	// Check if session URL is already present
 	if containsSessionURL(command, confabSessionID) {
 		logger.Info("Confab link already present in command")
 		outputPreToolUseDecision(w, "allow", "Session URL already present")
 		return nil
 	}
 
-	// Handle git commit
 	if isCommit {
 		logger.Info("Requesting Confab link for git commit -> session %s", confabSessionID)
 		trailerLine := formatTrailerLine(sessionURL)
@@ -149,16 +140,15 @@ func handlePreToolUse(r io.Reader, w io.Writer) error {
 		return nil
 	}
 
-	// Handle gh pr create
 	logger.Info("Requesting Confab link for PR -> session %s", confabSessionID)
 	outputPreToolUseDecision(w, "deny", formatPRDenyReason(sessionURL))
 	return nil
 }
 
-// handleMCPPRCreate handles GitHub MCP tool PR creation
-func handleMCPPRCreate(hookInput *types.ClaudeHookInput, w io.Writer) error {
-	// Get the Confab session ID from daemon state
-	confabSessionID, err := getConfabSessionID(hookInput.SessionID)
+// handleMCPPRCreate handles the Claude GitHub MCP PR creation tool. Codex
+// doesn't install this matcher, so this is invoked only for Claude.
+func handleMCPPRCreate(p provider.Provider, hookInput *toolUseHookInput, w io.Writer) error {
+	confabSessionID, err := getConfabSessionID(p, hookInput.SessionID)
 	if err != nil || confabSessionID == "" {
 		logger.Warn("Confab link skipped: no session ID available (err=%v)", err)
 		return nil
@@ -170,7 +160,6 @@ func handleMCPPRCreate(hookInput *types.ClaudeHookInput, w io.Writer) error {
 		return nil
 	}
 
-	// Check if session URL is already in the body field
 	if body, ok := hookInput.ToolInput["body"].(string); ok {
 		if strings.Contains(body, sessionURL) {
 			logger.Info("Confab link already present in MCP PR body")
@@ -179,23 +168,52 @@ func handleMCPPRCreate(hookInput *types.ClaudeHookInput, w io.Writer) error {
 		}
 	}
 
-	// Deny and ask Claude to add the link
 	logger.Info("Requesting Confab link for MCP PR -> session %s", confabSessionID)
 	outputPreToolUseDecision(w, "deny", formatPRDenyReason(sessionURL))
 	return nil
 }
 
-// getConfabSessionID retrieves the Confab session ID from daemon state.
-// Returns empty string if not available.
-func getConfabSessionID(claudeSessionID string) (string, error) {
-	state, err := daemon.LoadStateForProvider(provider.NameClaudeCode, claudeSessionID)
+// resolveCommitLinkingProvider reads the --provider hook flag, normalizes
+// it, and gates on the provider's SupportsCommitLinking. Providers that
+// don't advertise support cause the caller to silently no-op.
+func resolveCommitLinkingProvider() (provider.Provider, error) {
+	name, err := provider.NormalizeName(hookProviderName)
+	if err != nil {
+		return nil, err
+	}
+	p, err := provider.Get(name)
+	if err != nil {
+		return nil, err
+	}
+	if !p.SupportsCommitLinking() {
+		return nil, fmt.Errorf("provider %q does not support GitHub commit linking", p.Name())
+	}
+	return p, nil
+}
+
+// getConfabSessionID returns the Confab session ID for a firing tool-use
+// hook, walking up to the root session when the firing UUID has no daemon
+// state of its own (e.g., a Codex subagent ran the tool but the daemon
+// state is keyed off the root rollout). Identity for Claude; SQLite walk
+// for Codex.
+func getConfabSessionID(p provider.Provider, sessionID string) (string, error) {
+	state, err := daemon.LoadStateForProvider(p.Name(), sessionID)
 	if err != nil {
 		return "", err
 	}
-	if state == nil {
+	if state != nil {
+		return state.ConfabSessionID, nil
+	}
+
+	rootID, _, _ := p.WalkUpToRoot(sessionID)
+	if rootID == "" || rootID == sessionID {
 		return "", nil
 	}
-	return state.ConfabSessionID, nil
+	rootState, err := daemon.LoadStateForProvider(p.Name(), rootID)
+	if err != nil || rootState == nil {
+		return "", err
+	}
+	return rootState.ConfabSessionID, nil
 }
 
 func firstMatch(re *regexp.Regexp, s string) int {
@@ -242,15 +260,15 @@ func formatPRLink(sessionURL string) string {
 func formatPRDenyReason(sessionURL string) string {
 	return fmt.Sprintf(
 		"✓ Confab is linking this PR to your session. "+
-			"Add this line at the bottom of the PR body (just above the \"Generated with Claude Code\" line, if present):\n\n    %s\n\n"+
+			"Add this line at the bottom of the PR body:\n\n    %s\n\n"+
 			"IMPORTANT: Copy this line verbatim. The value is a URL, NOT a ticket ID like CF-123.",
 		formatPRLink(sessionURL),
 	)
 }
 
 func outputPreToolUseDecision(w io.Writer, decision, reason string) {
-	response := types.ClaudePreToolUseResponse{
-		HookSpecificOutput: &types.ClaudePreToolUseOutput{
+	response := types.PreToolUseResponse{
+		HookSpecificOutput: &types.PreToolUseOutput{
 			HookEventName:            "PreToolUse",
 			PermissionDecision:       decision,
 			PermissionDecisionReason: reason,

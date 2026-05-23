@@ -56,7 +56,10 @@ type ClaudeHookInput struct {
 
 // CodexHookInput contains the shared fields Confab needs from Codex command
 // hooks. The fields follow the current official Codex hook schemas, while
-// provider-specific parsing owns validation.
+// provider-specific parsing owns validation. Like ClaudeHookInput, this is
+// a union type carrying fields from all Codex hook events (SessionStart,
+// PreToolUse, PostToolUse); JSON unmarshaling handles missing fields
+// gracefully.
 type CodexHookInput struct {
 	SessionID      string `json:"session_id"`
 	TranscriptPath string `json:"transcript_path"`
@@ -66,6 +69,15 @@ type CodexHookInput struct {
 	Source         string `json:"source,omitempty"`
 	TurnID         string `json:"turn_id,omitempty"`
 	ParentPID      int    `json:"parent_pid,omitempty"` // Codex process ID (set by confab, not Codex)
+
+	// PreToolUse/PostToolUse-specific fields. Codex normalizes its shell
+	// tool's tool_name to "Bash" in hook stdin (HookToolName::bash() in
+	// codex-rs/core/src/tools/hook_names.rs), so our Bash matcher and
+	// gitCommit/ghPRCreate regexes work without per-provider tweaks.
+	ToolName     string         `json:"tool_name,omitempty"`
+	ToolInput    map[string]any `json:"tool_input,omitempty"`
+	ToolUseID    string         `json:"tool_use_id,omitempty"`
+	ToolResponse map[string]any `json:"tool_response,omitempty"` // PostToolUse only
 }
 
 // CodexHookResponse is the JSON response sent back to Codex hooks.
@@ -121,13 +133,16 @@ type ClaudeHookResponse struct {
 	SystemMessage  string `json:"systemMessage,omitempty"`
 }
 
-// ClaudePreToolUseResponse is the JSON response for PreToolUse hooks
-type ClaudePreToolUseResponse struct {
-	HookSpecificOutput *ClaudePreToolUseOutput `json:"hookSpecificOutput,omitempty"`
+// PreToolUseResponse is the JSON response for PreToolUse hooks. The shape
+// is provider-agnostic: Claude Code and Codex both accept the same
+// hookSpecificOutput.permissionDecision contract per their respective
+// schemas.
+type PreToolUseResponse struct {
+	HookSpecificOutput *PreToolUseOutput `json:"hookSpecificOutput,omitempty"`
 }
 
-// ClaudePreToolUseOutput contains PreToolUse-specific decision fields
-type ClaudePreToolUseOutput struct {
+// PreToolUseOutput contains PreToolUse-specific decision fields.
+type PreToolUseOutput struct {
 	HookEventName            string `json:"hookEventName"`
 	PermissionDecision       string `json:"permissionDecision,omitempty"` // "allow", "deny", or "ask"
 	PermissionDecisionReason string `json:"permissionDecisionReason,omitempty"`

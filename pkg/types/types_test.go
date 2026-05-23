@@ -2,6 +2,7 @@ package types
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -266,4 +267,39 @@ type failingReader struct {
 
 func (r *failingReader) Read(p []byte) (int, error) {
 	return 0, r.err
+}
+
+// TestCodexHookInputUnmarshalsToolUseFields pins the CodexHookInput union
+// shape: it must carry tool_name, tool_input, tool_use_id, and tool_response
+// alongside the session-level fields. Codex's pre/post-tool-use payloads
+// include these exact field names per its wire schema.
+func TestCodexHookInputUnmarshalsToolUseFields(t *testing.T) {
+	payload := `{
+		"session_id": "01234567-89ab-cdef-0123-456789abcdef",
+		"transcript_path": "/home/u/.codex/sessions/2026/05/23/rollout-foo.jsonl",
+		"cwd": "/repo",
+		"hook_event_name": "PreToolUse",
+		"tool_name": "Bash",
+		"tool_input": {"command": "git commit -m 'test'"},
+		"tool_use_id": "tu_abc",
+		"tool_response": {"exit_code": 0, "stdout": "ok"}
+	}`
+
+	var got CodexHookInput
+	if err := json.Unmarshal([]byte(payload), &got); err != nil {
+		t.Fatalf("Unmarshal CodexHookInput: %v", err)
+	}
+
+	if got.ToolName != "Bash" {
+		t.Errorf("ToolName = %q, want %q", got.ToolName, "Bash")
+	}
+	if cmd, _ := got.ToolInput["command"].(string); cmd != "git commit -m 'test'" {
+		t.Errorf("ToolInput[command] = %q, want %q", cmd, "git commit -m 'test'")
+	}
+	if got.ToolUseID != "tu_abc" {
+		t.Errorf("ToolUseID = %q, want %q", got.ToolUseID, "tu_abc")
+	}
+	if code, _ := got.ToolResponse["exit_code"].(float64); code != 0 {
+		t.Errorf("ToolResponse[exit_code] = %v, want 0", got.ToolResponse["exit_code"])
+	}
 }

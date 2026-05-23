@@ -39,17 +39,25 @@ Before CF-396 (Phase 2), hook install logic lived in `pkg/config` (Claude side) 
 |---|---|
 | `InstallCodexHooks(configPath string) (string, error)` | Idempotent install of the managed block into `config.toml`. Returns the file path. |
 | `UninstallCodexHooks(configPath string) (string, error)` | Strip the managed block; restore `features.hooks` to its prior state. |
-| `IsCodexHooksInstalled(configPath string) (bool, error)` | True iff a confab command is registered under `[[hooks.SessionStart]]`. |
+| `IsCodexHooksInstalled(configPath string) (bool, error)` | True only when all three Confab hook events (SessionStart, PreToolUse, PostToolUse) carry a confab command. Stale single-event installs (pre-CF-492) read as "not installed" so `confab setup` re-emits the managed block and transparently upgrades. |
 
-The Codex managed block is delimited by `# >>> confab codex hooks (managed) >>>` / `<<< confab codex hooks (managed) <<<` markers and includes the SHA-256 `trusted_hash` Codex requires for non-interactive hook trust.
+The Codex managed block is delimited by `# >>> confab codex hooks (managed) >>>` / `<<< confab codex hooks (managed) <<<` markers and installs three hook events:
+
+- `[[hooks.SessionStart]]` — daemon spawn (`startup|resume|clear` matcher)
+- `[[hooks.PreToolUse]]` — `Confab-Link:` commit trailer + `📝 [Confab link]` PR body injection (`Bash` matcher)
+- `[[hooks.PostToolUse]]` — commit/PR URL linking back to the session (`Bash` matcher)
+
+Each event also writes a `[hooks.state."<configPath>:<event_lower>:<group_idx>:<hook_idx>"]` table with the SHA-256 `trusted_hash` Codex requires for non-interactive hook trust. Event labels follow Codex's snake_case convention (`session_start`, `pre_tool_use`, `post_tool_use`) — see `codex-rs/hooks/src/lib.rs:84-110`.
+
+The hash blob covers `{event_name, hooks: [{async, command, statusMessage, timeout, type}], matcher}` with fields in alphabetical order. `statusMessage` is `"Starting Confab sync"` for SessionStart and `""` for the tool-use events — empty-string is load-bearing because Codex's TOML `Option<String>` deserializes `statusMessage = ""` to `Some("")`, which canonical-JSON-serializes as `"statusMessage": ""`; omitting the field would round-trip to `None` and yield a hash mismatch.
 
 ## Invariants
 
 - **Atomic writes.** Both providers use `config.AtomicUpdateSettings` (Claude) or a `.bak` + atomic rename (Codex) so a crashed install never leaves a half-edited config.
 - **Idempotent.** Calling `Install...` twice produces the same file as calling it once. Tests pin this for both providers.
 - **Preserves user config.** Neither provider rewrites unmanaged config. Codex only touches `[features]` + the managed `[[hooks.SessionStart]]` block.
-- **No `[[hooks.Stop]]` for Codex.** Codex fires `Stop` at every agent/turn boundary, so a Stop-driven daemon shutdown would kill the root prematurely. Daemon shutdown is parent-PID based.
-- **Trusted-hash positional keys.** Codex's `[hooks.state."<configPath>:<event>:<group_idx>:<hook_idx>"]` key uses the hook's actual position in the existing `[[hooks.SessionStart]]` list; pre-CF-396 a stale `:0:0` key would land in the wrong slot if the user had other Codex hooks installed.
+- **No `[[hooks.Stop]]` / `[[hooks.UserPromptSubmit]]` for Codex.** Codex fires `Stop` at every agent/turn boundary (Stop-driven shutdown would kill the root daemon prematurely), and parent-PID monitoring already covers the Claude `UserPromptSubmit` teleport case.
+- **Trusted-hash positional keys.** Codex's `[hooks.state."<configPath>:<event>:<group_idx>:<hook_idx>"]` key uses the hook's actual position in the existing `[[hooks.<Event>]]` list. `countCodexHookMatcherGroups` runs **per event** and on the post-strip config so re-installs interleave correctly with any unmanaged user-authored blocks at any of the three event types.
 
 ## Dependencies
 

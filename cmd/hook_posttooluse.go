@@ -13,7 +13,6 @@ import (
 	"github.com/ConfabulousDev/confab/pkg/logger"
 	"github.com/ConfabulousDev/confab/pkg/provider"
 	pkgsync "github.com/ConfabulousDev/confab/pkg/sync"
-	"github.com/ConfabulousDev/confab/pkg/types"
 	"github.com/spf13/cobra"
 )
 
@@ -34,9 +33,8 @@ rev-parse and links the GitHub commit URL to the current Confab session.
 
 For all other tool calls, exits silently (code 0).
 
-This command is typically invoked by Claude Code, not directly by users.
-
-Claude Code only — Codex does not fire PostToolUse.`,
+This command is typically invoked by the provider runtime (Claude Code or
+Codex), not directly by users. Provider is selected via --provider.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return handlePostToolUse(os.Stdin, os.Stdout)
 	},
@@ -50,42 +48,41 @@ func init() {
 // Errors are logged but not printed to stderr - tool hooks run frequently
 // and visible errors would be too noisy. See SessionStart hook for visible errors.
 func handlePostToolUse(r io.Reader, _ io.Writer) error {
-	// Check if GitHub linking is disabled
 	if config.IsLinkFromGitHubDisabled() {
 		logger.Info("GitHub linking disabled via %s", config.DisableLinkFromGitHubEnv)
 		return nil
 	}
 
-	hookInput, err := provider.ClaudeCode{}.ReadHookInput(r)
+	p, err := resolveCommitLinkingProvider()
+	if err != nil {
+		logger.Warn("PostToolUse skipped: %v", err)
+		return nil
+	}
+
+	hookInput, err := readToolUseHookInput(p, r)
 	if err != nil {
 		logger.Warn("Failed to read hook input: %v", err)
-		return nil // Exit silently, don't block Claude
+		return nil
 	}
 
-	// Check for MCP GitHub PR creation tool
+	// PR creation paths: MCP tool (Claude-only matcher) or `gh pr create`
+	// via Bash. Both extract the PR URL from the tool response and link
+	// it under the firing session.
 	if hookInput.ToolName == config.ToolNameMCPGitHubCreatePR {
-		return handleMCPPRCreateOutput(hookInput)
+		return linkPRFromResponse(p, hookInput)
 	}
 
-	// Only process Bash tool calls
 	if hookInput.ToolName != config.ToolNameBash {
 		return nil
 	}
 
-	// Extract command from tool_input
 	command, ok := hookInput.ToolInput["command"].(string)
 	if !ok || command == "" {
 		return nil
 	}
 
-	// Check for gh pr create
 	if firstMatch(ghPRCreatePattern, command) >= 0 {
-		prURL := extractPRURLFromResponse(hookInput.ToolResponse)
-		if prURL == "" {
-			logger.Debug("No PR URL found in tool response")
-			return nil
-		}
-		return linkGitHubURL(hookInput.SessionID, prURL)
+		return linkPRFromResponse(p, hookInput)
 	}
 
 	if firstMatch(gitCommitPattern, command) >= 0 || firstMatch(gitPushPattern, command) >= 0 {
@@ -93,30 +90,31 @@ func handlePostToolUse(r io.Reader, _ io.Writer) error {
 			logger.Debug("Git command did not succeed, skipping link")
 			return nil
 		}
-		return linkCommitToSession(hookInput.SessionID, hookInput.CWD)
+		return linkCommitToSession(p, hookInput.SessionID, hookInput.CWD)
 	}
 
 	return nil
 }
 
-// handleMCPPRCreateOutput handles PostToolUse for GitHub MCP PR creation
-func handleMCPPRCreateOutput(hookInput *types.ClaudeHookInput) error {
-	// Extract PR URL from MCP tool response
+// linkPRFromResponse extracts a GitHub PR URL from the tool response and
+// links it to the firing session. Shared by the MCP GitHub PR matcher
+// (Claude-only) and the `gh pr create` Bash matcher.
+func linkPRFromResponse(p provider.Provider, hookInput *toolUseHookInput) error {
 	prURL := extractPRURLFromResponse(hookInput.ToolResponse)
 	if prURL == "" {
-		logger.Debug("No PR URL found in MCP tool response")
+		logger.Debug("No PR URL found in tool response")
 		return nil
 	}
-
-	return linkGitHubURL(hookInput.SessionID, prURL)
+	return linkGitHubURL(p, hookInput.SessionID, prURL)
 }
 
-// linkGitHubURL links a GitHub URL (PR or commit) to the current Confab session
-func linkGitHubURL(claudeSessionID, githubURL string) error {
+// linkGitHubURL links a GitHub URL (PR or commit) to the current Confab
+// session. Walks up to the root session for providers with a thread tree
+// (Codex) so subagent-initiated commits/PRs link to the user-facing root.
+func linkGitHubURL(p provider.Provider, sessionID, githubURL string) error {
 	logger.Info("Linking GitHub URL to session: %s", githubURL)
 
-	// Get the Confab session ID from daemon state
-	confabSessionID, err := getConfabSessionID(claudeSessionID)
+	confabSessionID, err := getConfabSessionID(p, sessionID)
 	if err != nil || confabSessionID == "" {
 		logger.Warn("GitHub link failed: no Confab session ID available (err=%v)", err)
 		return nil // Can't link without session ID, but don't error
@@ -157,13 +155,12 @@ func linkGitHubURL(claudeSessionID, githubURL string) error {
 // linkCommitToSession links a git commit to the current Confab session.
 // It gets the HEAD commit SHA and repo URL via git commands, then constructs
 // the GitHub commit URL.
-func linkCommitToSession(claudeSessionID, cwd string) error {
+func linkCommitToSession(p provider.Provider, sessionID, cwd string) error {
 	if cwd == "" {
 		logger.Warn("GitHub commit link failed: no CWD provided")
 		return nil
 	}
 
-	// Get the HEAD commit SHA
 	commitSHA, err := git.GetHeadSHA(cwd)
 	if err != nil || commitSHA == "" {
 		logger.Warn("GitHub commit link failed: could not get HEAD SHA from %s (err=%v)", cwd, err)
@@ -172,24 +169,20 @@ func linkCommitToSession(claudeSessionID, cwd string) error {
 
 	logger.Info("Linking commit to session: %s", commitSHA)
 
-	// Get the repo URL from git
 	repoURL, err := git.GetRepoURL(cwd)
 	if err != nil || repoURL == "" {
 		logger.Warn("GitHub commit link failed: could not get repo URL from %s (err=%v)", cwd, err)
 		return nil
 	}
 
-	// Convert to GitHub HTTPS URL
 	githubURL := git.ToGitHubURL(repoURL)
 	if githubURL == "" {
 		logger.Info("GitHub commit link skipped: repo is not on GitHub (%s)", repoURL)
 		return nil
 	}
 
-	// Construct the commit URL
 	commitURL := githubURL + "/commit/" + commitSHA
-
-	return linkGitHubURL(claudeSessionID, commitURL)
+	return linkGitHubURL(p, sessionID, commitURL)
 }
 
 // isSuccessfulBashResponse checks if a Bash tool response indicates success.

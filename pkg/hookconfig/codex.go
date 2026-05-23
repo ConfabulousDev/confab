@@ -76,22 +76,44 @@ func UninstallCodexHooks(configPath string) (string, error) {
 	return configPath, nil
 }
 
-// codexHooksConfig is the minimal TOML schema for IsCodexHooksInstalled.
-// We only inspect [[hooks.SessionStart]].hooks entries to decide
-// whether at least one confab command is registered.
-type codexHooksConfig struct {
-	Hooks struct {
-		SessionStart []struct {
-			Hooks []struct {
-				Type    string `toml:"type"`
-				Command string `toml:"command"`
-			} `toml:"hooks"`
-		} `toml:"SessionStart"`
+// codexHookGroup is one [[hooks.<EventName>]] block from config.toml as
+// inspected by IsCodexHooksInstalled.
+type codexHookGroup struct {
+	Hooks []struct {
+		Type    string `toml:"type"`
+		Command string `toml:"command"`
 	} `toml:"hooks"`
 }
 
-// IsCodexHooksInstalled parses configPath and returns true iff at least
-// one [[hooks.SessionStart.hooks]] entry invokes the confab binary.
+// codexHooksConfig is the minimal TOML schema for IsCodexHooksInstalled.
+// We inspect the three event arrays Confab installs (SessionStart,
+// PreToolUse, PostToolUse) and require a confab command in each.
+type codexHooksConfig struct {
+	Hooks struct {
+		SessionStart []codexHookGroup `toml:"SessionStart"`
+		PreToolUse   []codexHookGroup `toml:"PreToolUse"`
+		PostToolUse  []codexHookGroup `toml:"PostToolUse"`
+	} `toml:"hooks"`
+}
+
+// hasConfabCommand reports whether any entry in any group registers a
+// confab command.
+func hasConfabCommand(groups []codexHookGroup) bool {
+	for _, group := range groups {
+		for _, h := range group.Hooks {
+			if h.Type == "command" && isConfabCommand(h.Command) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// IsCodexHooksInstalled parses configPath and returns true only when all
+// three Confab hook events (SessionStart, PreToolUse, PostToolUse) carry
+// a confab command. Existing SessionStart-only installs (pre-CF-492) read
+// as "not installed" so `confab setup` re-emits the managed block and
+// transparently upgrades them.
 func IsCodexHooksInstalled(configPath string) (bool, error) {
 	data, err := os.ReadFile(configPath)
 	if err != nil {
@@ -104,21 +126,24 @@ func IsCodexHooksInstalled(configPath string) (bool, error) {
 	if err := toml.Unmarshal(data, &cfg); err != nil {
 		return false, fmt.Errorf("failed to parse Codex config: %w", err)
 	}
-	for _, group := range cfg.Hooks.SessionStart {
-		for _, h := range group.Hooks {
-			if h.Type == "command" && isConfabCommand(h.Command) {
-				return true, nil
-			}
-		}
-	}
-	return false, nil
+	return hasConfabCommand(cfg.Hooks.SessionStart) &&
+		hasConfabCommand(cfg.Hooks.PreToolUse) &&
+		hasConfabCommand(cfg.Hooks.PostToolUse), nil
 }
 
 func ensureCodexHooksConfig(config, configPath, binPath string) string {
 	config = removeManagedBlock(config, confabCodexHooksStart, confabCodexHooksEnd)
 	config = ensureCodexHooksFeature(config)
-	sessionStartGroupIndex := countCodexHookMatcherGroups(config, "SessionStart")
-	return appendTOMLBlock(config, confabCodexHooksStart+"\n"+codexHooksTOML(configPath, binPath, sessionStartGroupIndex)+confabCodexHooksEnd+"\n")
+	// Count groups per event AFTER stripping our managed block so re-installs
+	// produce stable positional trust keys. Each event is counted
+	// independently — the user may have pre-existing unmanaged blocks for
+	// any subset of events.
+	groupIndices := codexHookGroupIndices{
+		sessionStart: countCodexHookMatcherGroups(config, "SessionStart"),
+		preToolUse:   countCodexHookMatcherGroups(config, "PreToolUse"),
+		postToolUse:  countCodexHookMatcherGroups(config, "PostToolUse"),
+	}
+	return appendTOMLBlock(config, confabCodexHooksStart+"\n"+codexHooksTOML(configPath, binPath, groupIndices)+confabCodexHooksEnd+"\n")
 }
 
 func ensureCodexHooksFeature(config string) string {
@@ -187,16 +212,45 @@ func countCodexHookMatcherGroups(config, eventName string) int {
 	return len(re.FindAllStringIndex(config, -1))
 }
 
-// codexHooksTOML emits the managed Codex hook block. We install only
-// SessionStart — Codex fires Stop at every agent/turn boundary, so a
-// Stop hook would prematurely kill the root sync daemon. Daemon
-// shutdown is driven by parent-process liveness instead.
-func codexHooksTOML(configPath, binPath string, sessionStartGroupIndex int) string {
+// codexHookGroupIndices carries the per-event group offset we use to build
+// each event's positional trust-state key. Counted by
+// countCodexHookMatcherGroups against the post-strip config so the keys
+// land on our hook even when the user has pre-existing unmanaged blocks
+// for any subset of the three events.
+type codexHookGroupIndices struct {
+	sessionStart int
+	preToolUse   int
+	postToolUse  int
+}
+
+// codexHooksTOML emits the managed Codex hook block: SessionStart for
+// daemon lifecycle, PreToolUse + PostToolUse for bidirectional GitHub
+// link injection. We deliberately do NOT install [[hooks.Stop]] (fires
+// per turn; daemon shutdown is parent-PID driven) or
+// [[hooks.UserPromptSubmit]] (Claude-only teleport case; not applicable
+// to Codex's parent-PID model).
+//
+// StatusMessage is "" for the tool-use events to match Codex's Option<String>
+// round-trip: emitting statusMessage="" in TOML deserializes to Some("")
+// which canonical-JSON-serializes as "statusMessage":"" — matching the
+// JSON our Go side hashes. Omitting the field would round-trip to None and
+// produce a hash mismatch, triggering a first-run trust prompt.
+func codexHooksTOML(configPath, binPath string, idx codexHookGroupIndices) string {
 	escapedBinaryPath := strings.ReplaceAll(binPath, `\`, `\\`)
 	escapedBinaryPath = strings.ReplaceAll(escapedBinaryPath, `"`, `\"`)
+
 	sessionStartCommand := binPath + " hook session-start --provider codex"
+	preToolUseCommand := binPath + " hook pre-tool-use --provider codex"
+	postToolUseCommand := binPath + " hook post-tool-use --provider codex"
+
 	sessionStartHash := codexTrustedHookHash("session_start", "startup|resume|clear", sessionStartCommand, "Starting Confab sync")
-	sessionStartKey := tomlQuoteString(fmt.Sprintf("%s:session_start:%d:0", configPath, sessionStartGroupIndex))
+	preToolUseHash := codexTrustedHookHash("pre_tool_use", "Bash", preToolUseCommand, "")
+	postToolUseHash := codexTrustedHookHash("post_tool_use", "Bash", postToolUseCommand, "")
+
+	sessionStartKey := tomlQuoteString(fmt.Sprintf("%s:session_start:%d:0", configPath, idx.sessionStart))
+	preToolUseKey := tomlQuoteString(fmt.Sprintf("%s:pre_tool_use:%d:0", configPath, idx.preToolUse))
+	postToolUseKey := tomlQuoteString(fmt.Sprintf("%s:post_tool_use:%d:0", configPath, idx.postToolUse))
+
 	return fmt.Sprintf(`[[hooks.SessionStart]]
 matcher = "startup|resume|clear"
 [[hooks.SessionStart.hooks]]
@@ -204,9 +258,36 @@ type = "command"
 command = "%s hook session-start --provider codex"
 statusMessage = "Starting Confab sync"
 
+[[hooks.PreToolUse]]
+matcher = "Bash"
+[[hooks.PreToolUse.hooks]]
+type = "command"
+command = "%s hook pre-tool-use --provider codex"
+statusMessage = ""
+
+[[hooks.PostToolUse]]
+matcher = "Bash"
+[[hooks.PostToolUse.hooks]]
+type = "command"
+command = "%s hook post-tool-use --provider codex"
+statusMessage = ""
+
 [hooks.state.%s]
 trusted_hash = "%s"
-`, escapedBinaryPath, sessionStartKey, sessionStartHash)
+
+[hooks.state.%s]
+trusted_hash = "%s"
+
+[hooks.state.%s]
+trusted_hash = "%s"
+`,
+		escapedBinaryPath,
+		escapedBinaryPath,
+		escapedBinaryPath,
+		sessionStartKey, sessionStartHash,
+		preToolUseKey, preToolUseHash,
+		postToolUseKey, postToolUseHash,
+	)
 }
 
 type codexHookTrustIdentity struct {

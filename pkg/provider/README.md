@@ -61,7 +61,8 @@ Methods every provider must implement:
 - `StateDir() (string, error)` — local state directory.
 - `FindParentPID() int`, `IsProcess(pid int) bool` — parent-process detection.
 - `ParseSessionHook(io.Reader) (HookInput, error)` — read a SessionStart hook payload and return the provider-agnostic view.
-- `InstallHooks() (string, error)` / `UninstallHooks() (string, error)` / `IsHooksInstalled() (bool, error)` — install/check the full hook set the provider requires (Claude: 4 bundles; Codex: SessionStart only). Both methods delegate to `pkg/hookconfig`.
+- `InstallHooks() (string, error)` / `UninstallHooks() (string, error)` / `IsHooksInstalled() (bool, error)` — install/check the full hook set the provider requires. Claude installs 4 bundles (sync, PreToolUse, PostToolUse, UserPromptSubmit). Codex installs 3 events (SessionStart, PreToolUse, PostToolUse). Both methods delegate to `pkg/hookconfig`.
+- `SupportsCommitLinking() bool` — true if the provider installs the PreToolUse + PostToolUse events that drive bidirectional GitHub linking. Used by `cmd/hook_pretooluse.go` and `cmd/hook_posttooluse.go` to silently no-op for any future provider that doesn't yet support the flow. Both Claude Code and Codex return true.
 - `InstallSkills() error` / `UninstallSkills() error` / `IsSkillInstalled(name string) bool` — manage bundled Confab skills in the provider's local skill layout.
 - `WalkUpToRoot(sessionID string) (rootID, rootPath string, error)` — Codex walks `thread_spawn_edges`; Claude is identity with empty `rootPath`.
 - `ShouldSpawnForInput(in HookInput) bool` — Codex returns false for subagent rollouts and for unreadable rollout files; Claude always returns true. `os.IsNotExist` is treated as a race-tolerance "spawn anyway" case.

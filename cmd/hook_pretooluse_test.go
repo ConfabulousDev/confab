@@ -304,7 +304,7 @@ func TestHandlePreToolUse_GitCommitWithoutTrailer(t *testing.T) {
 	}
 
 	// Should output deny response
-	var response types.ClaudePreToolUseResponse
+	var response types.PreToolUseResponse
 	if err := json.Unmarshal(w.Bytes(), &response); err != nil {
 		t.Fatalf("Failed to parse response: %v", err)
 	}
@@ -356,7 +356,7 @@ func TestHandlePreToolUse_GitCommitWithTrailer(t *testing.T) {
 	}
 
 	// Should output allow response
-	var response types.ClaudePreToolUseResponse
+	var response types.PreToolUseResponse
 	if err := json.Unmarshal(w.Bytes(), &response); err != nil {
 		t.Fatalf("Failed to parse response: %v", err)
 	}
@@ -565,7 +565,7 @@ func TestHandlePreToolUse_PRCreateWithoutLink(t *testing.T) {
 	}
 
 	// Should output deny response
-	var response types.ClaudePreToolUseResponse
+	var response types.PreToolUseResponse
 	if err := json.Unmarshal(w.Bytes(), &response); err != nil {
 		t.Fatalf("Failed to parse response: %v", err)
 	}
@@ -617,7 +617,7 @@ func TestHandlePreToolUse_PRCreateWithLink(t *testing.T) {
 	}
 
 	// Should output allow response
-	var response types.ClaudePreToolUseResponse
+	var response types.PreToolUseResponse
 	if err := json.Unmarshal(w.Bytes(), &response); err != nil {
 		t.Fatalf("Failed to parse response: %v", err)
 	}
@@ -688,7 +688,7 @@ func TestHandlePreToolUse_MCPGitHubPRWithoutLink(t *testing.T) {
 	}
 
 	// Should output deny response
-	var response types.ClaudePreToolUseResponse
+	var response types.PreToolUseResponse
 	if err := json.Unmarshal(w.Bytes(), &response); err != nil {
 		t.Fatalf("Failed to parse response: %v", err)
 	}
@@ -744,7 +744,7 @@ func TestHandlePreToolUse_MCPGitHubPRWithLink(t *testing.T) {
 	}
 
 	// Should output allow response
-	var response types.ClaudePreToolUseResponse
+	var response types.PreToolUseResponse
 	if err := json.Unmarshal(w.Bytes(), &response); err != nil {
 		t.Fatalf("Failed to parse response: %v", err)
 	}
@@ -818,7 +818,7 @@ func TestHandlePreToolUse_MCPGitHubPRNoBody(t *testing.T) {
 	}
 
 	// Should output deny response requesting the link be added
-	var response types.ClaudePreToolUseResponse
+	var response types.PreToolUseResponse
 	if err := json.Unmarshal(w.Bytes(), &response); err != nil {
 		t.Fatalf("Failed to parse response: %v", err)
 	}

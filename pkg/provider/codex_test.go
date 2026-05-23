@@ -454,9 +454,13 @@ func TestCodexShouldSpawnForInput_ThreadSourceCoverage(t *testing.T) {
 }
 
 func TestCodexIsHooksInstalled(t *testing.T) {
-	const confabCommand = "/usr/local/bin/confab hook session-start --provider codex"
+	const confabSessionStart = "/usr/local/bin/confab hook session-start --provider codex"
+	const confabPreToolUse = "/usr/local/bin/confab hook pre-tool-use --provider codex"
+	const confabPostToolUse = "/usr/local/bin/confab hook post-tool-use --provider codex"
 	const otherCommand = "/usr/bin/some-other-tool"
 
+	// confabHooksTOML is the post-CF-492 install: all three confab hook
+	// events present.
 	confabHooksTOML := `[features]
 hooks = true
 
@@ -464,7 +468,35 @@ hooks = true
 matcher = "startup|resume|clear"
 [[hooks.SessionStart.hooks]]
 type = "command"
-command = "` + confabCommand + `"
+command = "` + confabSessionStart + `"
+statusMessage = "Starting Confab sync"
+
+[[hooks.PreToolUse]]
+matcher = "Bash"
+[[hooks.PreToolUse.hooks]]
+type = "command"
+command = "` + confabPreToolUse + `"
+statusMessage = ""
+
+[[hooks.PostToolUse]]
+matcher = "Bash"
+[[hooks.PostToolUse.hooks]]
+type = "command"
+command = "` + confabPostToolUse + `"
+statusMessage = ""
+`
+
+	// staleConfabHooksTOML is the pre-CF-492 install (SessionStart only).
+	// IsHooksInstalled must report false so confab setup re-emits the
+	// managed block and upgrades the user.
+	staleConfabHooksTOML := `[features]
+hooks = true
+
+[[hooks.SessionStart]]
+matcher = "startup|resume|clear"
+[[hooks.SessionStart.hooks]]
+type = "command"
+command = "` + confabSessionStart + `"
 statusMessage = "Starting Confab sync"
 `
 
@@ -485,7 +517,8 @@ command = "` + otherCommand + `"
 	}{
 		{"missing config file", "", false},
 		{"empty config", "# just a comment\n", false},
-		{"confab hooks installed", confabHooksTOML, true},
+		{"all three confab events", confabHooksTOML, true},
+		{"stale install (SessionStart only)", staleConfabHooksTOML, false},
 		{"non-confab SessionStart hook", otherHooksTOML, false},
 	}
 	for _, tt := range tests {

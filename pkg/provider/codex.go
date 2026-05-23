@@ -26,6 +26,11 @@ func (Codex) Name() string { return NameCodex }
 // CLIBinaryName returns "codex" — the binary users install via Codex.
 func (Codex) CLIBinaryName() string { return "codex" }
 
+// SupportsCommitLinking reports that Codex installs PreToolUse +
+// PostToolUse hooks that drive bidirectional GitHub linking. See
+// pkg/hookconfig/codex.go for the managed-block contents.
+func (Codex) SupportsCommitLinking() bool { return true }
+
 // ParseSessionHook reads a Codex SessionStart hook payload and returns
 // the provider-agnostic view.
 func (p Codex) ParseSessionHook(r io.Reader) (HookInput, error) {

@@ -61,7 +61,8 @@ The backend API lives in the sibling repo `../confab-web`. When implementing CLI
 - Codex fires `SessionStart` for every spawned subagent. The hook handler in `cmd/hook_sessionstart.go` calls `provider.Codex{}.WalkUpToRoot` to resolve the firing UUID to its top-most root before spawning a daemon — so only one daemon runs per root tree, and subagent SessionStart events for already-tracked trees are no-ops.
 - The sync engine calls `provider.DiscoverDescendants(tracker, externalID)` once per `SyncAll` cycle. Codex's implementation queries the local SQLite state DB (recursive walk under the root UUID); Claude's is a no-op. New subagent rollouts become `file_type=agent` sidechain files under the root's backend session — the same primitive Claude uses for its subagent files.
 - The first chunk of every Codex rollout (root or descendant) carries `chunk.metadata.codex_rollout` with the rollout's identity (thread UUID, parent UUID, rollout path, cwd, model, agent metadata). The backend upserts this into `codex_rollouts` keyed by thread UUID. Retries are safe: the metadata rides along again because `FirstLine == 1` is preserved across retries.
-- Daemon shutdown for Codex uses parent-process liveness, **not** a `Stop` hook. Codex fires `Stop` at every agent/turn boundary, so a Stop-driven shutdown would prematurely kill the root daemon. `cmd/spawn.go` resolves the Codex parent PID via `Codex.FindParentPID()` and stores it on the daemon; the daemon's main loop exits when that PID dies (same mechanism as Claude Code). `Codex.InstallHooks` only installs `[[hooks.SessionStart]]`, and `confab hook session-end --provider codex` returns an explicit error.
+- Daemon shutdown for Codex uses parent-process liveness, **not** a `Stop` hook. Codex fires `Stop` at every agent/turn boundary, so a Stop-driven shutdown would prematurely kill the root daemon. `cmd/spawn.go` resolves the Codex parent PID via `Codex.FindParentPID()` and stores it on the daemon; the daemon's main loop exits when that PID dies (same mechanism as Claude Code). `Codex.InstallHooks` installs `[[hooks.SessionStart]]` + `[[hooks.PreToolUse]]` + `[[hooks.PostToolUse]]` (no `Stop`, no `UserPromptSubmit`); `confab hook session-end --provider codex` returns an explicit error.
+- GitHub commit/PR linking is wired for Codex (CF-492). The same handlers as Claude (`cmd/hook_pretooluse.go`, `cmd/hook_posttooluse.go`) route by `--provider`. For each Bash invocation, `getConfabSessionID` first tries the firing UUID's daemon state; if missing, it calls `provider.Codex{}.WalkUpToRoot` and retries with the root UUID — so subagent-initiated `git commit` / `gh pr create` always link to the user-facing root session.
 - Redaction is provider-agnostic. `redactor.RedactJSONLine` walks any JSON line shape, and `FileTracker.ReadChunk` applies it to every tracked file regardless of provider — Codex rollouts get the same pattern set as Claude transcripts, which is what the backend's Codex Redactions analytics card relies on. `CodexRolloutMetadata` fields (cwd, model, agent_*) ride on the first chunk unredacted; see the struct doc in `pkg/provider/codex_rollout.go` before adding free-text fields there.
 
 ## Hook System
@@ -72,7 +73,14 @@ Confab installs four hook bundles in `~/.claude/settings.json` (see `pkg/hookcon
 - `PostToolUse` (same matchers): links resulting GitHub artifacts back to the Confab session
 - `UserPromptSubmit`: re-spawns the daemon if it died between turns
 
-The daemon also monitors its parent PID and shuts down if Claude Code exits unexpectedly. For Codex, only `SessionStart` is installed (see Codex provider differences above).
+The daemon also monitors its parent PID and shuts down if Claude Code exits unexpectedly.
+
+For Codex, three hook events are installed in `~/.codex/config.toml` (see `pkg/hookconfig/codex.go`):
+- `SessionStart`: spawns the sync daemon, with subagent → root walk-up
+- `PreToolUse` (matcher: `Bash`): injects the `Confab-Link:` commit trailer and `📝 [Confab link]` PR body line
+- `PostToolUse` (matcher: `Bash`): links the resulting commit / PR URL back to the root Confab session
+
+Daemon shutdown stays parent-PID driven (see Codex provider differences above for why `Stop` / `SessionEnd` and `UserPromptSubmit` are not installed).
 
 ## Skills
 
