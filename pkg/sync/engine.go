@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/user"
+	"strings"
 	"time"
 
 	"github.com/ConfabulousDev/confab/pkg/config"
@@ -164,12 +165,15 @@ func (cv *chunkView) SetFirstUserMessage(s string) {
 // - Sends initial metadata (git info, hostname, username)
 // Must be called before SyncAll.
 func (e *Engine) Init() error {
-	// Try to extract git info from transcript or detect from cwd
+	// Try to extract git info from transcript first, then fall back to cwd.
+	gitInfo, _ := git.ExtractGitInfoFromTranscript(e.transcriptPath)
+	if gitInfo == nil {
+		gitInfo, _ = git.DetectGitInfo(e.cwd)
+	}
 	var gitInfoJSON json.RawMessage
-	if gitInfo, _ := git.ExtractGitInfoFromTranscript(e.transcriptPath); gitInfo != nil {
+	if gitInfo != nil {
 		gitInfoJSON, _ = json.Marshal(gitInfo)
-	} else if gitInfo, _ := git.DetectGitInfo(e.cwd); gitInfo != nil {
-		gitInfoJSON, _ = json.Marshal(gitInfo)
+		logGitRemotes(gitInfo)
 	}
 
 	// Collect client info
@@ -372,6 +376,24 @@ func ensureChunkMetadata(chunk *Chunk) *ChunkMetadata {
 		chunk.Metadata = &ChunkMetadata{}
 	}
 	return chunk.Metadata
+}
+
+// logGitRemotes emits a one-line summary of detected remotes + tracking
+// remote at session init. No-op when there are no remotes.
+func logGitRemotes(info *git.GitInfo) {
+	if len(info.Remotes) == 0 {
+		return
+	}
+	names := make([]string, len(info.Remotes))
+	for i, r := range info.Remotes {
+		names[i] = r.Name
+	}
+	tracking := info.TrackingRemote
+	if tracking == "" {
+		tracking = "<none>"
+	}
+	logger.Info("Git remotes detected: %s (tracking: %s)",
+		strings.Join(names, ", "), tracking)
 }
 
 // SendSessionEnd sends a session_end event to the backend

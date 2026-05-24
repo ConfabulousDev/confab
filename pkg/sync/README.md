@@ -22,6 +22,10 @@ Thin wrapper around `pkg/http.Client` that marshals/unmarshals request types for
 ### FileTracker (file I/O + state)
 Manages the mapping between files on disk and their sync state. `ReadChunk()` seeks to the last known byte offset, reads new lines up to the chunk size limit, applies redaction, and extracts agent IDs. `DiscoverNewFiles()` finds new agent files both from collected agent IDs and by scanning the subagents directory.
 
+Per-chunk `git_info` extraction (CF-493) is provider-agnostic with two paths in `ReadChunk`, each guarded by the `gitInfo == nil` first-wins check:
+- `gitInfoFromClaudeMessage` — Claude transcript messages carry inline `gitBranch` + `cwd`; populates `Branch`, `RepoURL`, `Remotes`, `TrackingRemote`.
+- `gitInfoFromCodexSessionMeta` — Codex rollouts (both root transcripts and descendant agent files) begin with a `session_meta` line whose payload carries `cwd`; runs `git.DetectBranch(cwd)` and populates all four CF-494-resolver-required fields.
+
 ## Data Flow
 
 ```

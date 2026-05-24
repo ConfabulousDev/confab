@@ -189,6 +189,57 @@ func (t *FileTracker) HasFileChanged(file *TrackedFile) bool {
 // If the backend limit changes, this constant must be updated accordingly.
 const DefaultMaxChunkBytes = 14 * 1024 * 1024 // 14MB
 
+// gitInfoFromClaudeMessage extracts per-chunk git info from a Claude
+// transcript message (inline `gitBranch` + `cwd`). Returns nil for any
+// other shape (including agent files, where Type != "transcript").
+func gitInfoFromClaudeMessage(file *TrackedFile, msg map[string]interface{}) *git.GitInfo {
+	if file.Type != "transcript" {
+		return nil
+	}
+	branch, _ := msg["gitBranch"].(string)
+	if branch == "" {
+		return nil
+	}
+	info := &git.GitInfo{Branch: branch}
+	if cwd, _ := msg["cwd"].(string); cwd != "" {
+		info.RepoURL, _ = git.GetRepoURL(cwd)
+		info.Remotes, _ = git.DetectRemotes(cwd)
+		info.TrackingRemote = git.DetectTrackingRemote(cwd, branch)
+	}
+	return info
+}
+
+// gitInfoFromCodexSessionMeta extracts git info from a Codex
+// `session_meta` line (root rollouts and descendant agent files both
+// begin with one). Returns nil if msg isn't a session_meta, has no cwd,
+// or the cwd has no remotes — keying on type=="session_meta" is safe
+// since Claude transcripts never use that literal.
+func gitInfoFromCodexSessionMeta(msg map[string]interface{}) *git.GitInfo {
+	if t, _ := msg["type"].(string); t != "session_meta" {
+		return nil
+	}
+	payload, ok := msg["payload"].(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	cwd, _ := payload["cwd"].(string)
+	if cwd == "" {
+		return nil
+	}
+	remotes, _ := git.DetectRemotes(cwd)
+	if len(remotes) == 0 {
+		return nil
+	}
+	repoURL, _ := git.GetRepoURL(cwd)
+	branch := git.DetectBranch(cwd)
+	return &git.GitInfo{
+		RepoURL:        repoURL,
+		Remotes:        remotes,
+		Branch:         branch,
+		TrackingRemote: git.DetectTrackingRemote(cwd, branch),
+	}
+}
+
 // ReadChunk reads new lines from a file starting after LastSyncedLine.
 // Uses ByteOffset to seek directly to the right position if available.
 // Applies redaction if a redactor is provided.
@@ -296,14 +347,21 @@ func (t *FileTracker) ReadChunk(file *TrackedFile, r *redactor.Redactor, maxByte
 					}
 				}
 
-				// Extract git info (transcript only, first one wins)
-				if file.Type == "transcript" && gitInfo == nil {
-					if branch, ok := msg["gitBranch"].(string); ok && branch != "" {
-						gitInfo = &git.GitInfo{Branch: branch}
-						if cwd, ok := msg["cwd"].(string); ok {
-							gitInfo.RepoURL, _ = git.GetRepoURL(cwd)
-						}
-					}
+				// Extract git info — first message wins. Two provider-
+				// agnostic paths, keyed by message shape:
+				//   - Claude: any message with inline `gitBranch` + `cwd`
+				//     (transcript files only — agent JSONL has its own
+				//     branch-less shape).
+				//   - Codex: the leading `session_meta` line (both root
+				//     transcripts and descendant agent files) whose
+				//     payload carries `cwd`.
+				// Both fan out to the same git.Detect* helpers so the
+				// wire shape stays identical across providers.
+				if gitInfo == nil {
+					gitInfo = gitInfoFromClaudeMessage(file, msg)
+				}
+				if gitInfo == nil {
+					gitInfo = gitInfoFromCodexSessionMeta(msg)
 				}
 			}
 		}

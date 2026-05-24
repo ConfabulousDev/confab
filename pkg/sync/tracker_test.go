@@ -1,7 +1,10 @@
 package sync
 
 import (
+	"encoding/json"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -393,6 +396,137 @@ func TestFileTracker_ReadChunk_ExtractsGitInfo(t *testing.T) {
 
 	if chunk.Metadata.GitInfo.Branch != "main" {
 		t.Errorf("expected branch 'main', got %q", chunk.Metadata.GitInfo.Branch)
+	}
+}
+
+// runGitInTracker is a tiny test helper to init/configure a real git repo
+// the Codex session_meta path can detect remotes from. Kept local to this
+// file rather than depending on pkg/git's test helpers.
+func runGitInTracker(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+}
+
+// initGitRepoForTracker initialises a temp git repo with an identity and
+// one committed file on branch "main", mirroring pkg/git's test helper.
+func initGitRepoForTracker(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	runGitInTracker(t, dir, "init")
+	runGitInTracker(t, dir, "config", "user.email", "test@example.com")
+	runGitInTracker(t, dir, "config", "user.name", "Test User")
+	if err := os.WriteFile(filepath.Join(dir, "f.txt"), []byte("x"), 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	runGitInTracker(t, dir, "add", "f.txt")
+	runGitInTracker(t, dir, "commit", "-m", "init")
+	runGitInTracker(t, dir, "branch", "-M", "main")
+	return dir
+}
+
+func TestFileTracker_ReadChunk_CodexSessionMeta_ExtractsGitInfo(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available in PATH")
+	}
+
+	// Real git repo with two remotes + tracking config — all four CF-494
+	// resolver inputs must show up on the resulting chunk.
+	repoDir := initGitRepoForTracker(t)
+	runGitInTracker(t, repoDir, "remote", "add", "origin", "git@github.com:jackie/repo.git")
+	runGitInTracker(t, repoDir, "remote", "add", "upstream", "git@github.com:ConfabulousDev/repo.git")
+	runGitInTracker(t, repoDir, "config", "branch.main.remote", "upstream")
+
+	tmpDir := t.TempDir()
+	transcriptPath := filepath.Join(tmpDir, "transcript.jsonl")
+	sessionMeta := fmt.Sprintf(`{"type":"session_meta","payload":{"cwd":%q}}`+"\n",
+		repoDir)
+	if err := os.WriteFile(transcriptPath, []byte(sessionMeta), 0644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+
+	ft := NewFileTracker(transcriptPath)
+	ft.InitFromBackendState(map[string]FileState{
+		"transcript.jsonl": {LastSyncedLine: 0},
+	})
+
+	chunk, err := ft.ReadChunk(ft.GetTranscriptFile(), nil, DefaultMaxChunkBytes)
+	if err != nil {
+		t.Fatalf("ReadChunk: %v", err)
+	}
+	if chunk == nil || chunk.Metadata == nil || chunk.Metadata.GitInfo == nil {
+		t.Fatalf("expected chunk with GitInfo, got %+v", chunk)
+	}
+	gi := chunk.Metadata.GitInfo
+	if gi.RepoURL != "git@github.com:jackie/repo.git" {
+		t.Errorf("RepoURL = %q, want origin URL", gi.RepoURL)
+	}
+	if len(gi.Remotes) != 2 {
+		t.Fatalf("Remotes = %+v, want 2 entries", gi.Remotes)
+	}
+	if gi.Remotes[0].Name != "origin" || gi.Remotes[1].Name != "upstream" {
+		t.Errorf("Remotes order = [%s %s], want [origin upstream]",
+			gi.Remotes[0].Name, gi.Remotes[1].Name)
+	}
+	if gi.Branch != "main" {
+		t.Errorf("Branch = %q, want %q", gi.Branch, "main")
+	}
+	if gi.TrackingRemote != "upstream" {
+		t.Errorf("TrackingRemote = %q, want %q", gi.TrackingRemote, "upstream")
+	}
+}
+
+func TestFileTracker_ReadChunk_CodexSessionMeta_AgentFile_ExtractsGitInfo(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available in PATH")
+	}
+
+	repoDir := t.TempDir()
+	runGitInTracker(t, repoDir, "init")
+	runGitInTracker(t, repoDir, "remote", "add", "origin", "git@github.com:owner/repo.git")
+
+	// Build a tracker around a transcript, then register an agent file
+	// pointing at a separate JSONL whose first line is session_meta.
+	tmpDir := t.TempDir()
+	transcriptPath := filepath.Join(tmpDir, "transcript.jsonl")
+	if err := os.WriteFile(transcriptPath, []byte(""), 0644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+
+	agentPath := filepath.Join(tmpDir, "agent-codex-descendant.jsonl")
+	sessionMeta, _ := json.Marshal(map[string]any{
+		"type":    "session_meta",
+		"payload": map[string]any{"cwd": repoDir},
+	})
+	if err := os.WriteFile(agentPath, append(sessionMeta, '\n'), 0644); err != nil {
+		t.Fatalf("write agent: %v", err)
+	}
+
+	ft := NewFileTracker(transcriptPath)
+	ft.InitFromBackendState(map[string]FileState{
+		"transcript.jsonl": {LastSyncedLine: 0},
+	})
+	// Manually add the agent file as a tracked file — match how Codex
+	// descendant rollouts are registered (Type=="agent").
+	ft.files[filepath.Base(agentPath)] = &TrackedFile{
+		Path:           agentPath,
+		Name:           filepath.Base(agentPath),
+		Type:           "agent",
+		LastSyncedLine: 0,
+	}
+
+	chunk, err := ft.ReadChunk(ft.files[filepath.Base(agentPath)], nil, DefaultMaxChunkBytes)
+	if err != nil {
+		t.Fatalf("ReadChunk: %v", err)
+	}
+	if chunk == nil || chunk.Metadata == nil || chunk.Metadata.GitInfo == nil {
+		t.Fatalf("expected chunk with GitInfo on agent file, got %+v", chunk)
+	}
+	if len(chunk.Metadata.GitInfo.Remotes) != 1 || chunk.Metadata.GitInfo.Remotes[0].Name != "origin" {
+		t.Errorf("Remotes = %+v, want [origin]", chunk.Metadata.GitInfo.Remotes)
 	}
 }
 
