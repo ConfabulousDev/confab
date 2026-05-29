@@ -21,9 +21,13 @@ Union type for all Claude Code hook events. A single struct carries fields for e
 - `PreToolUse` / `PostToolUse`: `ToolName`, `ToolInput`, `ToolUseID`, `ToolResponse`
 - `SessionStart` / `SessionEnd`: `Reason`
 
-### `ClaudeHookResponse` / `ClaudePreToolUseResponse`
+### `ClaudeHookResponse` / `PreToolUseResponse`
 
-Response types written to stdout for Claude Code to consume. `ClaudePreToolUseResponse` includes `HookSpecificOutput` with permission decisions (allow/deny with instructions).
+Response types written to stdout for the harness to consume. `PreToolUseResponse` includes `HookSpecificOutput` (a `PreToolUseOutput`) with permission decisions (allow/deny with instructions). `PreToolUseResponse` is provider-agnostic — Claude Code and Codex both accept the same shape.
+
+### `CodexHookInput` / `CodexHookResponse`
+
+Codex counterparts to the Claude types. `CodexHookInput` is a union type carrying fields from all Codex hook events; `ToolResponseMap()` normalizes Codex's `tool_response` value (the shell tool sends a plain string, other tools send a map) into a `map[string]any`. `CodexHookResponse` is the JSON response sent back to Codex hooks.
 
 ### `InboxEvent`
 

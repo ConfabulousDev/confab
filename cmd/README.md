@@ -14,6 +14,7 @@ CLI command layer built on [Cobra](https://github.com/spf13/cobra). Each file de
 | `hook_pretooluse.go` | `pre-tool-use` hook: injects Confab links into git commits and PRs |
 | `hook_posttooluse.go` | `post-tool-use` hook: links GitHub artifacts to Confab sessions |
 | `hook_userpromptsubmit.go` | `user-prompt-submit` hook: ensures daemon is running |
+| `hook_tooluse_input.go` | `readToolUseHookInput()` adapter mapping `ClaudeHookInput` / `CodexHookInput` into a shared `toolUseHookInput` shape for the pre/post-tool-use handlers |
 | `hooks.go` | `confab hooks add/remove --provider <name>` — install/uninstall hooks for the selected provider via `p.InstallHooks()` |
 | `sync.go` | `confab sync start/stop/status` — daemon management |
 | `spawn.go` | Generic `maybeSpawnDaemon(p, *daemonLaunchInput)` — single dispatch for Claude and Codex daemon spawn. `daemonLaunchInput` is the canonical wire format between the hook and the freshly-spawned daemon process. |
