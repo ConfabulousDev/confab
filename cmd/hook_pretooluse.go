@@ -23,6 +23,9 @@ const (
 	// PR body link format: 📝 [Confab link]({session_url})
 	prLinkPrefix = "📝 [Confab link]("
 	prLinkSuffix = ")"
+
+	// AI appends this shell comment to certify the link is in a file the hook can't see.
+	confabLinkedMarker = "# confab-linked"
 )
 
 // gitCommitPattern matches git commit commands
@@ -49,6 +52,10 @@ Confab session URL trailer (Confab-Link: {backend_url}/sessions/{session_id}).
 
 For PR creation (gh pr create, GitHub MCP tool), ensures the PR body includes a
 Confab session link (📝 [Confab link]({backend_url}/sessions/{session_id})).
+
+When the link lives in a file the hook can't see (e.g. via 'git commit -F',
+'gh pr create --body-file', or $(cat …)), the agent can certify its presence
+by appending the shell comment '# confab-linked' to the Bash command.
 
 For all other tool calls, exits silently (code 0) to allow normal flow.
 
@@ -120,27 +127,20 @@ func handlePreToolUse(r io.Reader, w io.Writer) error {
 		return nil
 	}
 
-	if containsSessionURL(command, confabSessionID) {
+	if commandContainsConfabLink(command, confabSessionID) {
 		logger.Info("Confab link already present in command")
-		outputPreToolUseDecision(w, "allow", "Session URL already present")
+		outputPreToolUseDecision(w, "allow", "Confab link present")
 		return nil
 	}
 
 	if isCommit {
 		logger.Info("Requesting Confab link for git commit -> session %s", confabSessionID)
-		trailerLine := formatTrailerLine(sessionURL)
-		reason := fmt.Sprintf(
-			"✓ Confab is linking this commit to your session. "+
-				"Add this trailer to the end of your commit message (after any other trailers like Co-Authored-By):\n\n    %s\n\n"+
-				"IMPORTANT: Copy this line verbatim. The value is a URL, NOT a ticket ID like CF-123.",
-			trailerLine,
-		)
-		outputPreToolUseDecision(w, "deny", reason)
+		outputPreToolUseDecision(w, "deny", formatCommitDenyReason(sessionURL))
 		return nil
 	}
 
 	logger.Info("Requesting Confab link for PR -> session %s", confabSessionID)
-	outputPreToolUseDecision(w, "deny", formatPRDenyReason(sessionURL))
+	outputPreToolUseDecision(w, "deny", formatBashPRDenyReason(sessionURL))
 	return nil
 }
 
@@ -233,6 +233,14 @@ func containsSessionURL(command, sessionID string) bool {
 	return strings.Contains(command, sessionURL)
 }
 
+// commandContainsConfabLink reports whether the command already carries the
+// Confab session link, either as the literal session URL or via the
+// confabLinkedMarker certification (used when the link lives in a body/commit
+// file the hook can't see).
+func commandContainsConfabLink(command, sessionID string) bool {
+	return strings.Contains(command, confabLinkedMarker) || containsSessionURL(command, sessionID)
+}
+
 // formatSessionURL returns the session URL derived from the configured backend URL.
 // Returns error if backend URL is not configured.
 func formatSessionURL(sessionID string) (string, error) {
@@ -256,12 +264,42 @@ func formatPRLink(sessionURL string) string {
 	return prLinkPrefix + sessionURL + prLinkSuffix
 }
 
+// formatPRDenyReason is the MCP-path deny message: the AI is editing a
+// structured body field, so no shell-comment marker advice is included.
 func formatPRDenyReason(sessionURL string) string {
 	return fmt.Sprintf(
 		"✓ Confab is linking this PR to your session. "+
 			"Add this line at the bottom of the PR body:\n\n    %s\n\n"+
 			"IMPORTANT: Copy this line verbatim. The value is a URL, NOT a ticket ID like CF-123.",
 		formatPRLink(sessionURL),
+	)
+}
+
+// formatBashPRDenyReason is the Bash gh-pr-create deny message: includes the
+// shell-comment marker as an alternative for when the body lives in a file.
+func formatBashPRDenyReason(sessionURL string) string {
+	return fmt.Sprintf(
+		"✓ Confab is linking this PR to your session. "+
+			"Add this line at the bottom of the PR body:\n\n    %s\n\n"+
+			"Alternatively, if the Confab link is already in the PR body "+
+			"(e.g. via --body-file or $(cat …)), certify it by appending "+
+			"this shell comment to your gh command:\n\n    %s\n\n"+
+			"IMPORTANT: Copy the link line verbatim. The value is a URL, NOT a ticket ID like CF-123.",
+		formatPRLink(sessionURL),
+		confabLinkedMarker,
+	)
+}
+
+func formatCommitDenyReason(sessionURL string) string {
+	return fmt.Sprintf(
+		"✓ Confab is linking this commit to your session. "+
+			"Add this trailer to the end of your commit message (after any other trailers like Co-Authored-By):\n\n    %s\n\n"+
+			"Alternatively, if the Confab link is already in the commit message "+
+			"(e.g. via `git commit -F <file>`), certify it by appending "+
+			"this shell comment to your git command:\n\n    %s\n\n"+
+			"IMPORTANT: Copy the trailer verbatim. The value is a URL, NOT a ticket ID like CF-123.",
+		formatTrailerLine(sessionURL),
+		confabLinkedMarker,
 	)
 }
 
