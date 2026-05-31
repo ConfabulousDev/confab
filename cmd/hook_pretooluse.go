@@ -284,6 +284,7 @@ func formatBashPRDenyReason(sessionURL string) string {
 			"Alternatively, if the Confab link is already in the PR body "+
 			"(e.g. via --body-file or $(cat …)), certify it by appending "+
 			"this shell comment to your gh command:\n\n    %s\n\n"+
+			"The marker is a shell comment on the command line ONLY — never put it in the PR title or body.\n\n"+
 			"IMPORTANT: Copy the link line verbatim. The value is a URL, NOT a ticket ID like CF-123.",
 		formatPRLink(sessionURL),
 		confabLinkedMarker,
@@ -297,6 +298,7 @@ func formatCommitDenyReason(sessionURL string) string {
 			"Alternatively, if the Confab link is already in the commit message "+
 			"(e.g. via `git commit -F <file>`), certify it by appending "+
 			"this shell comment to your git command:\n\n    %s\n\n"+
+			"The marker is a shell comment on the git command line ONLY — never put it in the commit message.\n\n"+
 			"IMPORTANT: Copy the trailer verbatim. The value is a URL, NOT a ticket ID like CF-123.",
 		formatTrailerLine(sessionURL),
 		confabLinkedMarker,
