@@ -86,7 +86,7 @@ func engineWithStub(t *testing.T) (*Engine, *stubProvider, *mockBackend, string)
 	tmpDir, transcriptPath := setupTestEnv(t, server.URL)
 
 	stub := &stubProvider{}
-	engine := NewWithBackend(
+	engine, err := NewWithBackend(
 		mustNewClient(t, server.URL, tmpDir),
 		nil,
 		EngineConfig{
@@ -95,6 +95,9 @@ func engineWithStub(t *testing.T) (*Engine, *stubProvider, *mockBackend, string)
 			CWD:            tmpDir,
 		},
 	)
+	if err != nil {
+		t.Fatalf("NewWithBackend: %v", err)
+	}
 	engine.setProviderForTest(stub)
 	return engine, stub, mock, transcriptPath
 }

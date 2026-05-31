@@ -35,15 +35,11 @@ func TestEngine_IncrementalSync(t *testing.T) {
 `
 	os.WriteFile(transcriptPath, []byte(transcriptContent), 0644)
 
-	engine := NewWithBackend(
-		mustNewClient(t, server.URL, tmpDir),
-		nil,
-		EngineConfig{
-			ExternalID:     "incremental-test",
-			TranscriptPath: transcriptPath,
-			CWD:            tmpDir,
-		},
-	)
+	engine := newEngineWithBackend(t, mustNewClient(t, server.URL, tmpDir), nil, EngineConfig{
+		ExternalID:     "incremental-test",
+		TranscriptPath: transcriptPath,
+		CWD:            tmpDir,
+	})
 
 	if err := engine.Init(); err != nil {
 		t.Fatalf("Init failed: %v", err)
@@ -83,15 +79,11 @@ func TestEngine_MultipleSyncCycles(t *testing.T) {
 	// Start with initial content
 	os.WriteFile(transcriptPath, []byte(`{"type":"system","line":1}`+"\n"), 0644)
 
-	engine := NewWithBackend(
-		mustNewClient(t, server.URL, tmpDir),
-		nil,
-		EngineConfig{
-			ExternalID:     "multi-cycle-test",
-			TranscriptPath: transcriptPath,
-			CWD:            tmpDir,
-		},
-	)
+	engine := newEngineWithBackend(t, mustNewClient(t, server.URL, tmpDir), nil, EngineConfig{
+		ExternalID:     "multi-cycle-test",
+		TranscriptPath: transcriptPath,
+		CWD:            tmpDir,
+	})
 
 	if err := engine.Init(); err != nil {
 		t.Fatalf("Init failed: %v", err)
@@ -166,15 +158,11 @@ func TestEngine_MultipleAgentFiles(t *testing.T) {
 		os.WriteFile(agentPath, []byte(fmt.Sprintf(`{"agent":"%s","line":1}`+"\n", id)), 0644)
 	}
 
-	engine := NewWithBackend(
-		mustNewClient(t, server.URL, tmpDir),
-		nil,
-		EngineConfig{
-			ExternalID:     "multi-agent-test",
-			TranscriptPath: transcriptPath,
-			CWD:            tmpDir,
-		},
-	)
+	engine := newEngineWithBackend(t, mustNewClient(t, server.URL, tmpDir), nil, EngineConfig{
+		ExternalID:     "multi-agent-test",
+		TranscriptPath: transcriptPath,
+		CWD:            tmpDir,
+	})
 
 	if err := engine.Init(); err != nil {
 		t.Fatalf("Init failed: %v", err)
@@ -283,15 +271,11 @@ func TestEngine_BackendRollback(t *testing.T) {
 	os.WriteFile(transcriptPath, []byte(transcriptContent), 0644)
 
 	// First engine: syncs all 6 lines
-	engine1 := NewWithBackend(
-		mustNewClient(t, server.URL, tmpDir),
-		nil,
-		EngineConfig{
-			ExternalID:     "rollback-test",
-			TranscriptPath: transcriptPath,
-			CWD:            tmpDir,
-		},
-	)
+	engine1 := newEngineWithBackend(t, mustNewClient(t, server.URL, tmpDir), nil, EngineConfig{
+		ExternalID:     "rollback-test",
+		TranscriptPath: transcriptPath,
+		CWD:            tmpDir,
+	})
 
 	if err := engine1.Init(); err != nil {
 		t.Fatalf("First init failed: %v", err)
@@ -320,15 +304,11 @@ func TestEngine_BackendRollback(t *testing.T) {
 	}
 
 	// Second engine (simulating restart) - backend reports lastSyncedLine=3
-	engine2 := NewWithBackend(
-		mustNewClient(t, server.URL, tmpDir),
-		nil,
-		EngineConfig{
-			ExternalID:     "rollback-test",
-			TranscriptPath: transcriptPath,
-			CWD:            tmpDir,
-		},
-	)
+	engine2 := newEngineWithBackend(t, mustNewClient(t, server.URL, tmpDir), nil, EngineConfig{
+		ExternalID:     "rollback-test",
+		TranscriptPath: transcriptPath,
+		CWD:            tmpDir,
+	})
 
 	if err := engine2.Init(); err != nil {
 		t.Fatalf("Second init failed: %v", err)
@@ -378,15 +358,11 @@ func TestEngine_BackendHasMoreLines(t *testing.T) {
 	}
 	os.WriteFile(transcriptPath, []byte(strings.Join(lines, "\n")+"\n"), 0644)
 
-	engine := NewWithBackend(
-		mustNewClient(t, server.URL, tmpDir),
-		nil,
-		EngineConfig{
-			ExternalID:     "backend-ahead-test",
-			TranscriptPath: transcriptPath,
-			CWD:            tmpDir,
-		},
-	)
+	engine := newEngineWithBackend(t, mustNewClient(t, server.URL, tmpDir), nil, EngineConfig{
+		ExternalID:     "backend-ahead-test",
+		TranscriptPath: transcriptPath,
+		CWD:            tmpDir,
+	})
 
 	if err := engine.Init(); err != nil {
 		t.Fatalf("Init failed: %v", err)
@@ -422,15 +398,11 @@ func TestEngine_EmptyTranscript(t *testing.T) {
 	// Create empty transcript
 	os.WriteFile(transcriptPath, []byte(""), 0644)
 
-	engine := NewWithBackend(
-		mustNewClient(t, server.URL, tmpDir),
-		nil,
-		EngineConfig{
-			ExternalID:     "empty-transcript-test",
-			TranscriptPath: transcriptPath,
-			CWD:            tmpDir,
-		},
-	)
+	engine := newEngineWithBackend(t, mustNewClient(t, server.URL, tmpDir), nil, EngineConfig{
+		ExternalID:     "empty-transcript-test",
+		TranscriptPath: transcriptPath,
+		CWD:            tmpDir,
+	})
 
 	if err := engine.Init(); err != nil {
 		t.Fatalf("Init failed: %v", err)
@@ -506,15 +478,11 @@ func TestEngine_LargeFile(t *testing.T) {
 	}
 	f.Close()
 
-	engine := NewWithBackend(
-		mustNewClient(t, server.URL, tmpDir),
-		nil,
-		EngineConfig{
-			ExternalID:     "large-file-test",
-			TranscriptPath: transcriptPath,
-			CWD:            tmpDir,
-		},
-	)
+	engine := newEngineWithBackend(t, mustNewClient(t, server.URL, tmpDir), nil, EngineConfig{
+		ExternalID:     "large-file-test",
+		TranscriptPath: transcriptPath,
+		CWD:            tmpDir,
+	})
 
 	if err := engine.Init(); err != nil {
 		t.Fatalf("Init failed: %v", err)
@@ -563,19 +531,14 @@ func TestEngine_RetryAfterReset(t *testing.T) {
 	}
 	client, _ := NewClient(cfg)
 
-	engine := NewWithBackend(
-		client,
-		nil,
-		EngineConfig{
-			ExternalID:     "retry-test",
-			TranscriptPath: transcriptPath,
-			CWD:            tmpDir,
-		},
-	)
+	engine := newEngineWithBackend(t, client, nil, EngineConfig{
+		ExternalID:     "retry-test",
+		TranscriptPath: transcriptPath,
+		CWD:            tmpDir,
+	})
 
 	// First init should fail
-	err := engine.Init()
-	if err == nil {
+	if err := engine.Init(); err == nil {
 		t.Error("Expected first init to fail")
 	}
 
@@ -583,8 +546,7 @@ func TestEngine_RetryAfterReset(t *testing.T) {
 	engine.Reset()
 
 	// Second init should succeed
-	err = engine.Init()
-	if err != nil {
+	if err := engine.Init(); err != nil {
 		t.Fatalf("Second init should succeed: %v", err)
 	}
 
