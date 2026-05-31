@@ -199,18 +199,13 @@ func TestEngine_Init_NewSession(t *testing.T) {
 	// Create transcript
 	os.WriteFile(transcriptPath, []byte(`{"type":"system"}`+"\n"), 0644)
 
-	engine := NewWithBackend(
-		mustNewClient(t, server.URL, tmpDir),
-		nil,
-		EngineConfig{
-			ExternalID:     "test-external-id",
-			TranscriptPath: transcriptPath,
-			CWD:            tmpDir,
-		},
-	)
+	engine := newEngineWithBackend(t, mustNewClient(t, server.URL, tmpDir), nil, EngineConfig{
+		ExternalID:     "test-external-id",
+		TranscriptPath: transcriptPath,
+		CWD:            tmpDir,
+	})
 
-	err := engine.Init()
-	if err != nil {
+	if err := engine.Init(); err != nil {
 		t.Fatalf("Init failed: %v", err)
 	}
 
@@ -250,15 +245,11 @@ func TestEngine_SendSessionEnd_DispatchesEvent(t *testing.T) {
 	tmpDir, transcriptPath := setupTestEnv(t, server.URL)
 	os.WriteFile(transcriptPath, []byte(`{"type":"system"}`+"\n"), 0644)
 
-	engine := NewWithBackend(
-		mustNewClient(t, server.URL, tmpDir),
-		nil,
-		EngineConfig{
-			ExternalID:     "send-session-end-test",
-			TranscriptPath: transcriptPath,
-			CWD:            tmpDir,
-		},
-	)
+	engine := newEngineWithBackend(t, mustNewClient(t, server.URL, tmpDir), nil, EngineConfig{
+		ExternalID:     "send-session-end-test",
+		TranscriptPath: transcriptPath,
+		CWD:            tmpDir,
+	})
 	if err := engine.Init(); err != nil {
 		t.Fatalf("Init failed: %v", err)
 	}
@@ -309,11 +300,7 @@ func TestEngine_SendSessionEnd_NotInitialized(t *testing.T) {
 	defer server.Close()
 	tmpDir, transcriptPath := setupTestEnv(t, server.URL)
 	os.WriteFile(transcriptPath, []byte(`{"type":"system"}`+"\n"), 0644)
-	engine := NewWithBackend(
-		mustNewClient(t, server.URL, tmpDir),
-		nil,
-		EngineConfig{ExternalID: "not-init", TranscriptPath: transcriptPath, CWD: tmpDir},
-	)
+	engine := newEngineWithBackend(t, mustNewClient(t, server.URL, tmpDir), nil, EngineConfig{ExternalID: "not-init", TranscriptPath: transcriptPath, CWD: tmpDir})
 	// No Init() call.
 	if err := engine.SendSessionEnd(&types.ClaudeHookInput{}, time.Now()); err != nil {
 		t.Errorf("SendSessionEnd on uninitialized engine returned %v, want nil (no-op)", err)
@@ -336,16 +323,12 @@ func TestEngine_Init_RecordsProviderField(t *testing.T) {
 	tmpDir, transcriptPath := setupTestEnv(t, server.URL)
 	os.WriteFile(transcriptPath, []byte(`{"type":"session_meta","payload":{}}`+"\n"), 0644)
 
-	engine := NewWithBackend(
-		mustNewClient(t, server.URL, tmpDir),
-		nil,
-		EngineConfig{
-			Provider:       "codex",
-			ExternalID:     "codex-external-id",
-			TranscriptPath: transcriptPath,
-			CWD:            tmpDir,
-		},
-	)
+	engine := newEngineWithBackend(t, mustNewClient(t, server.URL, tmpDir), nil, EngineConfig{
+		Provider:       "codex",
+		ExternalID:     "codex-external-id",
+		TranscriptPath: transcriptPath,
+		CWD:            tmpDir,
+	})
 
 	if err := engine.Init(); err != nil {
 		t.Fatalf("Init failed: %v", err)
@@ -377,15 +360,11 @@ func TestEngine_Init_ResumeSession(t *testing.T) {
 	}
 	os.WriteFile(transcriptPath, []byte(content), 0644)
 
-	engine := NewWithBackend(
-		mustNewClient(t, server.URL, tmpDir),
-		nil,
-		EngineConfig{
-			ExternalID:     "resume-test",
-			TranscriptPath: transcriptPath,
-			CWD:            tmpDir,
-		},
-	)
+	engine := newEngineWithBackend(t, mustNewClient(t, server.URL, tmpDir), nil, EngineConfig{
+		ExternalID:     "resume-test",
+		TranscriptPath: transcriptPath,
+		CWD:            tmpDir,
+	})
 
 	if err := engine.Init(); err != nil {
 		t.Fatalf("Init failed: %v", err)
@@ -428,15 +407,11 @@ func TestEngine_SyncAll_FirstSync(t *testing.T) {
 `
 	os.WriteFile(transcriptPath, []byte(content), 0644)
 
-	engine := NewWithBackend(
-		mustNewClient(t, server.URL, tmpDir),
-		nil,
-		EngineConfig{
-			ExternalID:     "first-sync-test",
-			TranscriptPath: transcriptPath,
-			CWD:            tmpDir,
-		},
-	)
+	engine := newEngineWithBackend(t, mustNewClient(t, server.URL, tmpDir), nil, EngineConfig{
+		ExternalID:     "first-sync-test",
+		TranscriptPath: transcriptPath,
+		CWD:            tmpDir,
+	})
 
 	if err := engine.Init(); err != nil {
 		t.Fatalf("Init failed: %v", err)
@@ -497,15 +472,11 @@ func TestEngine_SyncAll_NoChanges(t *testing.T) {
 
 	os.WriteFile(transcriptPath, []byte(`{"type":"system"}`+"\n"), 0644)
 
-	engine := NewWithBackend(
-		mustNewClient(t, server.URL, tmpDir),
-		nil,
-		EngineConfig{
-			ExternalID:     "no-changes-test",
-			TranscriptPath: transcriptPath,
-			CWD:            tmpDir,
-		},
-	)
+	engine := newEngineWithBackend(t, mustNewClient(t, server.URL, tmpDir), nil, EngineConfig{
+		ExternalID:     "no-changes-test",
+		TranscriptPath: transcriptPath,
+		CWD:            tmpDir,
+	})
 
 	if err := engine.Init(); err != nil {
 		t.Fatalf("Init failed: %v", err)
@@ -546,15 +517,11 @@ func TestEngine_SyncAll_WithAgentDiscovery(t *testing.T) {
 `
 	os.WriteFile(agentPath, []byte(agentContent), 0644)
 
-	engine := NewWithBackend(
-		mustNewClient(t, server.URL, tmpDir),
-		nil,
-		EngineConfig{
-			ExternalID:     "agent-discovery-test",
-			TranscriptPath: transcriptPath,
-			CWD:            tmpDir,
-		},
-	)
+	engine := newEngineWithBackend(t, mustNewClient(t, server.URL, tmpDir), nil, EngineConfig{
+		ExternalID:     "agent-discovery-test",
+		TranscriptPath: transcriptPath,
+		CWD:            tmpDir,
+	})
 
 	if err := engine.Init(); err != nil {
 		t.Fatalf("Init failed: %v", err)
@@ -618,22 +585,17 @@ func TestEngine_SyncAll_WithMetadata(t *testing.T) {
 `
 	os.WriteFile(transcriptPath, []byte(content), 0644)
 
-	engine := NewWithBackend(
-		mustNewClient(t, server.URL, tmpDir),
-		nil,
-		EngineConfig{
-			ExternalID:     "metadata-test",
-			TranscriptPath: transcriptPath,
-			CWD:            tmpDir,
-		},
-	)
+	engine := newEngineWithBackend(t, mustNewClient(t, server.URL, tmpDir), nil, EngineConfig{
+		ExternalID:     "metadata-test",
+		TranscriptPath: transcriptPath,
+		CWD:            tmpDir,
+	})
 
 	if err := engine.Init(); err != nil {
 		t.Fatalf("Init failed: %v", err)
 	}
 
-	_, err := engine.SyncAll()
-	if err != nil {
+	if _, err := engine.SyncAll(); err != nil {
 		t.Fatalf("SyncAll failed: %v", err)
 	}
 
@@ -672,23 +634,18 @@ func TestEngine_SyncAll_WithCodexFirstUserMessage(t *testing.T) {
 `
 	os.WriteFile(transcriptPath, []byte(content), 0644)
 
-	engine := NewWithBackend(
-		mustNewClient(t, server.URL, tmpDir),
-		nil,
-		EngineConfig{
-			Provider:       (provider.Codex{}).Name(),
-			ExternalID:     "codex-metadata-test",
-			TranscriptPath: transcriptPath,
-			CWD:            tmpDir,
-		},
-	)
+	engine := newEngineWithBackend(t, mustNewClient(t, server.URL, tmpDir), nil, EngineConfig{
+		Provider:       (provider.Codex{}).Name(),
+		ExternalID:     "codex-metadata-test",
+		TranscriptPath: transcriptPath,
+		CWD:            tmpDir,
+	})
 
 	if err := engine.Init(); err != nil {
 		t.Fatalf("Init failed: %v", err)
 	}
 
-	_, err := engine.SyncAll()
-	if err != nil {
+	if _, err := engine.SyncAll(); err != nil {
 		t.Fatalf("SyncAll failed: %v", err)
 	}
 
@@ -730,15 +687,11 @@ func TestEngine_SyncAll_MetadataRedaction(t *testing.T) {
 		t.Fatalf("Failed to create redactor: %v", err)
 	}
 
-	engine := NewWithBackend(
-		mustNewClient(t, server.URL, tmpDir),
-		r,
-		EngineConfig{
-			ExternalID:     "redact-metadata-test",
-			TranscriptPath: transcriptPath,
-			CWD:            tmpDir,
-		},
-	)
+	engine := newEngineWithBackend(t, mustNewClient(t, server.URL, tmpDir), r, EngineConfig{
+		ExternalID:     "redact-metadata-test",
+		TranscriptPath: transcriptPath,
+		CWD:            tmpDir,
+	})
 
 	if err := engine.Init(); err != nil {
 		t.Fatalf("Init failed: %v", err)
@@ -784,15 +737,11 @@ func TestEngine_GetSyncStats(t *testing.T) {
 `
 	os.WriteFile(transcriptPath, []byte(content), 0644)
 
-	engine := NewWithBackend(
-		mustNewClient(t, server.URL, tmpDir),
-		nil,
-		EngineConfig{
-			ExternalID:     "stats-test",
-			TranscriptPath: transcriptPath,
-			CWD:            tmpDir,
-		},
-	)
+	engine := newEngineWithBackend(t, mustNewClient(t, server.URL, tmpDir), nil, EngineConfig{
+		ExternalID:     "stats-test",
+		TranscriptPath: transcriptPath,
+		CWD:            tmpDir,
+	})
 
 	if err := engine.Init(); err != nil {
 		t.Fatalf("Init failed: %v", err)
@@ -821,15 +770,11 @@ func TestEngine_Reset(t *testing.T) {
 	tmpDir, transcriptPath := setupTestEnv(t, server.URL)
 	os.WriteFile(transcriptPath, []byte(`{"type":"system"}`+"\n"), 0644)
 
-	engine := NewWithBackend(
-		mustNewClient(t, server.URL, tmpDir),
-		nil,
-		EngineConfig{
-			ExternalID:     "reset-test",
-			TranscriptPath: transcriptPath,
-			CWD:            tmpDir,
-		},
-	)
+	engine := newEngineWithBackend(t, mustNewClient(t, server.URL, tmpDir), nil, EngineConfig{
+		ExternalID:     "reset-test",
+		TranscriptPath: transcriptPath,
+		CWD:            tmpDir,
+	})
 
 	if err := engine.Init(); err != nil {
 		t.Fatalf("Init failed: %v", err)
@@ -900,15 +845,11 @@ func TestEngine_SyncAll_TransitiveAgentDiscovery(t *testing.T) {
 `
 	os.WriteFile(agentCPath, []byte(agentCContent), 0644)
 
-	engine := NewWithBackend(
-		mustNewClient(t, server.URL, tmpDir),
-		nil,
-		EngineConfig{
-			ExternalID:     "transitive-agent-test",
-			TranscriptPath: transcriptPath,
-			CWD:            tmpDir,
-		},
-	)
+	engine := newEngineWithBackend(t, mustNewClient(t, server.URL, tmpDir), nil, EngineConfig{
+		ExternalID:     "transitive-agent-test",
+		TranscriptPath: transcriptPath,
+		CWD:            tmpDir,
+	})
 
 	if err := engine.Init(); err != nil {
 		t.Fatalf("Init failed: %v", err)
@@ -977,15 +918,11 @@ func TestEngine_SyncAll_AgentCycleDetection(t *testing.T) {
 `
 	os.WriteFile(agentBPath, []byte(agentBContent), 0644)
 
-	engine := NewWithBackend(
-		mustNewClient(t, server.URL, tmpDir),
-		nil,
-		EngineConfig{
-			ExternalID:     "cycle-detection-test",
-			TranscriptPath: transcriptPath,
-			CWD:            tmpDir,
-		},
-	)
+	engine := newEngineWithBackend(t, mustNewClient(t, server.URL, tmpDir), nil, EngineConfig{
+		ExternalID:     "cycle-detection-test",
+		TranscriptPath: transcriptPath,
+		CWD:            tmpDir,
+	})
 
 	if err := engine.Init(); err != nil {
 		t.Fatalf("Init failed: %v", err)
@@ -1056,15 +993,11 @@ func TestEngine_SyncAll_MaxIterations(t *testing.T) {
 		os.WriteFile(agentPath, []byte(content), 0644)
 	}
 
-	engine := NewWithBackend(
-		mustNewClient(t, server.URL, tmpDir),
-		nil,
-		EngineConfig{
-			ExternalID:     "max-iterations-test",
-			TranscriptPath: transcriptPath,
-			CWD:            tmpDir,
-		},
-	)
+	engine := newEngineWithBackend(t, mustNewClient(t, server.URL, tmpDir), nil, EngineConfig{
+		ExternalID:     "max-iterations-test",
+		TranscriptPath: transcriptPath,
+		CWD:            tmpDir,
+	})
 
 	if err := engine.Init(); err != nil {
 		t.Fatalf("Init failed: %v", err)
@@ -1113,15 +1046,11 @@ func TestEngine_SyncAll_AgentFileAppearsLater(t *testing.T) {
 `
 	os.WriteFile(transcriptPath, []byte(transcriptContent), 0644)
 
-	engine := NewWithBackend(
-		mustNewClient(t, server.URL, tmpDir),
-		nil,
-		EngineConfig{
-			ExternalID:     "late-agent-test",
-			TranscriptPath: transcriptPath,
-			CWD:            tmpDir,
-		},
-	)
+	engine := newEngineWithBackend(t, mustNewClient(t, server.URL, tmpDir), nil, EngineConfig{
+		ExternalID:     "late-agent-test",
+		TranscriptPath: transcriptPath,
+		CWD:            tmpDir,
+	})
 
 	if err := engine.Init(); err != nil {
 		t.Fatalf("Init failed: %v", err)
@@ -1223,15 +1152,11 @@ func TestEngine_SyncAll_RefreshStateAfterUploadFailure(t *testing.T) {
 	}
 	os.WriteFile(transcriptPath, []byte(content), 0644)
 
-	engine := NewWithBackend(
-		mustNewClient(t, server.URL, tmpDir),
-		nil,
-		EngineConfig{
-			ExternalID:     "refresh-state-test",
-			TranscriptPath: transcriptPath,
-			CWD:            tmpDir,
-		},
-	)
+	engine := newEngineWithBackend(t, mustNewClient(t, server.URL, tmpDir), nil, EngineConfig{
+		ExternalID:     "refresh-state-test",
+		TranscriptPath: transcriptPath,
+		CWD:            tmpDir,
+	})
 
 	// Initialize
 	if err := engine.Init(); err != nil {
@@ -1350,23 +1275,18 @@ func TestEngine_SyncAll_RefreshStateOnContiguityError(t *testing.T) {
 	}
 	os.WriteFile(transcriptPath, []byte(content), 0644)
 
-	engine := NewWithBackend(
-		mustNewClient(t, server.URL, tmpDir),
-		nil,
-		EngineConfig{
-			ExternalID:     "contiguity-test",
-			TranscriptPath: transcriptPath,
-			CWD:            tmpDir,
-		},
-	)
+	engine := newEngineWithBackend(t, mustNewClient(t, server.URL, tmpDir), nil, EngineConfig{
+		ExternalID:     "contiguity-test",
+		TranscriptPath: transcriptPath,
+		CWD:            tmpDir,
+	})
 
 	if err := engine.Init(); err != nil {
 		t.Fatalf("Init failed: %v", err)
 	}
 
 	// First SyncAll - will fail with "timeout" but trigger refresh
-	_, err := engine.SyncAll()
-	if err == nil {
+	if _, err := engine.SyncAll(); err == nil {
 		t.Error("expected error from first SyncAll")
 	}
 
@@ -1433,15 +1353,11 @@ func TestEngine_SyncAll_AuthErrorDuringRefreshPropagated(t *testing.T) {
 	tmpDir, transcriptPath := setupTestEnv(t, server.URL)
 	os.WriteFile(transcriptPath, []byte(`{"line":1}`+"\n"), 0644)
 
-	engine := NewWithBackend(
-		mustNewClient(t, server.URL, tmpDir),
-		nil,
-		EngineConfig{
-			ExternalID:     "auth-during-refresh-test",
-			TranscriptPath: transcriptPath,
-			CWD:            tmpDir,
-		},
-	)
+	engine := newEngineWithBackend(t, mustNewClient(t, server.URL, tmpDir), nil, EngineConfig{
+		ExternalID:     "auth-during-refresh-test",
+		TranscriptPath: transcriptPath,
+		CWD:            tmpDir,
+	})
 
 	if err := engine.Init(); err != nil {
 		t.Fatalf("Init failed: %v", err)
@@ -1490,15 +1406,11 @@ func TestEngine_SyncAll_DirScanAfterRestart(t *testing.T) {
 		[]byte(`{"type":"agent","message":"agent 2"}`+"\n"), 0644)
 
 	// --- First engine: syncs everything ---
-	engine1 := NewWithBackend(
-		mustNewClient(t, server.URL, tmpDir),
-		nil,
-		EngineConfig{
-			ExternalID:     "dir-scan-restart-test",
-			TranscriptPath: transcriptPath,
-			CWD:            tmpDir,
-		},
-	)
+	engine1 := newEngineWithBackend(t, mustNewClient(t, server.URL, tmpDir), nil, EngineConfig{
+		ExternalID:     "dir-scan-restart-test",
+		TranscriptPath: transcriptPath,
+		CWD:            tmpDir,
+	})
 	if err := engine1.Init(); err != nil {
 		t.Fatalf("Init failed: %v", err)
 	}
@@ -1519,15 +1431,11 @@ func TestEngine_SyncAll_DirScanAfterRestart(t *testing.T) {
 		"agent-acompact-2aaa241e456ebc94.jsonl": {LastSyncedLine: 1},
 	}
 
-	engine2 := NewWithBackend(
-		mustNewClient(t, server.URL, tmpDir),
-		nil,
-		EngineConfig{
-			ExternalID:     "dir-scan-restart-test",
-			TranscriptPath: transcriptPath,
-			CWD:            tmpDir,
-		},
-	)
+	engine2 := newEngineWithBackend(t, mustNewClient(t, server.URL, tmpDir), nil, EngineConfig{
+		ExternalID:     "dir-scan-restart-test",
+		TranscriptPath: transcriptPath,
+		CWD:            tmpDir,
+	})
 	if err := engine2.Init(); err != nil {
 		t.Fatalf("Second Init failed: %v", err)
 	}
@@ -1594,15 +1502,11 @@ func TestEngine_SyncAll_DirScanDiscoversUnknownAgent(t *testing.T) {
 		"transcript.jsonl": {LastSyncedLine: 0},
 	}
 
-	engine := NewWithBackend(
-		mustNewClient(t, server.URL, tmpDir),
-		nil,
-		EngineConfig{
-			ExternalID:     "dir-scan-unknown-agent-test",
-			TranscriptPath: transcriptPath,
-			CWD:            tmpDir,
-		},
-	)
+	engine := newEngineWithBackend(t, mustNewClient(t, server.URL, tmpDir), nil, EngineConfig{
+		ExternalID:     "dir-scan-unknown-agent-test",
+		TranscriptPath: transcriptPath,
+		CWD:            tmpDir,
+	})
 
 	if err := engine.Init(); err != nil {
 		t.Fatalf("Init failed: %v", err)
@@ -1662,15 +1566,11 @@ func TestEngine_SyncAll_MixedAgentIDFormats(t *testing.T) {
 		os.WriteFile(filepath.Join(subagentsDir, name), []byte(content), 0644)
 	}
 
-	engine := NewWithBackend(
-		mustNewClient(t, server.URL, tmpDir),
-		nil,
-		EngineConfig{
-			ExternalID:     "mixed-formats-test",
-			TranscriptPath: transcriptPath,
-			CWD:            tmpDir,
-		},
-	)
+	engine := newEngineWithBackend(t, mustNewClient(t, server.URL, tmpDir), nil, EngineConfig{
+		ExternalID:     "mixed-formats-test",
+		TranscriptPath: transcriptPath,
+		CWD:            tmpDir,
+	})
 
 	if err := engine.Init(); err != nil {
 		t.Fatalf("Init failed: %v", err)
@@ -1696,6 +1596,17 @@ func TestEngine_SyncAll_MixedAgentIDFormats(t *testing.T) {
 			t.Errorf("expected %s to be uploaded", name)
 		}
 	}
+}
+
+// newEngineWithBackend creates an engine with a mock backend for testing.
+// Fatals on error to keep test bodies clean.
+func newEngineWithBackend(t *testing.T, backend Backend, r *redactor.Redactor, cfg EngineConfig) *Engine {
+	t.Helper()
+	engine, err := NewWithBackend(backend, r, cfg)
+	if err != nil {
+		t.Fatalf("NewWithBackend: %v", err)
+	}
+	return engine
 }
 
 // mustNewClient creates a client for testing
@@ -1743,16 +1654,12 @@ func codexEngineSetup(t *testing.T, mock *mockBackend) (*codextest.Fixture, *Eng
 		WithSessionMeta("/workdir", "gpt-5").
 		WithUserMessage("hello codex")
 
-	engine := NewWithBackend(
-		mustNewClient(t, server.URL, tmpDir),
-		nil,
-		EngineConfig{
-			Provider:       (provider.Codex{}).Name(),
-			ExternalID:     root.ThreadUUID(),
-			TranscriptPath: root.Path(),
-			CWD:            "/workdir",
-		},
-	)
+	engine := newEngineWithBackend(t, mustNewClient(t, server.URL, tmpDir), nil, EngineConfig{
+		Provider:       (provider.Codex{}).Name(),
+		ExternalID:     root.ThreadUUID(),
+		TranscriptPath: root.Path(),
+		CWD:            "/workdir",
+	})
 	if err := engine.Init(); err != nil {
 		t.Fatalf("Init: %v", err)
 	}
@@ -1998,15 +1905,11 @@ func TestEngine_SyncAll_Claude_DoesNotEmitCodexRolloutMeta(t *testing.T) {
 	tmpDir, transcriptPath := setupTestEnv(t, server.URL)
 	os.WriteFile(transcriptPath, []byte(`{"type":"user","message":"hi"}`+"\n"), 0644)
 
-	engine := NewWithBackend(
-		mustNewClient(t, server.URL, tmpDir),
-		nil,
-		EngineConfig{
-			ExternalID:     "claude-session",
-			TranscriptPath: transcriptPath,
-			CWD:            tmpDir,
-		},
-	)
+	engine := newEngineWithBackend(t, mustNewClient(t, server.URL, tmpDir), nil, EngineConfig{
+		ExternalID:     "claude-session",
+		TranscriptPath: transcriptPath,
+		CWD:            tmpDir,
+	})
 	if err := engine.Init(); err != nil {
 		t.Fatalf("Init: %v", err)
 	}

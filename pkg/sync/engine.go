@@ -96,13 +96,11 @@ func New(uploadCfg *config.UploadConfig, engineCfg EngineConfig) (*Engine, error
 }
 
 // NewWithBackend creates an engine with a preconfigured backend.
-// Test-facing; an invalid Provider name falls back to ClaudeCode to keep
-// historical behavior (default provider when unspecified) and avoid a
-// second error path for callers that don't care.
-func NewWithBackend(backend Backend, r *redactor.Redactor, engineCfg EngineConfig) *Engine {
+// Test-facing; returns an error if the provider name is invalid.
+func NewWithBackend(backend Backend, r *redactor.Redactor, engineCfg EngineConfig) (*Engine, error) {
 	p, err := provider.Get(engineCfg.Provider)
 	if err != nil {
-		p = provider.ClaudeCode{}
+		return nil, fmt.Errorf("invalid provider %q: %w", engineCfg.Provider, err)
 	}
 	return &Engine{
 		backend:        backend,
@@ -112,7 +110,7 @@ func NewWithBackend(backend Backend, r *redactor.Redactor, engineCfg EngineConfi
 		externalID:     engineCfg.ExternalID,
 		transcriptPath: engineCfg.TranscriptPath,
 		cwd:            engineCfg.CWD,
-	}
+	}, nil
 }
 
 // redactFn returns the engine's redactor as a nil-safe closure so providers
