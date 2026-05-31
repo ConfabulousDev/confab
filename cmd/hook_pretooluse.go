@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/rand/v2"
 	"os"
 	"regexp"
 	"strings"
@@ -24,9 +25,29 @@ const (
 	prLinkPrefix = "📝 [Confab link]("
 	prLinkSuffix = ")"
 
-	// AI appends this shell comment to certify the link is in a file the hook can't see.
-	confabLinkedMarker = "# confab-linked"
+	// confabLinkedMarkerPrefix is the base of the certification shell comment.
+	// The AI appends "<prefix>-<token>" (a short random hex suffix minted per
+	// deny) to certify the link lives in a file the hook can't see. The random
+	// suffix keeps an incidental mention of the bare "# confab-linked" string
+	// (e.g. a PR body or commit message that documents the marker) from being
+	// misread as certification and suppressing link injection.
+	confabLinkedMarkerPrefix = "# confab-linked"
 )
+
+// confabLinkedMarkerPattern matches the certification marker: the prefix, a
+// hyphen, exactly four lowercase hex chars, then a non-hex boundary (or end of
+// input). The trailing boundary stops a longer hex-ish run in prose (e.g.
+// "# confab-linked-deadbeef") from incidentally matching on its first four
+// chars. Matching the shape rather than a specific value keeps verification
+// stateless — the deny that mints the token and the follow-up check that reads
+// it are separate hook invocations.
+var confabLinkedMarkerPattern = regexp.MustCompile(regexp.QuoteMeta(confabLinkedMarkerPrefix) + `-[0-9a-f]{4}(?:[^0-9a-f]|$)`)
+
+// newConfabLinkedMarker mints a fresh certification marker with a short random
+// hex suffix for the AI to append as a shell comment.
+func newConfabLinkedMarker() string {
+	return fmt.Sprintf("%s-%04x", confabLinkedMarkerPrefix, rand.IntN(0x10000))
+}
 
 // gitCommitPattern matches git commit commands
 // Matches: git commit, git commit -m, git -C /path commit, etc.
@@ -55,7 +76,9 @@ Confab session link (📝 [Confab link]({backend_url}/sessions/{session_id})).
 
 When the link lives in a file the hook can't see (e.g. via 'git commit -F',
 'gh pr create --body-file', or $(cat …)), the agent can certify its presence
-by appending the shell comment '# confab-linked' to the Bash command.
+by appending the shell comment marker from the deny message ('# confab-linked-'
+plus a short random token) to the Bash command. The random suffix keeps a bare
+mention of '# confab-linked' in prose from being misread as certification.
 
 For all other tool calls, exits silently (code 0) to allow normal flow.
 
@@ -133,14 +156,15 @@ func handlePreToolUse(r io.Reader, w io.Writer) error {
 		return nil
 	}
 
+	marker := newConfabLinkedMarker()
 	if isCommit {
 		logger.Info("Requesting Confab link for git commit -> session %s", confabSessionID)
-		outputPreToolUseDecision(w, "deny", formatCommitDenyReason(sessionURL))
+		outputPreToolUseDecision(w, "deny", formatCommitDenyReason(sessionURL, marker))
 		return nil
 	}
 
 	logger.Info("Requesting Confab link for PR -> session %s", confabSessionID)
-	outputPreToolUseDecision(w, "deny", formatBashPRDenyReason(sessionURL))
+	outputPreToolUseDecision(w, "deny", formatBashPRDenyReason(sessionURL, marker))
 	return nil
 }
 
@@ -234,11 +258,11 @@ func containsSessionURL(command, sessionID string) bool {
 }
 
 // commandContainsConfabLink reports whether the command already carries the
-// Confab session link, either as the literal session URL or via the
-// confabLinkedMarker certification (used when the link lives in a body/commit
-// file the hook can't see).
+// Confab session link, either as the literal session URL or via a
+// confabLinkedMarkerPattern certification (used when the link lives in a
+// body/commit file the hook can't see).
 func commandContainsConfabLink(command, sessionID string) bool {
-	return strings.Contains(command, confabLinkedMarker) || containsSessionURL(command, sessionID)
+	return confabLinkedMarkerPattern.MatchString(command) || containsSessionURL(command, sessionID)
 }
 
 // formatSessionURL returns the session URL derived from the configured backend URL.
@@ -277,31 +301,31 @@ func formatPRDenyReason(sessionURL string) string {
 
 // formatBashPRDenyReason is the Bash gh-pr-create deny message: includes the
 // shell-comment marker as an alternative for when the body lives in a file.
-func formatBashPRDenyReason(sessionURL string) string {
+func formatBashPRDenyReason(sessionURL, marker string) string {
 	return fmt.Sprintf(
 		"✓ Confab is linking this PR to your session. "+
 			"Add this line at the bottom of the PR body:\n\n    %s\n\n"+
 			"Alternatively, if the Confab link is already in the PR body "+
 			"(e.g. via --body-file or $(cat …)), certify it by appending "+
-			"this shell comment to your gh command:\n\n    %s\n\n"+
+			"this exact shell comment to your gh command:\n\n    %s\n\n"+
 			"The marker is a shell comment on the command line ONLY — never put it in the PR title or body.\n\n"+
 			"IMPORTANT: Copy the link line verbatim. The value is a URL, NOT a ticket ID like CF-123.",
 		formatPRLink(sessionURL),
-		confabLinkedMarker,
+		marker,
 	)
 }
 
-func formatCommitDenyReason(sessionURL string) string {
+func formatCommitDenyReason(sessionURL, marker string) string {
 	return fmt.Sprintf(
 		"✓ Confab is linking this commit to your session. "+
 			"Add this trailer to the end of your commit message (after any other trailers like Co-Authored-By):\n\n    %s\n\n"+
 			"Alternatively, if the Confab link is already in the commit message "+
 			"(e.g. via `git commit -F <file>`), certify it by appending "+
-			"this shell comment to your git command:\n\n    %s\n\n"+
+			"this exact shell comment to your git command:\n\n    %s\n\n"+
 			"The marker is a shell comment on the git command line ONLY — never put it in the commit message.\n\n"+
 			"IMPORTANT: Copy the trailer verbatim. The value is a URL, NOT a ticket ID like CF-123.",
 		formatTrailerLine(sessionURL),
-		confabLinkedMarker,
+		marker,
 	)
 }
 

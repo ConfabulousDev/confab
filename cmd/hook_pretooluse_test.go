@@ -845,7 +845,7 @@ func TestHandlePreToolUse_PRCreateWithMarker(t *testing.T) {
 		HookEventName: "PreToolUse",
 		ToolName:      config.ToolNameBash,
 		ToolInput: map[string]any{
-			"command": `gh pr create --title "Fix bug" --body-file /tmp/pr-body.md  # confab-linked`,
+			"command": `gh pr create --title "Fix bug" --body-file /tmp/pr-body.md  # confab-linked-a3f9`,
 		},
 	}
 
@@ -884,7 +884,7 @@ func TestHandlePreToolUse_GitCommitWithMarker(t *testing.T) {
 		HookEventName: "PreToolUse",
 		ToolName:      config.ToolNameBash,
 		ToolInput: map[string]any{
-			"command": `git commit -F /tmp/commit-msg.txt  # confab-linked`,
+			"command": `git commit -F /tmp/commit-msg.txt  # confab-linked-a3f9`,
 		},
 	}
 
@@ -950,6 +950,73 @@ func TestHandlePreToolUse_MarkerWithoutSpaceNotAccepted(t *testing.T) {
 	}
 }
 
+func TestConfabLinkedMarker_MintedMarkerRoundTrips(t *testing.T) {
+	// The deny invocation mints a marker; a separate verify invocation must
+	// accept it via shape match. Exercise that round trip for a batch of
+	// freshly minted markers (the suffix is random).
+	for range 100 {
+		marker := newConfabLinkedMarker()
+		cmd := `gh pr create --body-file b.md  ` + marker
+		if !commandContainsConfabLink(cmd, "any-session") {
+			t.Fatalf("minted marker %q not recognized by commandContainsConfabLink", marker)
+		}
+	}
+}
+
+func TestConfabLinkedMarker_NonMarkersNotMatched(t *testing.T) {
+	for _, cmd := range []string{
+		`gh pr create --body "see # confab-linked for details"`,       // bare prefix, no token
+		`gh pr create --body "use # confab-linked-<token>"`,           // non-hex placeholder
+		`gh pr create --body "#confab-linked-a3f9"`,                   // missing space inside the prefix
+		`gh pr create --body "# confab-linked-A3F9"`,                  // uppercase hex not accepted
+		`gh pr create --body "# confab-linked-deadbeef in the docs"`,  // longer hex run must not match on its first 4
+	} {
+		if commandContainsConfabLink(cmd, "any-session") {
+			t.Errorf("expected no certification match for %q", cmd)
+		}
+	}
+}
+
+func TestHandlePreToolUse_BareMarkerWithoutTokenNotAccepted(t *testing.T) {
+	claudeSessionID := "claude-session-123"
+	confabSessionID := "confab-session-456"
+
+	cleanup := setupTestState(t, claudeSessionID, confabSessionID)
+	defer cleanup()
+
+	// A bare "# confab-linked" with no random token must NOT certify — this is
+	// what guards against an incidental mention of the marker in a PR body (e.g.
+	// docs describing the marker) suppressing link injection.
+	input := types.ClaudeHookInput{
+		SessionID:     claudeSessionID,
+		HookEventName: "PreToolUse",
+		ToolName:      config.ToolNameBash,
+		ToolInput: map[string]any{
+			"command": `gh pr create --title "Fix" --body "see # confab-linked for details"`,
+		},
+	}
+
+	inputJSON, _ := json.Marshal(input)
+	r := strings.NewReader(string(inputJSON))
+	var w bytes.Buffer
+
+	if err := handlePreToolUse(r, &w); err != nil {
+		t.Errorf("Expected nil error, got %v", err)
+	}
+
+	var response types.PreToolUseResponse
+	if err := json.Unmarshal(w.Bytes(), &response); err != nil {
+		t.Fatalf("Failed to parse response: %v", err)
+	}
+	if response.HookSpecificOutput == nil {
+		t.Fatal("Expected hookSpecificOutput, got nil")
+	}
+	if response.HookSpecificOutput.PermissionDecision != "deny" {
+		t.Errorf("Expected 'deny' for bare '# confab-linked' without token, got %q",
+			response.HookSpecificOutput.PermissionDecision)
+	}
+}
+
 func TestHandlePreToolUse_PRDenyMessageIncludesMarkerOption(t *testing.T) {
 	claudeSessionID := "claude-session-123"
 	confabSessionID := "confab-session-456"
@@ -978,8 +1045,11 @@ func TestHandlePreToolUse_PRDenyMessageIncludesMarkerOption(t *testing.T) {
 		t.Fatal("Expected hookSpecificOutput, got nil")
 	}
 	reason := response.HookSpecificOutput.PermissionDecisionReason
-	if !strings.Contains(reason, "confab-linked") {
-		t.Errorf("PR deny reason should mention '# confab-linked' certification option, got: %q", reason)
+	// The marker the deny message tells the AI to append must be one the verify
+	// check would actually accept — otherwise the AI copies a marker the hook
+	// then rejects. Assert the reason carries a properly-shaped marker.
+	if !confabLinkedMarkerPattern.MatchString(reason) {
+		t.Errorf("PR deny reason should include a verifiable '# confab-linked-<token>' marker, got: %q", reason)
 	}
 	if !strings.Contains(reason, "Confab link") {
 		t.Errorf("PR deny reason should still mention the Confab link line, got: %q", reason)
@@ -1014,8 +1084,10 @@ func TestHandlePreToolUse_CommitDenyMessageIncludesMarkerOption(t *testing.T) {
 		t.Fatal("Expected hookSpecificOutput, got nil")
 	}
 	reason := response.HookSpecificOutput.PermissionDecisionReason
-	if !strings.Contains(reason, "confab-linked") {
-		t.Errorf("Commit deny reason should mention '# confab-linked' certification option, got: %q", reason)
+	// The marker the deny message tells the AI to append must be one the verify
+	// check would actually accept (see the PR-path test for the rationale).
+	if !confabLinkedMarkerPattern.MatchString(reason) {
+		t.Errorf("Commit deny reason should include a verifiable '# confab-linked-<token>' marker, got: %q", reason)
 	}
 	if !strings.Contains(reason, "Confab-Link:") {
 		t.Errorf("Commit deny reason should still mention the Confab-Link: trailer, got: %q", reason)
