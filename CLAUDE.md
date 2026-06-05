@@ -55,6 +55,17 @@ The backend API lives in the sibling repo `../confab-web`. When implementing CLI
 3. Backend tracks `last_synced_line` per file; daemon syncs only new content
 4. Agent sidechain files (`agent-*.jsonl`) are synced alongside the main transcript
 
+### Claude workflow subagent files (CF-533)
+
+Claude's `Workflow` tool spawns subagents whose transcripts live nested at `<session>/subagents/workflows/<runId>/agent-<id>.jsonl`, plus a per-run `journal.jsonl`. These carry no `agentId` in the main transcript, so they are **not** found by `ExtractAgentIDsFromMessage`. Instead `provider.ClaudeCode.DiscoverWorkflowFiles` (in `pkg/provider/claude_workflows.go`) scans the `subagents/workflows/` directory each `SyncAll` cycle and registers them via `pkg/sync.FileTracker.RegisterWorkflowFile` under **path-encoded** backend `file_name`s, written verbatim (the backend resolves `<runId>` from the path and `<id>` via `path.Base`):
+
+- `subagents/workflows/<runId>/agent-<id>.jsonl` → `file_type=agent`
+- `subagents/workflows/<runId>/journal.jsonl` → `file_type=workflow_journal`
+
+`agent-<id>.meta.json`, `wf_<runId>.json`, and the script file are not uploaded. From there they reuse the ordinary incremental/redacted chunk path. This is Claude-only — `Codex.DiscoverWorkflowFiles` is a no-op.
+
+**Capability gating.** Because the CLI may outrun a self-hosted backend, workflow uploads are gated on the backend advertising support via the public `GET /api/v1/capabilities` endpoint (body **is** `{"workflow_files":bool,"workflow_journal":bool}`, no wrapper; shipped by CF-532). The engine (`pkg/sync/engine.go`) probes lazily — only when a workflow run dir actually exists, so non-workflow sessions never probe — caches only definitive answers (a `404` from an old backend → unsupported; a clean `200` → the parsed flags) and re-probes on transient failures. Gating is **per-flag**: `agent` files require `workflow_files`, the journal requires `workflow_journal`. The `journal.jsonl` line schema is documented in `pkg/sync/README.md` as the read contract for the downstream frontend tickets (CF-534/535).
+
 ### Codex provider differences
 
 - Codex rollouts live at `~/.codex/sessions/<yyyy>/<mm>/<dd>/rollout-...<uuid>.jsonl`. A "session" is a user-initiated thread; subagents spawn their own rollouts and are tracked in Codex's local SQLite (`~/.codex/state_*.sqlite`, `threads` + `thread_spawn_edges`).

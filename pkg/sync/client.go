@@ -118,6 +118,31 @@ func (c *Client) Init(providerName, externalID, transcriptPath string, metadata 
 	return &resp, nil
 }
 
+// Capabilities is the backend's optional-feature signal (CF-533). The
+// response body of GET /api/v1/capabilities IS this map (no outer wrapper).
+// Absent fields default to false (zero value), so a backend that omits a
+// field — or the whole endpoint (404) — is treated as not supporting it.
+type Capabilities struct {
+	// WorkflowFiles reports that the backend resolves path-encoded workflow
+	// subagent file_names (subagents/workflows/<runId>/agent-<id>.jsonl).
+	WorkflowFiles bool `json:"workflow_files"`
+	// WorkflowJournal reports that the backend accepts the workflow_journal
+	// file_type (subagents/workflows/<runId>/journal.jsonl).
+	WorkflowJournal bool `json:"workflow_journal"`
+}
+
+// Capabilities probes GET /api/v1/capabilities (public, no auth). Any failure
+// — 404 on an older backend, a network error, or a malformed body — is
+// returned to the caller, which treats it as "no capabilities". The 404
+// sentinel (http.ErrSessionNotFound) is preserved via %w for errors.Is.
+func (c *Client) Capabilities() (Capabilities, error) {
+	var caps Capabilities
+	if err := c.httpClient.Get("/api/v1/capabilities", &caps); err != nil {
+		return Capabilities{}, fmt.Errorf("capabilities probe failed: %w", err)
+	}
+	return caps, nil
+}
+
 // UploadChunk uploads a chunk of lines for a file with optional metadata
 // Returns the new last synced line number
 func (c *Client) UploadChunk(sessionID, fileName, fileType string, firstLine int, lines []string, metadata *ChunkMetadata) (int, error) {

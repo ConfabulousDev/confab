@@ -37,6 +37,24 @@ type DescendantRegistrar interface {
 	RegisterCodexRollout(path, fileName string, isRoot bool, meta CodexRolloutMetadata)
 }
 
+// FileTypeWorkflowJournal is the sync file_type for a Claude workflow run's
+// journal.jsonl (CF-533). The backend (CF-532) accepts and stores it but
+// never Claude-parses it; it is excluded from token/transcript analytics.
+// Workflow subagent transcripts use the ordinary "agent" file_type.
+const FileTypeWorkflowJournal = "workflow_journal"
+
+// WorkflowRegistrar is the surface DiscoverWorkflowFiles uses to register
+// Claude workflow subagent transcripts + run journals as path-encoded
+// sidechain files. *sync.FileTracker satisfies it. SubagentsDir exposes the
+// session's <session>/subagents directory (workflow runs live beneath
+// subagents/workflows/<runId>/); RegisterWorkflowFile tracks a file by its
+// backend file_name (forward-slash path-encoded) and reports whether it was
+// newly added (vs. an in-place path/type correction of an existing entry).
+type WorkflowRegistrar interface {
+	SubagentsDir() string
+	RegisterWorkflowFile(path, name, fileType string) bool
+}
+
 // ChunkView is the structural view of a chunk + its source file that
 // AnnotateChunk reads from and writes back into. pkg/sync's chunkView
 // adapter satisfies it. Setters mutate the underlying chunk's metadata in
@@ -131,6 +149,19 @@ type Provider interface {
 	// Claude is a no-op (its agents are discovered transitively from
 	// transcript content, handled in tracker.DiscoverNewFiles).
 	DiscoverDescendants(reg DescendantRegistrar, externalID string) error
+
+	// DiscoverWorkflowFiles is called once per SyncAll cycle, alongside
+	// DiscoverDescendants, to register Claude workflow subagent transcripts
+	// (subagents/workflows/<runId>/agent-<id>.jsonl) and run journals
+	// (.../journal.jsonl) as path-encoded sidechain files (CF-533). The
+	// allow predicate is supplied by the engine and gates each file by its
+	// file_type against backend capability ("agent" → workflow_files,
+	// "workflow_journal" → workflow_journal); the provider calls it only
+	// after it has a candidate file, so non-workflow sessions never trigger
+	// a backend capability probe. Returns the count of newly-registered
+	// files (for logging). Claude scans the filesystem; Codex is a no-op
+	// (no Workflow-tool equivalent). Must be idempotent across calls.
+	DiscoverWorkflowFiles(reg WorkflowRegistrar, allow func(fileType string) bool) (int, error)
 
 	// AnnotateChunk is called for every chunk read from a tracked file,
 	// BEFORE upload. Providers attach provider-specific chunk metadata

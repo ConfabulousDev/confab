@@ -51,6 +51,12 @@ type mockBackend struct {
 	chunkStatus    int // if non-zero, /sync/chunk returns this status code with empty body
 	requestCount   int32
 	failUntilCount int32 // fail requests until this count is reached
+
+	// Capability probe (CF-533). caps==nil → respond 404 (old backend).
+	// Daemon tests don't exercise workflow sessions, so the default 404
+	// keeps workflow discovery off; the route exists to avoid the
+	// default-case t.Errorf if a probe ever fires.
+	caps *sync.Capabilities
 }
 
 // getInitRequests returns a snapshot of the init requests received so far.
@@ -98,6 +104,13 @@ func (m *mockBackend) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	switch r.URL.Path {
+	case "/api/v1/capabilities":
+		if m.caps == nil {
+			w.WriteHeader(http.StatusNotFound) // old backend: no endpoint
+			return
+		}
+		json.NewEncoder(w).Encode(m.caps)
+
 	case "/api/v1/sync/init":
 		if m.initError {
 			w.WriteHeader(http.StatusInternalServerError)
