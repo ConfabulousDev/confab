@@ -1419,3 +1419,64 @@ func TestFileTracker_AddCodexRollout_DistinctPaths_AddsBoth(t *testing.T) {
 // moved from FileTracker to provider.Codex). FileTracker now exposes only
 // generic primitives (IsTracked, AddCodexRollout, RegisterCodexRollout);
 // the dispatch-through-stub tests live with their implementation.
+
+// ---- Workflow file registration (CF-533) ----
+
+// Spec: SubagentsDir exposes <session>/subagents for the provider to scan.
+func TestFileTracker_SubagentsDir(t *testing.T) {
+	tr := NewFileTracker("/projects/p/session-abc.jsonl")
+	want := filepath.Join("/projects/p/session-abc", "subagents")
+	if got := tr.SubagentsDir(); got != want {
+		t.Errorf("SubagentsDir() = %q, want %q", got, want)
+	}
+}
+
+// Spec: registering a brand-new workflow file returns true and tracks it with
+// the path-encoded name, on-disk path, and given file type.
+func TestFileTracker_RegisterWorkflowFile_New(t *testing.T) {
+	tr := NewFileTracker("/irrelevant.jsonl")
+	name := "subagents/workflows/wf_run1/journal.jsonl"
+	path := "/abs/subagents/workflows/wf_run1/journal.jsonl"
+
+	if isNew := tr.RegisterWorkflowFile(path, name, "workflow_journal"); !isNew {
+		t.Error("RegisterWorkflowFile returned false for a new file, want true")
+	}
+	if !tr.IsTracked(name) {
+		t.Fatalf("file %q not tracked after register", name)
+	}
+	f := tr.files[name]
+	if f.Path != path || f.Name != name || f.Type != "workflow_journal" {
+		t.Errorf("tracked file = {Path:%q Name:%q Type:%q}, want {%q %q workflow_journal}",
+			f.Path, f.Name, f.Type, path, name)
+	}
+}
+
+// Spec: re-registering an already-tracked name returns false and overwrites
+// Path+Type IN PLACE while preserving sync position (LastSyncedLine/ByteOffset).
+func TestFileTracker_RegisterWorkflowFile_OverwritesPreservingPosition(t *testing.T) {
+	tr := NewFileTracker("/irrelevant.jsonl")
+	name := "subagents/workflows/wf_run1/journal.jsonl"
+
+	// First register (e.g. from a prior cycle), then advance sync position.
+	tr.RegisterWorkflowFile("/wrong/path/journal.jsonl", name, "agent")
+	tr.files[name].LastSyncedLine = 7
+	tr.files[name].ByteOffset = 123
+
+	correctPath := "/abs/subagents/workflows/wf_run1/journal.jsonl"
+	if isNew := tr.RegisterWorkflowFile(correctPath, name, "workflow_journal"); isNew {
+		t.Error("RegisterWorkflowFile returned true for an existing file, want false")
+	}
+	f := tr.files[name]
+	if f.Path != correctPath {
+		t.Errorf("Path = %q, want %q (overwritten)", f.Path, correctPath)
+	}
+	if f.Type != "workflow_journal" {
+		t.Errorf("Type = %q, want workflow_journal (corrected)", f.Type)
+	}
+	if f.LastSyncedLine != 7 || f.ByteOffset != 123 {
+		t.Errorf("sync position = {line:%d off:%d}, want {7 123} (preserved)", f.LastSyncedLine, f.ByteOffset)
+	}
+	if got := len(tr.GetTrackedFiles()); got != 1 {
+		t.Errorf("tracked files = %d, want 1 (in-place correction, no dup)", got)
+	}
+}

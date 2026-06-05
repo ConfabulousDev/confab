@@ -176,6 +176,14 @@ func (p Codex) DiscoverDescendants(reg DescendantRegistrar, rootThreadUUID strin
 	return nil
 }
 
+// DiscoverWorkflowFiles is a no-op for Codex: workflow subagents are a Claude
+// Code harness feature (the Workflow tool) with no Codex equivalent, so there
+// are never workflow run dirs to scan. The allow predicate is intentionally
+// never invoked, so a Codex session never triggers a backend capability probe.
+func (Codex) DiscoverWorkflowFiles(WorkflowRegistrar, func(fileType string) bool) (int, error) {
+	return 0, nil
+}
+
 // AnnotateChunk attaches Codex-specific chunk metadata. Two concerns are
 // handled independently:
 //

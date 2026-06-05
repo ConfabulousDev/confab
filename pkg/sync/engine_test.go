@@ -53,6 +53,13 @@ type mockBackend struct {
 	chunkError      bool
 	requestCount    int32
 	failUntilCount  int32 // fail requests until this count is reached
+
+	// Capability probe (CF-533). caps==nil → respond 404 (old backend);
+	// capsStatus!=0 → respond that status (e.g. 500) to simulate a transient
+	// failure. capsRequestCount counts probe hits for "probed once" asserts.
+	caps             *Capabilities
+	capsStatus       int
+	capsRequestCount int32
 }
 
 // summaryRequest captures a PATCH to /api/v1/sessions/{externalID}/summary.
@@ -92,6 +99,18 @@ func (m *mockBackend) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	switch r.URL.Path {
+	case "/api/v1/capabilities":
+		atomic.AddInt32(&m.capsRequestCount, 1)
+		if m.capsStatus != 0 {
+			w.WriteHeader(m.capsStatus)
+			return
+		}
+		if m.caps == nil {
+			w.WriteHeader(http.StatusNotFound) // old backend: no endpoint
+			return
+		}
+		json.NewEncoder(w).Encode(m.caps)
+
 	case "/api/v1/sync/init":
 		if m.initError {
 			w.WriteHeader(http.StatusInternalServerError)
@@ -1935,5 +1954,233 @@ func TestEngine_SyncAll_Codex_NoChildren_OnlyRootChunkUploaded(t *testing.T) {
 	}
 	if mock.chunkRequests[0].FileName != filepath.Base(root.Path()) {
 		t.Errorf("chunk file = %q, want root rollout", mock.chunkRequests[0].FileName)
+	}
+}
+
+// ============================================================================
+// Workflow subagent file sync (CF-533)
+// ============================================================================
+
+// writeWorkflowSessionTree lays a transcript + a classic flat subagent + a
+// workflow run dir (agent + journal) under the conventional layout, and
+// returns the subagents dir. base = transcript path without ext.
+func writeWorkflowSessionTree(t *testing.T, transcriptPath, runID string) string {
+	t.Helper()
+	if err := os.WriteFile(transcriptPath, []byte(`{"type":"system","message":"start"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	base := transcriptPath[:len(transcriptPath)-len(filepath.Ext(transcriptPath))]
+	subagents := filepath.Join(base, "subagents")
+	// classic flat subagent (discovered by the existing directory scan)
+	if err := os.MkdirAll(subagents, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(subagents, "agent-yyyyyyy1.jsonl"), []byte(`{"type":"agent"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// workflow run dir
+	runDir := filepath.Join(subagents, "workflows", runID)
+	if err := os.MkdirAll(runDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range []string{"agent-aaaaaaa11.jsonl", "journal.jsonl"} {
+		if err := os.WriteFile(filepath.Join(runDir, f), []byte(`{"type":"x"}`+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// files that must NOT be uploaded
+	for _, f := range []string{"agent-aaaaaaa11.meta.json", runID + ".json"} {
+		if err := os.WriteFile(filepath.Join(runDir, f), []byte(`{}`+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return subagents
+}
+
+// Spec: with both caps true, every workflow subagent transcript + the journal
+// upload with exact path-encoded file_names and types; classic flat subagent
+// still works; meta.json/wf_*.json are not uploaded; probe happens once;
+// re-sync is idempotent.
+func TestEngine_SyncAll_WorkflowFiles_BothCapsTrue_Uploaded(t *testing.T) {
+	mock := newMockBackend(t)
+	mock.caps = &Capabilities{WorkflowFiles: true, WorkflowJournal: true}
+	server := httptest.NewServer(mock)
+	defer server.Close()
+
+	tmpDir, transcriptPath := setupTestEnv(t, server.URL)
+	writeWorkflowSessionTree(t, transcriptPath, "wf_run1")
+
+	engine := newEngineWithBackend(t, mustNewClient(t, server.URL, tmpDir), nil, EngineConfig{
+		ExternalID:     "wf-both-true",
+		TranscriptPath: transcriptPath,
+		CWD:            tmpDir,
+	})
+	if err := engine.Init(); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	if _, err := engine.SyncAll(); err != nil {
+		t.Fatalf("SyncAll: %v", err)
+	}
+
+	agentChunk, ok := findChunkForFile(mock.chunkRequests, "subagents/workflows/wf_run1/agent-aaaaaaa11.jsonl")
+	if !ok {
+		t.Fatal("workflow agent transcript not uploaded")
+	}
+	if agentChunk.FileType != "agent" {
+		t.Errorf("workflow agent file_type = %q, want \"agent\"", agentChunk.FileType)
+	}
+	journalChunk, ok := findChunkForFile(mock.chunkRequests, "subagents/workflows/wf_run1/journal.jsonl")
+	if !ok {
+		t.Fatal("workflow journal not uploaded")
+	}
+	if journalChunk.FileType != "workflow_journal" {
+		t.Errorf("journal file_type = %q, want \"workflow_journal\"", journalChunk.FileType)
+	}
+	// classic flat subagent still uploaded
+	if _, ok := findChunkForFile(mock.chunkRequests, "agent-yyyyyyy1.jsonl"); !ok {
+		t.Error("classic flat subagent not uploaded (regression)")
+	}
+	// excluded files never uploaded
+	for _, req := range mock.chunkRequests {
+		if strings.HasSuffix(req.FileName, ".meta.json") || strings.HasSuffix(req.FileName, "wf_run1.json") {
+			t.Errorf("uploaded excluded file %q", req.FileName)
+		}
+	}
+
+	// probed exactly once and cached
+	if got := atomic.LoadInt32(&mock.capsRequestCount); got != 1 {
+		t.Errorf("capabilities probed %d times, want 1", got)
+	}
+
+	// idempotent: nothing changed → second SyncAll uploads nothing new
+	before := len(mock.chunkRequests)
+	n, err := engine.SyncAll()
+	if err != nil {
+		t.Fatalf("second SyncAll: %v", err)
+	}
+	if n != 0 || len(mock.chunkRequests) != before {
+		t.Errorf("second SyncAll uploaded %d chunks (total %d→%d), want 0 (idempotent)", n, before, len(mock.chunkRequests))
+	}
+	if got := atomic.LoadInt32(&mock.capsRequestCount); got != 1 {
+		t.Errorf("capabilities probed %d times after 2 cycles, want 1 (cached)", got)
+	}
+}
+
+// Spec: a 404 (old backend) cleanly skips workflow files; the rest of the
+// sync (transcript + classic subagent) is unaffected.
+func TestEngine_SyncAll_WorkflowFiles_404_Skipped(t *testing.T) {
+	mock := newMockBackend(t) // caps==nil → 404
+	server := httptest.NewServer(mock)
+	defer server.Close()
+
+	tmpDir, transcriptPath := setupTestEnv(t, server.URL)
+	writeWorkflowSessionTree(t, transcriptPath, "wf_run1")
+
+	engine := newEngineWithBackend(t, mustNewClient(t, server.URL, tmpDir), nil, EngineConfig{
+		ExternalID:     "wf-404",
+		TranscriptPath: transcriptPath,
+		CWD:            tmpDir,
+	})
+	if err := engine.Init(); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	if _, err := engine.SyncAll(); err != nil {
+		t.Fatalf("SyncAll: %v", err)
+	}
+
+	for _, req := range mock.chunkRequests {
+		if strings.Contains(req.FileName, "workflows/") {
+			t.Errorf("workflow file %q uploaded despite 404 capabilities", req.FileName)
+		}
+	}
+	// rest of sync unaffected
+	if _, ok := findChunkForFile(mock.chunkRequests, "transcript.jsonl"); !ok {
+		t.Error("transcript not uploaded")
+	}
+	if _, ok := findChunkForFile(mock.chunkRequests, "agent-yyyyyyy1.jsonl"); !ok {
+		t.Error("classic flat subagent not uploaded")
+	}
+}
+
+// Spec: per-flag gating — workflow_files=true, workflow_journal=false uploads
+// the agent transcript but skips the journal.
+func TestEngine_SyncAll_WorkflowFiles_JournalCapFalse_PartialUpload(t *testing.T) {
+	mock := newMockBackend(t)
+	mock.caps = &Capabilities{WorkflowFiles: true, WorkflowJournal: false}
+	server := httptest.NewServer(mock)
+	defer server.Close()
+
+	tmpDir, transcriptPath := setupTestEnv(t, server.URL)
+	writeWorkflowSessionTree(t, transcriptPath, "wf_run1")
+
+	engine := newEngineWithBackend(t, mustNewClient(t, server.URL, tmpDir), nil, EngineConfig{
+		ExternalID:     "wf-partial",
+		TranscriptPath: transcriptPath,
+		CWD:            tmpDir,
+	})
+	if err := engine.Init(); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	if _, err := engine.SyncAll(); err != nil {
+		t.Fatalf("SyncAll: %v", err)
+	}
+
+	if _, ok := findChunkForFile(mock.chunkRequests, "subagents/workflows/wf_run1/agent-aaaaaaa11.jsonl"); !ok {
+		t.Error("workflow agent transcript not uploaded (workflow_files=true)")
+	}
+	if _, ok := findChunkForFile(mock.chunkRequests, "subagents/workflows/wf_run1/journal.jsonl"); ok {
+		t.Error("journal uploaded despite workflow_journal=false")
+	}
+}
+
+// Spec: a transient probe failure (5xx) is not cached — it probes at most once
+// per cycle (not once per workflow file), skips workflow uploads that cycle,
+// and re-probes the next cycle, succeeding once the backend recovers.
+func TestEngine_SyncAll_WorkflowFiles_TransientProbe_RetriesNextCycle(t *testing.T) {
+	mock := newMockBackend(t)
+	mock.capsStatus = http.StatusInternalServerError // transient failure
+	server := httptest.NewServer(mock)
+	defer server.Close()
+
+	tmpDir, transcriptPath := setupTestEnv(t, server.URL)
+	writeWorkflowSessionTree(t, transcriptPath, "wf_run1") // 2 workflow files
+
+	engine := newEngineWithBackend(t, mustNewClient(t, server.URL, tmpDir), nil, EngineConfig{
+		ExternalID:     "wf-transient",
+		TranscriptPath: transcriptPath,
+		CWD:            tmpDir,
+	})
+	if err := engine.Init(); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	// Cycle 1: backend failing. Workflow files skipped; probed at most once
+	// (NOT once per workflow file) and not cached.
+	if _, err := engine.SyncAll(); err != nil {
+		t.Fatalf("SyncAll cycle 1: %v", err)
+	}
+	for _, req := range mock.chunkRequests {
+		if strings.Contains(req.FileName, "workflows/") {
+			t.Errorf("workflow file %q uploaded despite transient probe failure", req.FileName)
+		}
+	}
+	if got := atomic.LoadInt32(&mock.capsRequestCount); got != 1 {
+		t.Errorf("cycle 1 probed %d times, want 1 (once per cycle, not per file)", got)
+	}
+
+	// Backend recovers; cycle 2 re-probes and uploads.
+	mock.capsStatus = 0
+	mock.caps = &Capabilities{WorkflowFiles: true, WorkflowJournal: true}
+	if _, err := engine.SyncAll(); err != nil {
+		t.Fatalf("SyncAll cycle 2: %v", err)
+	}
+	if _, ok := findChunkForFile(mock.chunkRequests, "subagents/workflows/wf_run1/agent-aaaaaaa11.jsonl"); !ok {
+		t.Error("workflow agent not uploaded after backend recovered (transient failure was cached)")
+	}
+	if _, ok := findChunkForFile(mock.chunkRequests, "subagents/workflows/wf_run1/journal.jsonl"); !ok {
+		t.Error("workflow journal not uploaded after backend recovered")
+	}
+	if got := atomic.LoadInt32(&mock.capsRequestCount); got != 2 {
+		t.Errorf("total probes = %d, want 2 (one transient + one definitive)", got)
 	}
 }

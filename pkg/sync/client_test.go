@@ -292,6 +292,80 @@ func mustNewTestClient(t *testing.T, serverURL string) *Client {
 }
 
 // ============================================================================
+// Capabilities probe (CF-533)
+// ============================================================================
+
+// Spec: the response body IS the capabilities map (no wrapper); both flags parse.
+func TestCapabilities_ParsesBareMap(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/capabilities" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		if r.Method != http.MethodGet {
+			t.Errorf("expected GET, got %s", r.Method)
+		}
+		w.Write([]byte(`{"workflow_files":true,"workflow_journal":true}`))
+	}))
+	defer server.Close()
+
+	caps, err := mustNewTestClient(t, server.URL).Capabilities()
+	if err != nil {
+		t.Fatalf("Capabilities: %v", err)
+	}
+	if !caps.WorkflowFiles || !caps.WorkflowJournal {
+		t.Errorf("caps = %+v, want both true", caps)
+	}
+}
+
+// Spec: an absent field defaults to false (default-missing-to-false rule).
+func TestCapabilities_MissingFieldDefaultsFalse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"workflow_files":true}`))
+	}))
+	defer server.Close()
+
+	caps, err := mustNewTestClient(t, server.URL).Capabilities()
+	if err != nil {
+		t.Fatalf("Capabilities: %v", err)
+	}
+	if !caps.WorkflowFiles {
+		t.Error("workflow_files = false, want true")
+	}
+	if caps.WorkflowJournal {
+		t.Error("workflow_journal = true, want false (missing field defaults to false)")
+	}
+}
+
+// Spec: a 404 (old backend without the endpoint) is a definitive error that
+// preserves the ErrSessionNotFound sentinel for errors.Is.
+func TestCapabilities_404IsSessionNotFound(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	_, err := mustNewTestClient(t, server.URL).Capabilities()
+	if err == nil {
+		t.Fatal("expected error on 404, got nil")
+	}
+	if !errors.Is(err, pkghttp.ErrSessionNotFound) {
+		t.Errorf("errors.Is(err, ErrSessionNotFound) = false; err = %v", err)
+	}
+}
+
+// Spec: a malformed 200 body is an error (treated as transient by the engine).
+func TestCapabilities_MalformedBodyIsError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`not json`))
+	}))
+	defer server.Close()
+
+	if _, err := mustNewTestClient(t, server.URL).Capabilities(); err == nil {
+		t.Fatal("expected error on malformed body, got nil")
+	}
+}
+
+// ============================================================================
 // ChunkMetadata.CodexRollout wire format (CF-387)
 // ============================================================================
 

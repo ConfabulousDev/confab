@@ -140,6 +140,36 @@ func (t *FileTracker) RegisterCodexRollout(path, fileName string, isRoot bool, m
 	t.AddCodexRollout(path, fileName, isRoot, meta)
 }
 
+// SubagentsDir returns the <session>/subagents directory for this tracker.
+// Part of provider.WorkflowRegistrar: the Claude provider scans
+// subagents/workflows/<runId>/ beneath it to discover workflow files.
+func (t *FileTracker) SubagentsDir() string {
+	return t.subagentsDir
+}
+
+// RegisterWorkflowFile is the provider.WorkflowRegistrar entry point for
+// Claude workflow subagent transcripts + run journals (CF-533). name is the
+// forward-slash path-encoded backend file_name; path is its absolute
+// location on disk; fileType is "agent" or provider.FileTypeWorkflowJournal.
+//
+// Returns true when a new file is tracked. When the name is already tracked
+// (e.g. a stale entry rebuilt from backend state on daemon restart), it
+// overwrites Path+Type in place and returns false, preserving the sync
+// position (LastSyncedLine/ByteOffset) so the file resumes incrementally.
+func (t *FileTracker) RegisterWorkflowFile(path, name, fileType string) bool {
+	if existing, ok := t.files[name]; ok {
+		existing.Path = path
+		existing.Type = fileType
+		return false
+	}
+	t.files[name] = &TrackedFile{
+		Path: path,
+		Name: name,
+		Type: fileType,
+	}
+	return true
+}
+
 // GetTrackedFiles returns all currently tracked files
 func (t *FileTracker) GetTrackedFiles() []*TrackedFile {
 	result := make([]*TrackedFile, 0, len(t.files))

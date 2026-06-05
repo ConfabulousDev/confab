@@ -23,6 +23,7 @@ import (
 var (
 	_ provider.TranscriptRegistrar = (*TrackedFile)(nil)
 	_ provider.DescendantRegistrar = (*FileTracker)(nil)
+	_ provider.WorkflowRegistrar   = (*FileTracker)(nil)
 )
 
 // Engine is the core sync engine used by both daemon and manual save.
@@ -38,6 +39,16 @@ type Engine struct {
 	cwd                  string
 	initialized          bool
 	sentFirstUserMessage bool
+
+	// Workflow-file capability gating (CF-533). The backend capability is
+	// probed lazily (only when the Claude provider finds a workflow run dir)
+	// and cached for the engine's lifetime == one backend + one session.
+	// Only a DEFINITIVE answer (200 or 404) is cached; a transient probe
+	// failure leaves capsResolved false so the next SyncAll re-probes.
+	capsResolved      bool         // a definitive capabilities answer was cached
+	caps              Capabilities // cached capabilities (zero value on 404)
+	loggedProbeError  bool         // a transient probe failure was already logged
+	capsProbedThisRun bool         // a probe was already attempted in this SyncAll cycle
 }
 
 // setProviderForTest substitutes the engine's resolved Provider with a stub.
@@ -51,6 +62,11 @@ type Backend interface {
 	UploadChunk(sessionID, fileName, fileType string, firstLine int, lines []string, metadata *ChunkMetadata) (int, error)
 	SendEvent(sessionID, eventType string, timestamp time.Time, payload json.RawMessage) error
 	UpdateSessionSummary(externalID, summary string) error
+	// Capabilities probes the backend's optional-feature signal (CF-533).
+	// Returns an error (404 / network / parse) when the backend does not
+	// advertise capabilities; the engine treats a 404 as a definitive
+	// "unsupported" and other errors as transient.
+	Capabilities() (Capabilities, error)
 }
 
 // EngineConfig holds configuration for creating an Engine
@@ -266,6 +282,21 @@ func (e *Engine) SyncAll() (int, error) {
 		logger.Warn("provider DiscoverDescendants failed: %v", err)
 	}
 
+	// Provider-owned workflow-file discovery (CF-533), gated per-file-type on
+	// backend capability via workflowFileTypeAllowed. Claude scans
+	// subagents/workflows/<runId>/; Codex is a no-op. Skipped once the backend
+	// has definitively reported no support, so we don't re-scan every cycle.
+	// Reset the per-cycle probe guard so a transient capability-probe failure
+	// is retried at most once per cycle, not once per workflow file.
+	e.capsProbedThisRun = false
+	if !e.workflowUploadsRuledOut() {
+		if n, err := e.provider.DiscoverWorkflowFiles(e.tracker, e.workflowFileTypeAllowed); err != nil {
+			logger.Warn("provider DiscoverWorkflowFiles failed: %v", err)
+		} else if n > 0 {
+			logger.Info("Discovered %d workflow subagent file(s)", n)
+		}
+	}
+
 	// Start with all currently tracked files
 	filesToProcess := e.tracker.GetTrackedFiles()
 
@@ -366,6 +397,80 @@ func (e *Engine) SyncAll() (int, error) {
 	}
 
 	return totalChunks, firstErr
+}
+
+// resolveCaps lazily probes and caches the backend's workflow capabilities
+// (CF-533). It caches only DEFINITIVE answers: a 404 (old backend → both
+// false) or a clean 200 (parsed flags). A transient failure (network /
+// timeout / 5xx / malformed body) is NOT cached and returns ok=false, so the
+// next SyncAll re-probes. Each distinct outcome logs once at Info.
+func (e *Engine) resolveCaps() (Capabilities, bool) {
+	if e.capsResolved {
+		return e.caps, true
+	}
+	// Probe at most once per SyncAll cycle: a transient failure must not
+	// re-hit the backend for every workflow file in the same cycle.
+	if e.capsProbedThisRun {
+		return Capabilities{}, false
+	}
+	e.capsProbedThisRun = true
+
+	caps, err := e.backend.Capabilities()
+	if err != nil {
+		// A 404 is definitive: the backend predates the capabilities
+		// endpoint (CF-532), so it supports nothing. Cache it.
+		if errors.Is(err, http.ErrSessionNotFound) {
+			e.caps = Capabilities{}
+			e.capsResolved = true
+			logger.Info("Backend has no capabilities endpoint (404); skipping workflow subagent uploads")
+			return e.caps, true
+		}
+		// Transient (network / timeout / 5xx / malformed body): do NOT
+		// cache, so the next sync cycle re-probes rather than disabling
+		// workflow uploads for the rest of the session.
+		if !e.loggedProbeError {
+			e.loggedProbeError = true
+			logger.Info("Backend capability probe failed (%v); will retry next sync cycle", err)
+		}
+		return Capabilities{}, false
+	}
+
+	e.caps = caps
+	e.capsResolved = true
+	if caps.WorkflowFiles || caps.WorkflowJournal {
+		logger.Info("Backend workflow capabilities: workflow_files=%v workflow_journal=%v",
+			caps.WorkflowFiles, caps.WorkflowJournal)
+	} else {
+		logger.Info("Backend advertises no workflow file support; skipping workflow subagent uploads")
+	}
+	return e.caps, true
+}
+
+// workflowUploadsRuledOut reports whether the backend has definitively
+// answered that it supports neither workflow capability. Once true, SyncAll
+// stops scanning the filesystem for workflow files for the engine's lifetime.
+func (e *Engine) workflowUploadsRuledOut() bool {
+	return e.capsResolved && !e.caps.WorkflowFiles && !e.caps.WorkflowJournal
+}
+
+// workflowFileTypeAllowed reports whether a workflow file of the given
+// file_type may be uploaded to this backend, per its (cached) capabilities.
+// Per-flag: "agent" gates on WorkflowFiles, FileTypeWorkflowJournal on
+// WorkflowJournal. Passed to provider.DiscoverWorkflowFiles as the gate
+// predicate; the first call triggers the lazy probe.
+func (e *Engine) workflowFileTypeAllowed(fileType string) bool {
+	caps, ok := e.resolveCaps()
+	if !ok {
+		return false // transient probe failure — skip this cycle, retry next
+	}
+	switch fileType {
+	case "agent":
+		return caps.WorkflowFiles
+	case provider.FileTypeWorkflowJournal:
+		return caps.WorkflowJournal
+	default:
+		return false
+	}
 }
 
 // ensureChunkMetadata returns chunk.Metadata, allocating it if nil.
