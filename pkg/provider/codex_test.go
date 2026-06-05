@@ -312,7 +312,7 @@ func TestCodexInstallSkillsInstallsBundledSkills(t *testing.T) {
 		t.Fatalf("Codex.InstallSkills() error = %v", err)
 	}
 
-	for _, skill := range []string{"til", "retro"} {
+	for _, skill := range []string{"retro"} {
 		path := filepath.Join(tmpDir, "skills", skill, "SKILL.md")
 		data, err := os.ReadFile(path)
 		if err != nil {

@@ -23,11 +23,6 @@ type Announcement struct {
 // Add new entries here when shipping features that need user notification.
 var announcements = []Announcement{
 	{
-		Check:   func() bool { return !config.IsTilSkillInstalled() },
-		Setup:   config.InstallTilSkill,
-		Message: `/til is now available — capture TILs during your session. Try: /til "what you learned"`,
-	},
-	{
 		Check:   func() bool { return !config.IsRetroSkillInstalled() },
 		Setup:   config.InstallRetroSkill,
 		Message: `/retro is now available — chat about any session. Try: /retro <session-id>`,

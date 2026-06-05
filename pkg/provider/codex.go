@@ -60,13 +60,14 @@ func (p Codex) ShouldSpawnForInput(in HookInput) bool {
 	return info.IsUserSession()
 }
 
-// InstallSkills installs the Codex skills shipped with confab (/til and /retro).
+// InstallSkills installs the Codex skills shipped with confab (/retro) and
+// prunes any retired skills left by older versions.
 func (p Codex) InstallSkills() error {
 	stateDir, err := p.StateDir()
 	if err != nil {
 		return err
 	}
-	return config.InstallBundledSkills(stateDir, config.SkillProviderCodex)
+	return config.ReconcileBundledSkills(stateDir, config.SkillProviderCodex)
 }
 
 // UninstallSkills removes the Codex skills shipped with confab.

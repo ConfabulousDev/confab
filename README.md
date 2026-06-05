@@ -110,7 +110,7 @@ Codex stores rollouts under `~/.codex/sessions/<yyyy>/<mm>/<dd>/rollout-*.jsonl`
 
 ### Caveats
 
-- Bundled skills (`/til`, `/retro`) install for both Claude Code and Codex.
+- Bundled skills (`/retro`) install for both Claude Code and Codex.
 - GitHub commit/PR linking is wired for Claude Code and Codex. Claude also supports the GitHub MCP PR matcher; Codex uses Bash hooks.
 - Codex sync daemons shut down via parent-process liveness, not a `SessionEnd`/`Stop` hook.
 

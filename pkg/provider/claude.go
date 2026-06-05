@@ -89,14 +89,14 @@ func (p ClaudeCode) UninstallHooks() (string, error) {
 	return p.SettingsPath()
 }
 
-// InstallSkills installs the Claude Code skills shipped with confab
-// (/til and /retro).
+// InstallSkills installs the Claude Code skills shipped with confab (/retro)
+// and prunes any retired skills left by older versions.
 func (p ClaudeCode) InstallSkills() error {
 	stateDir, err := p.StateDir()
 	if err != nil {
 		return err
 	}
-	return config.InstallBundledSkills(stateDir, config.SkillProviderClaude)
+	return config.ReconcileBundledSkills(stateDir, config.SkillProviderClaude)
 }
 
 // UninstallSkills removes the Claude Code skills shipped with confab.

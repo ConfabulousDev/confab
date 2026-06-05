@@ -153,7 +153,7 @@ func TestClaudeCodeInstallSkills(t *testing.T) {
 	if err := (ClaudeCode{}).InstallSkills(); err != nil {
 		t.Fatalf("InstallSkills() error = %v", err)
 	}
-	for _, skill := range []string{"til", "retro"} {
+	for _, skill := range []string{"retro"} {
 		path := filepath.Join(tmpDir, "skills", skill, "SKILL.md")
 		data, err := os.ReadFile(path)
 		if err != nil {

@@ -363,7 +363,7 @@ func TestCodexHook_EnsuresCodexSkills(t *testing.T) {
 		t.Fatalf("hook: %v", err)
 	}
 
-	for _, skill := range []string{"til", "retro"} {
+	for _, skill := range []string{"retro"} {
 		claudePath := filepath.Join(tmpHome, ".claude", "skills", skill)
 		if _, err := os.Stat(claudePath); err == nil {
 			t.Errorf("Codex SessionStart leaked Claude skill into %s", claudePath)

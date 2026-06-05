@@ -31,7 +31,7 @@ func TestSkillsAddInstallsForAllDetectedProviders(t *testing.T) {
 	}
 
 	for _, base := range []string{claudeDir, codexDir} {
-		for _, skill := range []string{"til", "retro"} {
+		for _, skill := range []string{"retro"} {
 			path := filepath.Join(base, "skills", skill, "SKILL.md")
 			if _, err := os.Stat(path); err != nil {
 				t.Fatalf("expected %s after skills add: %v", path, err)
@@ -45,7 +45,7 @@ func TestSkillsRemoveRemovesFromAllProviderDirs(t *testing.T) {
 	stubProviderDetect(t, "claude")
 
 	for _, base := range []string{claudeDir, codexDir} {
-		for _, skill := range []string{"til", "retro"} {
+		for _, skill := range []string{"retro"} {
 			path := filepath.Join(base, "skills", skill, "SKILL.md")
 			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 				t.Fatalf("mkdir %s: %v", path, err)
@@ -61,7 +61,7 @@ func TestSkillsRemoveRemovesFromAllProviderDirs(t *testing.T) {
 	}
 
 	for _, base := range []string{claudeDir, codexDir} {
-		for _, skill := range []string{"til", "retro"} {
+		for _, skill := range []string{"retro"} {
 			path := filepath.Join(base, "skills", skill)
 			if _, err := os.Stat(path); !os.IsNotExist(err) {
 				t.Fatalf("expected %s to be removed, stat err=%v", path, err)
