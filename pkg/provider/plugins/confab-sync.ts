@@ -1,0 +1,40 @@
+import type { Event, Plugin } from "@opencode-ai/plugin"
+
+export const ConfabSync: Plugin = async ({ $, serverUrl }) => {
+  const running = new Set<string>()
+
+  async function spawn(sessionID: string, cwd: string) {
+    if (running.has(sessionID)) return
+    running.add(sessionID)
+    const input = JSON.stringify({
+      session_id: sessionID,
+      server_url: serverUrl.href,
+      cwd,
+    })
+    await $`echo ${input} | confab hook session-start --provider opencode`.quiet()
+  }
+
+  async function stop(sessionID: string) {
+    if (!running.has(sessionID)) return
+    running.delete(sessionID)
+    const input = JSON.stringify({
+      session_id: sessionID,
+      server_url: serverUrl.href,
+    })
+    await $`echo ${input} | confab hook session-end --provider opencode`.quiet()
+  }
+
+  return {
+    event: async ({ event }) => {
+      if (event.type === "session.created") {
+        const session = event.properties.info
+        await spawn(session.id, session.directory)
+      }
+    },
+    dispose: async () => {
+      for (const sid of [...running]) {
+        await stop(sid)
+      }
+    },
+  }
+}

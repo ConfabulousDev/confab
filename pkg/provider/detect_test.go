@@ -34,6 +34,24 @@ func TestDetectInstalled_Both(t *testing.T) {
 	}
 }
 
+func TestDetectInstalled_AllThree(t *testing.T) {
+	stubLookPath(t, "claude", "codex", "opencode")
+	got := DetectInstalled()
+	want := []string{NameClaudeCode, NameCodex, NameOpencode}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("DetectInstalled() = %v, want %v", got, want)
+	}
+}
+
+func TestDetectInstalled_OpencodeOnly(t *testing.T) {
+	stubLookPath(t, "opencode")
+	got := DetectInstalled()
+	want := []string{NameOpencode}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("DetectInstalled() = %v, want %v", got, want)
+	}
+}
+
 func TestDetectInstalled_ClaudeOnly(t *testing.T) {
 	stubLookPath(t, "claude")
 	got := DetectInstalled()
@@ -80,5 +98,11 @@ func TestCLIBinaryName_Claude(t *testing.T) {
 func TestCLIBinaryName_Codex(t *testing.T) {
 	if got := (Codex{}).CLIBinaryName(); got != "codex" {
 		t.Fatalf("Codex.CLIBinaryName() = %q, want %q", got, "codex")
+	}
+}
+
+func TestCLIBinaryName_Opencode(t *testing.T) {
+	if got := (Opencode{}).CLIBinaryName(); got != "opencode" {
+		t.Fatalf("Opencode.CLIBinaryName() = %q, want %q", got, "opencode")
 	}
 }

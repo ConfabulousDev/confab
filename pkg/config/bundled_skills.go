@@ -7,8 +7,9 @@ import (
 )
 
 const (
-	SkillProviderClaude = "claude-code"
-	SkillProviderCodex  = "codex"
+	SkillProviderClaude   = "claude-code"
+	SkillProviderCodex    = "codex"
+	SkillProviderOpencode = "opencode"
 )
 
 var bundledSkillNames = []string{retroSkillName}

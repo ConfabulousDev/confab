@@ -356,3 +356,30 @@ func TestClaudeCodeIsHooksInstalled(t *testing.T) {
 		})
 	}
 }
+
+func TestGetProcName(t *testing.T) {
+	selfPID := os.Getpid()
+	name := getProcName(selfPID)
+	if name == "" {
+		t.Fatalf("getProcName(%d) returned empty string", selfPID)
+	}
+	if strings.Contains(name, "/") {
+		t.Errorf("getProcName(%d) = %q, should be basename not full path", selfPID, name)
+	}
+	if strings.Contains(name, " ") {
+		t.Errorf("getProcName(%d) = %q, should be just process name not full cmdline", selfPID, name)
+	}
+
+	pid1 := getProcName(1)
+	if pid1 == "" {
+		t.Skip("PID 1 not accessible (container?), skipping")
+	}
+	if strings.Contains(pid1, "/") || strings.Contains(pid1, " ") {
+		t.Errorf("getProcName(1) = %q, should be basename only", pid1)
+	}
+
+	bogus := getProcName(999999999)
+	if bogus != "" {
+		t.Errorf("getProcName(999999999) = %q, want empty string for non-existent PID", bogus)
+	}
+}

@@ -31,6 +31,73 @@ func TestNewStateForProvider(t *testing.T) {
 	}
 }
 
+func TestNewStateForProviderWithURL(t *testing.T) {
+	state := NewStateForProviderWithURL("opencode", "ext-789", "http://localhost:4096", "/work/dir", 0)
+
+	if state.ExternalID != "ext-789" {
+		t.Errorf("ExternalID = %q, want %q", state.ExternalID, "ext-789")
+	}
+	if state.OpenCodeServerURL != "http://localhost:4096" {
+		t.Errorf("OpenCodeServerURL = %q, want %q", state.OpenCodeServerURL, "http://localhost:4096")
+	}
+	if state.TranscriptPath != "" {
+		t.Errorf("TranscriptPath = %q, want \"\"", state.TranscriptPath)
+	}
+	if state.CWD != "/work/dir" {
+		t.Errorf("CWD = %q, want %q", state.CWD, "/work/dir")
+	}
+	if state.Provider != "opencode" {
+		t.Errorf("Provider = %q, want %q", state.Provider, "opencode")
+	}
+	if state.PID != os.Getpid() {
+		t.Errorf("PID = %d, want %d", state.PID, os.Getpid())
+	}
+	if state.ParentPID != 0 {
+		t.Errorf("ParentPID = %d, want 0", state.ParentPID)
+	}
+	if time.Since(state.StartedAt) > time.Second {
+		t.Error("expected StartedAt to be recent")
+	}
+}
+
+func TestNewStateForProviderWithURL_SaveAndLoadRoundTrip(t *testing.T) {
+	tmpDir := t.TempDir()
+	origHome := os.Getenv("HOME")
+	os.Setenv("HOME", tmpDir)
+	defer os.Setenv("HOME", origHome)
+
+	state := NewStateForProviderWithURL("opencode", "roundtrip-id", "http://localhost:4096", "/work/dir", 0)
+	state.PID = os.Getpid()
+	if err := state.Save(); err != nil {
+		t.Fatalf("save state: %v", err)
+	}
+
+	statePath := filepath.Join(tmpDir, ".confab", "sync", "opencode", "roundtrip-id.json")
+	if _, err := os.Stat(statePath); err != nil {
+		t.Fatalf("state file not created: %v", err)
+	}
+
+	loaded, err := LoadStateForProvider("opencode", "roundtrip-id")
+	if err != nil {
+		t.Fatalf("load state: %v", err)
+	}
+	if loaded == nil {
+		t.Fatal("loaded state is nil")
+	}
+	if loaded.ExternalID != "roundtrip-id" {
+		t.Errorf("ExternalID = %q", loaded.ExternalID)
+	}
+	if loaded.OpenCodeServerURL != "http://localhost:4096" {
+		t.Errorf("OpenCodeServerURL = %q", loaded.OpenCodeServerURL)
+	}
+	if loaded.TranscriptPath != "" {
+		t.Errorf("TranscriptPath = %q", loaded.TranscriptPath)
+	}
+	if loaded.Provider != "opencode" {
+		t.Errorf("Provider = %q", loaded.Provider)
+	}
+}
+
 func TestNewStateForProvider_WithParentPID(t *testing.T) {
 	state := NewStateForProvider("", "ext-456", "/path/to/transcript.jsonl", "/work/dir", 12345)
 

@@ -33,6 +33,31 @@ func TestClaudeHookInputAdapter(t *testing.T) {
 	}
 }
 
+func TestOpencodeHookInputAdapter(t *testing.T) {
+	src := &types.OpenCodeHookInput{
+		SessionID: "0199-opencode-session",
+		CWD:       "/work/opencode",
+		ParentPID: 7777,
+	}
+	a := opencodeHookInputAdapter{inner: src}
+
+	if got := a.SessionID(); got != src.SessionID {
+		t.Errorf("SessionID() = %q, want %q", got, src.SessionID)
+	}
+	if got := a.TranscriptPath(); got != "" {
+		t.Errorf("TranscriptPath() = %q, want \"\"", got)
+	}
+	if got := a.CWD(); got != src.CWD {
+		t.Errorf("CWD() = %q, want %q", got, src.CWD)
+	}
+	if got := a.HookEventName(); got != "" {
+		t.Errorf("HookEventName() = %q, want \"\"", got)
+	}
+	if got := a.ParentPID(); got != src.ParentPID {
+		t.Errorf("ParentPID() = %d, want %d", got, src.ParentPID)
+	}
+}
+
 func TestCodexHookInputAdapter(t *testing.T) {
 	src := &types.CodexHookInput{
 		SessionID:      "11111111-1111-1111-1111-111111111111",
@@ -59,4 +84,3 @@ func TestCodexHookInputAdapter(t *testing.T) {
 		t.Errorf("ParentPID() = %d, want %d", got, src.ParentPID)
 	}
 }
-

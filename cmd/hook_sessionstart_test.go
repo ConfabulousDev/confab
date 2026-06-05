@@ -376,6 +376,174 @@ func TestCodexHook_EnsuresCodexSkills(t *testing.T) {
 	}
 }
 
+// --- OpenCode session-start helpers ---
+
+func runOpencodeSessionStart(t *testing.T, in []byte) error {
+	t.Helper()
+	orig := hookProviderName
+	hookProviderName = provider.NameOpencode
+	defer func() { hookProviderName = orig }()
+	return sessionStartFromReader(bytes.NewReader(in), io.Discard)
+}
+
+func opencodeHookInputJSON(t *testing.T, sessionID, serverURL string) []byte {
+	t.Helper()
+	b, err := json.Marshal(types.OpenCodeHookInput{
+		SessionID: sessionID,
+		OpenCodeServerURL: serverURL,
+		CWD:       "/work/opencode",
+	})
+	if err != nil {
+		t.Fatalf("marshal hook input: %v", err)
+	}
+	return b
+}
+
+// --- OpenCode session-start tests ---
+
+func TestOpencodeHook_SessionStart_SpawnsDaemon(t *testing.T) {
+	origSpawn := spawnDaemonFunc
+	defer func() { spawnDaemonFunc = origSpawn }()
+
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	syncDir := filepath.Join(tmpHome, ".confab", "sync")
+	if err := os.MkdirAll(syncDir, 0700); err != nil {
+		t.Fatalf("mkdir sync dir: %v", err)
+	}
+
+	var captured *daemonLaunchInput
+	spawnDaemonFunc = func(launch *daemonLaunchInput) error {
+		captured = launch
+		return nil
+	}
+
+	in := opencodeHookInputJSON(t, "oc-session-0199", "http://localhost:4096")
+	if err := runOpencodeSessionStart(t, in); err != nil {
+		t.Fatalf("hook: %v", err)
+	}
+	if captured == nil {
+		t.Fatal("expected spawn to be called")
+	}
+	if captured.ExternalID != "oc-session-0199" {
+		t.Errorf("session = %q, want %q", captured.ExternalID, "oc-session-0199")
+	}
+	if captured.OpenCodeServerURL != "http://localhost:4096" {
+		t.Errorf("OpenCodeServerURL = %q, want %q", captured.OpenCodeServerURL, "http://localhost:4096")
+	}
+	if captured.TranscriptPath != "" {
+		t.Errorf("TranscriptPath = %q, want \"\"", captured.TranscriptPath)
+	}
+	if captured.CWD != "/work/opencode" {
+		t.Errorf("CWD = %q, want %q", captured.CWD, "/work/opencode")
+	}
+}
+
+func TestOpencodeHook_SessionStart_NoDuplicateSpawn(t *testing.T) {
+	origSpawn := spawnDaemonFunc
+	defer func() { spawnDaemonFunc = origSpawn }()
+
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	syncDir := filepath.Join(tmpHome, ".confab", "sync", provider.NameOpencode)
+	if err := os.MkdirAll(syncDir, 0700); err != nil {
+		t.Fatalf("mkdir sync dir: %v", err)
+	}
+
+	sessionID := "oc-session-duplicate"
+	state := daemon.NewStateForProviderWithURL(provider.NameOpencode, sessionID, "http://localhost:4096", "/work/opencode", 0)
+	state.PID = os.Getpid()
+	if err := state.Save(); err != nil {
+		t.Fatalf("save state: %v", err)
+	}
+
+	var spawnCalled bool
+	spawnDaemonFunc = func(launch *daemonLaunchInput) error {
+		spawnCalled = true
+		return nil
+	}
+
+	in := opencodeHookInputJSON(t, sessionID, "http://localhost:4096")
+	if err := runOpencodeSessionStart(t, in); err != nil {
+		t.Fatalf("hook: %v", err)
+	}
+	if spawnCalled {
+		t.Error("expected hook to be a no-op when daemon is already running")
+	}
+}
+
+func TestBuildOpencodeLaunchArgs(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantID    string
+		wantURL   string
+		wantCWD   string
+		wantError bool
+	}{
+		{
+			name:    "valid input",
+			input:   `{"session_id":"test-0199","server_url":"http://localhost:4096","cwd":"/work"}`,
+			wantID:  "test-0199",
+			wantURL: "http://localhost:4096",
+			wantCWD: "/work",
+		},
+		{
+			name:      "missing session_id",
+			input:     `{"server_url":"http://localhost:4096","cwd":"/work"}`,
+			wantError: true,
+		},
+		{
+			name:      "missing server_url",
+			input:     `{"session_id":"test-0199","cwd":"/work"}`,
+			wantError: true,
+		},
+		{
+			name:      "invalid JSON",
+			input:     `not-json`,
+			wantError: true,
+		},
+		{
+			name:      "empty input",
+			input:     ``,
+			wantError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			launch, err := buildOpencodeLaunchArgs(strings.NewReader(tt.input))
+			if tt.wantError {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if launch == nil {
+				t.Fatal("expected launch, got nil")
+			}
+			if launch.Provider != provider.NameOpencode {
+				t.Errorf("Provider = %q, want %q", launch.Provider, provider.NameOpencode)
+			}
+			if launch.ExternalID != tt.wantID {
+				t.Errorf("ExternalID = %q, want %q", launch.ExternalID, tt.wantID)
+			}
+			if launch.OpenCodeServerURL != tt.wantURL {
+				t.Errorf("OpenCodeServerURL = %q, want %q", launch.OpenCodeServerURL, tt.wantURL)
+			}
+			if launch.CWD != tt.wantCWD {
+				t.Errorf("CWD = %q, want %q", launch.CWD, tt.wantCWD)
+			}
+			if launch.TranscriptPath != "" {
+				t.Errorf("TranscriptPath = %q, want \"\"", launch.TranscriptPath)
+			}
+		})
+	}
+}
+
 func TestCodexHook_RespondsWithoutPanic_WhenNoSpawn(t *testing.T) {
 	origSpawn := spawnDaemonFunc
 	defer func() { spawnDaemonFunc = origSpawn }()

@@ -320,6 +320,14 @@ func getProcCmdline(pid int) string {
 	return strings.TrimSpace(string(out))
 }
 
+func getProcName(pid int) string {
+	out, err := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "comm=").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
 func getParentPID(pid int) int {
 	out, err := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "ppid=").Output()
 	if err != nil {

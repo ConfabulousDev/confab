@@ -15,11 +15,11 @@ import (
 // errors instead of "run `confab login`".
 func TestEnsureAuthenticated(t *testing.T) {
 	tests := []struct {
-		name        string
-		config      *UploadConfig // nil = no config file
-		wantErr     bool
-		wantErrSub  string // substring expected in error
-		wantCfgPtr  bool   // expect non-nil returned cfg on success
+		name       string
+		config     *UploadConfig // nil = no config file
+		wantErr    bool
+		wantErrSub string // substring expected in error
+		wantCfgPtr bool   // expect non-nil returned cfg on success
 	}{
 		{
 			name:       "missing config file",
@@ -550,8 +550,6 @@ func TestAtomicUpdateSettings_PreservesUnknownFields(t *testing.T) {
 	}
 }
 
-
-
 func TestGetEventHooks_MalformedSettings(t *testing.T) {
 	// Test that getEventHooks handles malformed settings gracefully
 
@@ -603,8 +601,6 @@ func TestGetEventHooks_MalformedSettings(t *testing.T) {
 		}
 	})
 }
-
-
 
 func TestParseLogLevel(t *testing.T) {
 	tests := []struct {

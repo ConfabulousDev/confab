@@ -77,37 +77,29 @@ func sessionStartFromReader(r io.Reader, w io.Writer) error {
 
 	fmt.Fprintf(os.Stderr, "=== Confab: Starting %s Sync Daemon ===\n\n", p.Name())
 
-	in, err := p.ParseSessionHook(r)
+	// OpenCode is different: the TS plugin pipes JSON via stdin, so
+	// ParseSessionHook reads the JSON payload from r. For Claude/Codex,
+	// the same stdin-based pattern is used by the native hook system.
+	var launch *daemonLaunchInput
+	if p.Name() == provider.NameOpencode {
+		launch, err = buildOpencodeLaunchArgs(r)
+	} else {
+		launch, err = buildStandardLaunchArgs(p, r)
+	}
 	if err != nil {
 		logger.ErrorPrint("Error reading %s hook input: %v", p.Name(), err)
 		return nil
 	}
 
-	launch := &daemonLaunchInput{
-		Provider:       p.Name(),
-		ExternalID:     in.SessionID(),
-		TranscriptPath: in.TranscriptPath(),
-		CWD:            in.CWD(),
-		// ParentPID is filled by maybeSpawnDaemon via p.FindParentPID().
+	fmt.Fprintf(os.Stderr, "Provider: %s\nSession:  %s\n",
+		p.Name(), utils.TruncateSecret(launch.ExternalID, 8, 0))
+	if launch.TranscriptPath != "" {
+		fmt.Fprintf(os.Stderr, "Path:     %s\n", launch.TranscriptPath)
 	}
-
-	// Resolve to the root session. Identity for Claude; thread-edge walk
-	// for Codex. WalkUpToRoot degrades gracefully on errors and returns
-	// the input unchanged.
-	if launch.ExternalID != "" {
-		rootID, rootPath, _ := p.WalkUpToRoot(launch.ExternalID)
-		if rootID != "" && rootID != launch.ExternalID {
-			logger.Info("%s SessionStart resolved to root: firing=%s root=%s rollout=%s",
-				p.Name(), launch.ExternalID, rootID, rootPath)
-			launch.ExternalID = rootID
-			if rootPath != "" {
-				launch.TranscriptPath = rootPath
-			}
-		}
+	if launch.OpenCodeServerURL != "" {
+		fmt.Fprintf(os.Stderr, "Server:   %s\n", launch.OpenCodeServerURL)
 	}
-
-	fmt.Fprintf(os.Stderr, "Provider: %s\nSession:  %s\nPath:     %s\n\n",
-		p.Name(), utils.TruncateSecret(launch.ExternalID, 8, 0), launch.TranscriptPath)
+	fmt.Fprintf(os.Stderr, "\n")
 
 	spawned, err := maybeSpawnDaemon(p, launch)
 	if err != nil {
@@ -121,6 +113,53 @@ func sessionStartFromReader(r io.Reader, w io.Writer) error {
 	}
 
 	return nil
+}
+
+// buildStandardLaunchArgs reads hook input from stdin for Claude/Codex
+// providers, resolving subagent rollouts to roots when applicable.
+func buildStandardLaunchArgs(p provider.Provider, r io.Reader) (*daemonLaunchInput, error) {
+	in, err := p.ParseSessionHook(r)
+	if err != nil {
+		return nil, err
+	}
+
+	launch := &daemonLaunchInput{
+		Provider:       p.Name(),
+		ExternalID:     in.SessionID(),
+		TranscriptPath: in.TranscriptPath(),
+		CWD:            in.CWD(),
+	}
+
+	if launch.ExternalID != "" {
+		rootID, rootPath, _ := p.WalkUpToRoot(launch.ExternalID)
+		if rootID != "" && rootID != launch.ExternalID {
+			logger.Info("%s SessionStart resolved to root: firing=%s root=%s rollout=%s",
+				p.Name(), launch.ExternalID, rootID, rootPath)
+			launch.ExternalID = rootID
+			if rootPath != "" {
+				launch.TranscriptPath = rootPath
+			}
+		}
+	}
+	return launch, nil
+}
+
+// buildOpencodeLaunchArgs reads the JSON payload piped from the TS plugin.
+// The plugin constructs an OpenCodeHookInput with session_id, server_url, and
+// cwd — no transcript path since OpenCode data lives in the HTTP API.
+func buildOpencodeLaunchArgs(r io.Reader) (*daemonLaunchInput, error) {
+	p := provider.Opencode{}
+	in, err := p.ReadSessionHookInput(r)
+	if err != nil {
+		return nil, err
+	}
+
+	return &daemonLaunchInput{
+		Provider:   p.Name(),
+		ExternalID: in.SessionID,
+		OpenCodeServerURL: in.OpenCodeServerURL,
+		CWD:        in.CWD,
+	}, nil
 }
 
 // parseSyncEnvConfig reads sync configuration from environment variables.
@@ -161,6 +200,7 @@ func runDaemon(hookInputJSON string) error {
 		Provider:           providerName,
 		ExternalID:         launch.ExternalID,
 		TranscriptPath:     launch.TranscriptPath,
+		OpenCodeServerURL:  launch.OpenCodeServerURL,
 		CWD:                launch.CWD,
 		ParentPID:          launch.ParentPID,
 		SyncInterval:       syncInterval,

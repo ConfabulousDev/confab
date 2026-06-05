@@ -33,4 +33,3 @@ func GetClaudeStateDir() (string, error) {
 	}
 	return filepath.Join(home, ".claude"), nil
 }
-

@@ -1,10 +1,10 @@
 // Spec tests for CF-398: the two behavioral changes that ship alongside
 // the structural refactor.
 //
-//   1. Codex.ScanSessions populates SessionInfo.FirstUserMessage from the
-//      rollout's first event_msg.user_message (previously: CWD).
-//   2. Codex.FindSessionByID walks subagent UUIDs up to the root so callers
-//      get the top-most user session, not the subagent rollout.
+//  1. Codex.ScanSessions populates SessionInfo.FirstUserMessage from the
+//     rollout's first event_msg.user_message (previously: CWD).
+//  2. Codex.FindSessionByID walks subagent UUIDs up to the root so callers
+//     get the top-most user session, not the subagent rollout.
 //
 // Both tests fail today against the Phase 3b stubs and pass once Phase 4
 // commit 2 fills them in. Other migrated tests cover the structural moves.

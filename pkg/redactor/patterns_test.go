@@ -112,8 +112,8 @@ func TestAnthropicAPIKeyPattern(t *testing.T) {
 
 	// False positives - should NOT match
 	invalidKeys := []string{
-		"sk-ant-api-short",                         // Too short
-		"sk-ant-api99-",                            // Missing characters
+		"sk-ant-api-short", // Too short
+		"sk-ant-api99-",    // Missing characters
 		"sk-ant-apix3-" + string(make([]byte, 95)), // Invalid format (apix not api\d\d)
 		"sk-openai-1234567890",                     // Different API key format
 		"not-an-api-key",                           // Random string
@@ -151,10 +151,10 @@ func TestOpenAIAPIKeyPattern(t *testing.T) {
 
 	// False positives - should NOT match
 	invalidKeys := []string{
-		"sk-short",                           // Too short (less than 20 chars after prefix)
-		"sk-proj-short",                      // Too short (less than 20 chars after prefix)
-		"sk-abc!@#$%^&*()",                   // Invalid characters
-		"not-sk-prefix",                      // Wrong prefix
+		"sk-short",         // Too short (less than 20 chars after prefix)
+		"sk-proj-short",    // Too short (less than 20 chars after prefix)
+		"sk-abc!@#$%^&*()", // Invalid characters
+		"not-sk-prefix",    // Wrong prefix
 	}
 
 	for _, key := range invalidKeys {
@@ -242,7 +242,7 @@ func TestGitHubTokenPattern(t *testing.T) {
 				"gho_1234567890abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ",
 			},
 			invalid: []string{
-				"gho_short",        // Too short
+				"gho_short",         // Too short
 				"ghp_1234567890abc", // Wrong prefix
 			},
 		},
@@ -268,7 +268,7 @@ func TestGitHubTokenPattern(t *testing.T) {
 				"ghr_1234567890abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ",
 			},
 			invalid: []string{
-				"ghr_short",        // Too short
+				"ghr_short",         // Too short
 				"ghp_1234567890abc", // Wrong prefix
 			},
 		},
@@ -312,10 +312,10 @@ func TestJWTPattern(t *testing.T) {
 
 	// False positives - should NOT match
 	invalidJWTs := []string{
-		"not.a.jwt",           // No eyJ prefix
-		"eyJ.eyJ.",            // Incomplete
-		"eyJtest",             // No dots
-		"random string",       // Random text
+		"not.a.jwt",     // No eyJ prefix
+		"eyJ.eyJ.",      // Incomplete
+		"eyJtest",       // No dots
+		"random string", // Random text
 	}
 
 	for _, jwt := range invalidJWTs {
@@ -341,8 +341,8 @@ func TestPrivateKeyPattern(t *testing.T) {
 				"-----BEGIN RSA PRIVATE KEY-----\nshort\n-----END RSA PRIVATE KEY-----",
 			},
 			invalid: []string{
-				"-----BEGIN RSA PRIVATE KEY-----",           // Missing END
-				"-----BEGIN RSA PRIVATE KEY-----\nMIIE...",  // Incomplete
+				"-----BEGIN RSA PRIVATE KEY-----",                            // Missing END
+				"-----BEGIN RSA PRIVATE KEY-----\nMIIE...",                   // Incomplete
 				"-----BEGIN PUBLIC KEY-----\ndata\n-----END PUBLIC KEY-----", // Public key
 			},
 		},
@@ -373,7 +373,7 @@ func TestPrivateKeyPattern(t *testing.T) {
 				"-----BEGIN PRIVATE KEY-----\nMIIEvQIBAD...\n-----END PRIVATE KEY-----",
 			},
 			invalid: []string{
-				"-----BEGIN PRIVATE KEY-----",         // Missing END
+				"-----BEGIN PRIVATE KEY-----",                                          // Missing END
 				"-----BEGIN RSA PRIVATE KEY-----\ndata\n-----END RSA PRIVATE KEY-----", // Different type
 			},
 		},
@@ -422,9 +422,9 @@ func TestPostgreSQLConnectionStringPattern(t *testing.T) {
 
 	// False positives - should NOT match
 	invalidConnStrings := []string{
-		"mysql://user:password@localhost/db",  // Different database
-		"postgres://localhost:5432/db",         // No password
-		"http://user:pass@example.com",         // Not a database connection
+		"mysql://user:password@localhost/db", // Different database
+		"postgres://localhost:5432/db",       // No password
+		"http://user:pass@example.com",       // Not a database connection
 	}
 
 	for _, connStr := range invalidConnStrings {
@@ -458,9 +458,9 @@ func TestGenericPasswordPattern(t *testing.T) {
 
 	// False positives - should NOT match
 	invalidURLs := []string{
-		"https://example.com",              // No credentials
-		"user:password",                    // No URL format
-		"://no-user@example.com",          // No user
+		"https://example.com",    // No credentials
+		"user:password",          // No URL format
+		"://no-user@example.com", // No user
 	}
 
 	for _, url := range invalidURLs {
@@ -560,10 +560,10 @@ func TestStripeAPIKeyPattern(t *testing.T) {
 				"sk_test_aBcDeFgHiJkLmNoPqRsTuVwXyZ",
 			},
 			invalid: []string{
-				"sk_live_short",       // Too short
-				"sk_test_short",       // Too short
-				"pk_live_1234567890",  // Publishable key, not secret
-				"sk_prod_1234567890",  // Invalid environment
+				"sk_live_short",      // Too short
+				"sk_test_short",      // Too short
+				"pk_live_1234567890", // Publishable key, not secret
+				"sk_prod_1234567890", // Invalid environment
 			},
 		},
 		{
@@ -574,8 +574,8 @@ func TestStripeAPIKeyPattern(t *testing.T) {
 				"rk_test_1234567890abcdefghijklmnopqrstuvwxyz",
 			},
 			invalid: []string{
-				"rk_live_short",       // Too short
-				"sk_live_1234567890",  // Wrong prefix (sk not rk)
+				"rk_live_short",      // Too short
+				"sk_live_1234567890", // Wrong prefix (sk not rk)
 			},
 		},
 	}
@@ -619,7 +619,7 @@ func TestGoogleAPIKeyPattern(t *testing.T) {
 	// False positives - should NOT match
 	invalidKeys := []string{
 		"AIza123",                          // Too short
-		"AIzaBCDEFGHIJ!@#$%^&*()",         // Invalid characters
+		"AIzaBCDEFGHIJ!@#$%^&*()",          // Invalid characters
 		"NotAIza1234567890123456789012345", // Wrong prefix
 	}
 

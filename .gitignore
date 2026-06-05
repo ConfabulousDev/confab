@@ -19,3 +19,6 @@ test/e2e/confab-linux
 *.log
 .confab/
 .claude/
+
+# Node
+node_modules/

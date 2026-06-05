@@ -1,4 +1,4 @@
-.PHONY: build clean test
+.PHONY: build clean test check-deps
 
 BUILD_TIME := $(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
 
@@ -8,5 +8,13 @@ build:
 clean:
 	rm -f confab
 
-test:
+check-deps:
+	@echo "Checking required tooling..."
+	@command -v go >/dev/null 2>&1 || { echo "Go is required: https://go.dev/dl/"; exit 1; }
+	@echo "  go: found"
+	@command -v npx >/dev/null 2>&1 || { echo "Node.js/npx is required: https://nodejs.org/"; exit 1; }
+	@echo "  npx: found"
+	@echo "All dependencies found."
+
+test: check-deps
 	go test ./...

@@ -965,11 +965,11 @@ func TestConfabLinkedMarker_MintedMarkerRoundTrips(t *testing.T) {
 
 func TestConfabLinkedMarker_NonMarkersNotMatched(t *testing.T) {
 	for _, cmd := range []string{
-		`gh pr create --body "see # confab-linked for details"`,       // bare prefix, no token
-		`gh pr create --body "use # confab-linked-<token>"`,           // non-hex placeholder
-		`gh pr create --body "#confab-linked-a3f9"`,                   // missing space inside the prefix
-		`gh pr create --body "# confab-linked-A3F9"`,                  // uppercase hex not accepted
-		`gh pr create --body "# confab-linked-deadbeef in the docs"`,  // longer hex run must not match on its first 4
+		`gh pr create --body "see # confab-linked for details"`,      // bare prefix, no token
+		`gh pr create --body "use # confab-linked-<token>"`,          // non-hex placeholder
+		`gh pr create --body "#confab-linked-a3f9"`,                  // missing space inside the prefix
+		`gh pr create --body "# confab-linked-A3F9"`,                 // uppercase hex not accepted
+		`gh pr create --body "# confab-linked-deadbeef in the docs"`, // longer hex run must not match on its first 4
 	} {
 		if commandContainsConfabLink(cmd, "any-session") {
 			t.Errorf("expected no certification match for %q", cmd)

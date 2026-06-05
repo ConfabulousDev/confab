@@ -16,7 +16,7 @@ import (
 type UploadConfig struct {
 	BackendURL string           `json:"backend_url"`
 	APIKey     string           `json:"api_key"`
-	LogLevel   string           `json:"log_level,omitempty"`  // debug, info, warn, error (default: info)
+	LogLevel   string           `json:"log_level,omitempty"`   // debug, info, warn, error (default: info)
 	AutoUpdate *bool            `json:"auto_update,omitempty"` // nil = enabled (default), false = disabled
 	Redaction  *RedactionConfig `json:"redaction,omitempty"`
 }
@@ -440,4 +440,3 @@ func EnsureDefaultRedaction() (bool, error) {
 
 	return true, nil
 }
-

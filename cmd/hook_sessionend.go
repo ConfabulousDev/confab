@@ -26,7 +26,11 @@ signals the daemon to stop.
 Claude Code only — Codex fires Stop at every agent/turn boundary, so a
 Stop-driven shutdown would prematurely kill the root sync daemon. Codex
 daemons shut down via parent-process liveness instead (see
-Codex.FindParentPID).`,
+Codex.FindParentPID).
+
+For OpenCode, this command is called by the TS plugin when it receives a
+session.idle SSE event. The plugin pipes an OpenCodeHookInput JSON payload
+with session_id and opencode_server_url.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		providerName, err := provider.NormalizeName(hookProviderName)
 		if err != nil {
@@ -53,6 +57,16 @@ func sessionEndFromHook() error {
 func sessionEndFromReader(r io.Reader) error {
 	logger.Info("Stopping sync daemon (hook mode)")
 
+	providerName, err := provider.NormalizeName(hookProviderName)
+	if err != nil {
+		return err
+	}
+
+	// OpenCode: read OpenCodeHookInput from stdin, stop daemon by external ID
+	if providerName == provider.NameOpencode {
+		return sessionEndOpencode(r)
+	}
+
 	// Always output valid hook response, even on error
 	defer func() { writeClaudeHookResponse(os.Stdout, false) }()
 
@@ -69,6 +83,29 @@ func sessionEndFromReader(r io.Reader) error {
 	// Signal daemon to stop (it will do final sync in background)
 	// Pass hookInput so daemon can access the full SessionEnd payload
 	if err := daemon.StopDaemon(hookInput.SessionID, hookInput); err != nil {
+		logger.Warn("Could not stop daemon: %v", err)
+		fmt.Fprintf(os.Stderr, "Note: %v\n", err)
+	} else {
+		fmt.Fprintln(os.Stderr, "Daemon signaled to stop (final sync in background)")
+	}
+
+	return nil
+}
+
+// sessionEndOpencode handles session-end for OpenCode. Reads the JSON payload
+// piped from the TS plugin and stops the daemon by session ID.
+func sessionEndOpencode(r io.Reader) error {
+	fmt.Fprintln(os.Stderr, "=== Confab: Stopping Sync Daemon ===")
+	fmt.Fprintln(os.Stderr)
+
+	p := provider.Opencode{}
+	in, err := p.ReadSessionHookInput(r)
+	if err != nil {
+		logger.ErrorPrint("Error reading OpenCode hook input: %v", err)
+		return nil
+	}
+
+	if err := daemon.StopDaemonForProvider(provider.NameOpencode, in.SessionID, nil); err != nil {
 		logger.Warn("Could not stop daemon: %v", err)
 		fmt.Fprintf(os.Stderr, "Note: %v\n", err)
 	} else {

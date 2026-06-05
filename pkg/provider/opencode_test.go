@@ -1,0 +1,409 @@
+package provider
+
+import (
+	"encoding/json"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"testing"
+
+	"github.com/ConfabulousDev/confab/pkg/types"
+)
+
+func TestOpencodeName(t *testing.T) {
+	if got := (Opencode{}).Name(); got != NameOpencode {
+		t.Errorf("Name() = %q, want %q", got, NameOpencode)
+	}
+}
+
+func TestOpencodeSupportsCommitLinking(t *testing.T) {
+	if (Opencode{}).SupportsCommitLinking() {
+		t.Error("SupportsCommitLinking() = true, want false")
+	}
+}
+
+func TestOpencodeWalkUpToRoot(t *testing.T) {
+	id, path, err := (Opencode{}).WalkUpToRoot("test-session")
+	if err != nil {
+		t.Fatalf("WalkUpToRoot: %v", err)
+	}
+	if id != "test-session" {
+		t.Errorf("session = %q, want %q", id, "test-session")
+	}
+	if path != "" {
+		t.Errorf("path = %q, want \"\"", path)
+	}
+}
+
+func TestOpencodeDefaultCWD(t *testing.T) {
+	got := (Opencode{}).DefaultCWD("/home/user/.config/opencode/sessions/session-id.jsonl")
+	want := "/home/user/.config/opencode/sessions"
+	if got != want {
+		t.Errorf("DefaultCWD() = %q, want %q", got, want)
+	}
+}
+
+func TestOpencodeReadSessionHookInput_Valid(t *testing.T) {
+	input := `{"session_id":"test-0199","server_url":"http://localhost:4096","cwd":"/work"}`
+	p := Opencode{}
+	got, err := p.ReadSessionHookInput(strings.NewReader(input))
+	if err != nil {
+		t.Fatalf("ReadSessionHookInput: %v", err)
+	}
+	if got.SessionID != "test-0199" {
+		t.Errorf("SessionID = %q, want %q", got.SessionID, "test-0199")
+	}
+	if got.OpenCodeServerURL != "http://localhost:4096" {
+		t.Errorf("OpenCodeServerURL = %q, want %q", got.OpenCodeServerURL, "http://localhost:4096")
+	}
+	if got.CWD != "/work" {
+		t.Errorf("CWD = %q, want %q", got.CWD, "/work")
+	}
+}
+
+func TestOpencodeReadSessionHookInput_MissingSessionID(t *testing.T) {
+	input := `{"server_url":"http://localhost:4096","cwd":"/work"}`
+	_, err := (Opencode{}).ReadSessionHookInput(strings.NewReader(input))
+	if err == nil {
+		t.Fatal("expected error for missing session_id")
+	}
+	if !strings.Contains(err.Error(), "session_id") {
+		t.Errorf("error = %q, want session_id error", err)
+	}
+}
+
+func TestOpencodeReadSessionHookInput_MissingServerURL(t *testing.T) {
+	input := `{"session_id":"test-0199","cwd":"/work"}`
+	_, err := (Opencode{}).ReadSessionHookInput(strings.NewReader(input))
+	if err == nil {
+		t.Fatal("expected error for missing server_url")
+	}
+	if !strings.Contains(err.Error(), "server_url") {
+		t.Errorf("error = %q, want server_url error", err)
+	}
+}
+
+func TestOpencodeReadSessionHookInput_InvalidJSON(t *testing.T) {
+	_, err := (Opencode{}).ReadSessionHookInput(strings.NewReader("not-json"))
+	if err == nil {
+		t.Fatal("expected error for invalid JSON")
+	}
+}
+
+func TestOpencodeReadSessionHookInput_InvalidSessionID(t *testing.T) {
+	input := `{"session_id":"../../evil","server_url":"http://localhost:4096","cwd":"/work"}`
+	_, err := (Opencode{}).ReadSessionHookInput(strings.NewReader(input))
+	if err == nil {
+		t.Fatal("expected error for invalid session_id (path traversal)")
+	}
+}
+
+func TestOpencodeReadSessionHookInput_SetsParentPID(t *testing.T) {
+	input := `{"session_id":"test-0199","server_url":"http://localhost:4096","cwd":"/work","parent_pid":4242}`
+	got, err := (Opencode{}).ReadSessionHookInput(strings.NewReader(input))
+	if err != nil {
+		t.Fatalf("ReadSessionHookInput: %v", err)
+	}
+	if got.ParentPID != 4242 {
+		t.Errorf("ParentPID = %d, want 4242", got.ParentPID)
+	}
+}
+
+func TestOpencodeParseSessionHook(t *testing.T) {
+	input := `{"session_id":"test-parse","server_url":"http://localhost:4096","cwd":"/work"}`
+	hookInput, err := (Opencode{}).ParseSessionHook(strings.NewReader(input))
+	if err != nil {
+		t.Fatalf("ParseSessionHook: %v", err)
+	}
+	if hookInput.SessionID() != "test-parse" {
+		t.Errorf("SessionID() = %q, want %q", hookInput.SessionID(), "test-parse")
+	}
+	if hookInput.TranscriptPath() != "" {
+		t.Errorf("TranscriptPath() = %q, want \"\"", hookInput.TranscriptPath())
+	}
+	if hookInput.CWD() != "/work" {
+		t.Errorf("CWD() = %q, want %q", hookInput.CWD(), "/work")
+	}
+}
+
+func TestOpencodeStateDir_Default(t *testing.T) {
+	// Ensure env var is not set
+	t.Setenv("CONFAB_OPENCODE_CONFIG_DIR", "")
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatalf("UserHomeDir: %v", err)
+	}
+	got, err := (Opencode{}).StateDir()
+	if err != nil {
+		t.Fatalf("StateDir: %v", err)
+	}
+	want := filepath.Join(home, ".config", "opencode")
+	if got != want {
+		t.Errorf("StateDir() = %q, want %q", got, want)
+	}
+}
+
+func TestOpencodeStateDir_WithEnv(t *testing.T) {
+	t.Setenv("CONFAB_OPENCODE_CONFIG_DIR", "/custom/opencode")
+	got, err := (Opencode{}).StateDir()
+	if err != nil {
+		t.Fatalf("StateDir: %v", err)
+	}
+	if got != "/custom/opencode" {
+		t.Errorf("StateDir() = %q, want %q", got, "/custom/opencode")
+	}
+}
+
+func TestOpencodePluginDir(t *testing.T) {
+	t.Setenv("CONFAB_OPENCODE_CONFIG_DIR", "/custom/opencode")
+	got, err := (Opencode{}).PluginDir()
+	if err != nil {
+		t.Fatalf("PluginDir: %v", err)
+	}
+	want := filepath.Join("/custom/opencode", "plugins")
+	if got != want {
+		t.Errorf("PluginDir() = %q, want %q", got, want)
+	}
+}
+
+func TestOpencodeIsProcessPattern(t *testing.T) {
+	tests := []struct {
+		name    string
+		cmd     string
+		matches bool
+	}{
+		{"standalone opencode", "opencode", true},
+		{"opencode CLI path", "/usr/local/bin/opencode", true},
+		{"opencode with args", "opencode --version", true},
+		{"mixed case", "OpenCode", true},
+		{"electron opencode", "/opt/OpenCode/opencode", true},
+		{"all uppercase", "OPENCODE", true},
+		{"not opencode", "claude", false},
+		{"not opencode 2", "codex", false},
+		{"opencode as substring", "myopencodeapp", false},
+		{"prefixed opencode", "preopencode", false},
+		{"suffixed opencode", "opencodeextra", false},
+		{"empty string", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := opencodeProcessPattern.MatchString(tt.cmd)
+			if got != tt.matches {
+				t.Errorf("opencodeProcessPattern.MatchString(%q) = %v, want %v", tt.cmd, got, tt.matches)
+			}
+		})
+	}
+}
+
+func opencodePluginDir(t *testing.T) string {
+	t.Helper()
+	_, filename, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("could not determine test file path")
+	}
+	return filepath.Join(filepath.Dir(filename), "plugins")
+}
+
+func TestOpencodeInstallHooksWritesPlugin(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("CONFAB_OPENCODE_CONFIG_DIR", tmpDir)
+
+	p := Opencode{}
+	gotPath, err := p.InstallHooks()
+	if err != nil {
+		t.Fatalf("InstallHooks() error = %v", err)
+	}
+
+	wantPath := filepath.Join(tmpDir, "plugins", "confab-sync.ts")
+	if gotPath != wantPath {
+		t.Errorf("InstallHooks() returned %q, want %q", gotPath, wantPath)
+	}
+
+	data, err := os.ReadFile(wantPath)
+	if err != nil {
+		t.Fatalf("plugin file not written at %s: %v", wantPath, err)
+	}
+
+	source := string(data)
+	if !strings.Contains(source, "ConfabSync") {
+		t.Error("plugin file missing ConfabSync export")
+	}
+	if !strings.Contains(source, "session.created") {
+		t.Error("plugin file missing session.created handler")
+	}
+	if strings.Contains(source, "§BT§") {
+		t.Error("plugin file still contains §BT§ placeholders; backtick replacement failed")
+	}
+	if !strings.Contains(source, "session-start --provider opencode") {
+		t.Error("plugin file missing session-start command")
+	}
+	if !strings.Contains(source, "session-end --provider opencode") {
+		t.Error("plugin file missing session-end command")
+	}
+}
+
+func TestOpencodeUninstallHooksRemovesPlugin(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("CONFAB_OPENCODE_CONFIG_DIR", tmpDir)
+
+	p := Opencode{}
+	if _, err := p.InstallHooks(); err != nil {
+		t.Fatalf("InstallHooks() failed: %v", err)
+	}
+
+	gotPath, err := p.UninstallHooks()
+	if err != nil {
+		t.Fatalf("UninstallHooks() error = %v", err)
+	}
+
+	wantPath := filepath.Join(tmpDir, "plugins", "confab-sync.ts")
+	if gotPath != wantPath {
+		t.Errorf("UninstallHooks() returned %q, want %q", gotPath, wantPath)
+	}
+
+	if _, err := os.Stat(wantPath); !os.IsNotExist(err) {
+		t.Errorf("plugin file still exists after UninstallHooks: %v", err)
+	}
+}
+
+func TestOpencodeIsHooksInstalled(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("CONFAB_OPENCODE_CONFIG_DIR", tmpDir)
+
+	p := Opencode{}
+
+	installed, err := p.IsHooksInstalled()
+	if err != nil {
+		t.Fatalf("IsHooksInstalled() before install: %v", err)
+	}
+	if installed {
+		t.Error("IsHooksInstalled() = true before install, want false")
+	}
+
+	if _, err := p.InstallHooks(); err != nil {
+		t.Fatalf("InstallHooks() failed: %v", err)
+	}
+
+	installed, err = p.IsHooksInstalled()
+	if err != nil {
+		t.Fatalf("IsHooksInstalled() after install: %v", err)
+	}
+	if !installed {
+		t.Error("IsHooksInstalled() = false after install, want true")
+	}
+
+	if _, err := p.UninstallHooks(); err != nil {
+		t.Fatalf("UninstallHooks() failed: %v", err)
+	}
+
+	installed, err = p.IsHooksInstalled()
+	if err != nil {
+		t.Fatalf("IsHooksInstalled() after uninstall: %v", err)
+	}
+	if installed {
+		t.Error("IsHooksInstalled() = true after uninstall, want false")
+	}
+}
+
+func TestOpencodePluginSourceMatchesFile(t *testing.T) {
+	pluginDir := opencodePluginDir(t)
+	raw, err := os.ReadFile(filepath.Join(pluginDir, "confab-sync.ts"))
+	if err != nil {
+		t.Fatalf("read canonical plugin source: %v", err)
+	}
+
+	fileContent := string(raw)
+
+	// The file uses real backticks; the constant uses §BT§ as placeholder.
+	// Normalize the file to §BT§ form and compare.
+	fileAsConstant := strings.ReplaceAll(fileContent, "`", "§BT§")
+
+	if fileAsConstant != opencodePluginSourceRaw {
+		t.Fatal("canonical plugin source (pkg/provider/plugins/confab-sync.ts) does not match opencodePluginSourceRaw constant. Regenerate with: go generate ./pkg/provider/")
+	}
+}
+
+// TestOpencodeHookInputJSON ensures the JSON round-trips correctly.
+func TestOpencodeHookInputJSON(t *testing.T) {
+	orig := types.OpenCodeHookInput{
+		SessionID: "test-session",
+		OpenCodeServerURL: "http://localhost:4096",
+		CWD:       "/work",
+		ParentPID: 1234,
+	}
+	data, err := json.Marshal(orig)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var got types.OpenCodeHookInput
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got.SessionID != orig.SessionID {
+		t.Errorf("SessionID = %q, want %q", got.SessionID, orig.SessionID)
+	}
+	if got.OpenCodeServerURL != orig.OpenCodeServerURL {
+		t.Errorf("OpenCodeServerURL = %q, want %q", got.OpenCodeServerURL, orig.OpenCodeServerURL)
+	}
+	if got.CWD != orig.CWD {
+		t.Errorf("CWD = %q, want %q", got.CWD, orig.CWD)
+	}
+	if got.ParentPID != orig.ParentPID {
+		t.Errorf("ParentPID = %d, want %d", got.ParentPID, orig.ParentPID)
+	}
+}
+
+func TestOpencodePluginVitest(t *testing.T) {
+	npxPath, err := exec.LookPath("npx")
+	if err != nil {
+		t.Fatal("npx not found on PATH; install Node.js (https://nodejs.org) to run TypeScript plugin tests")
+	}
+
+	pluginDir := opencodePluginDir(t)
+
+	cmd := exec.Command(npxPath, "--yes", "vitest", "run")
+	cmd.Dir = pluginDir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("vitest failed:\n%s", string(out))
+	}
+}
+
+func TestOpencodePluginTypeScript(t *testing.T) {
+	npxPath, err := exec.LookPath("npx")
+	if err != nil {
+		t.Fatal("npx not found on PATH; install Node.js (https://nodejs.org) to validate the TypeScript plugin")
+	}
+
+	pluginDir := opencodePluginDir(t)
+	tmpDir := t.TempDir()
+
+	for _, rel := range []string{
+		"tsconfig.json",
+		"confab-sync.ts",
+		"types/opencode-plugin.d.ts",
+	} {
+		src := filepath.Join(pluginDir, rel)
+		dst := filepath.Join(tmpDir, rel)
+		if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
+			t.Fatalf("mkdir %s: %v", filepath.Dir(dst), err)
+		}
+		data, err := os.ReadFile(src)
+		if err != nil {
+			t.Fatalf("read %s: %v", src, err)
+		}
+		if err := os.WriteFile(dst, data, 0644); err != nil {
+			t.Fatalf("write %s: %v", dst, err)
+		}
+	}
+
+	cmd := exec.Command(npxPath, "--yes", "-p", "typescript", "tsc", "--noEmit")
+	cmd.Dir = tmpDir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("TypeScript type check failed:\n%s", string(out))
+	}
+}

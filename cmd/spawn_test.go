@@ -530,6 +530,126 @@ func TestUserPromptSubmitSpawnsDaemon(t *testing.T) {
 	})
 }
 
+func TestMaybeSpawnDaemonOpencode(t *testing.T) {
+	origSpawnDaemon := spawnDaemonFunc
+	defer func() { spawnDaemonFunc = origSpawnDaemon }()
+
+	t.Run("spawns daemon with OpenCodeServerURL when TranscriptPath is empty", func(t *testing.T) {
+		_ = setupSyncTestEnv(t)
+
+		var spawnCalled bool
+		var spawnedInput *daemonLaunchInput
+		spawnDaemonFunc = func(launch *daemonLaunchInput) error {
+			spawnCalled = true
+			spawnedInput = launch
+			return nil
+		}
+
+		sessionID := "oc-session-1234-1234-1234-123456789abc"
+
+		spawned, err := maybeSpawnDaemon(provider.Opencode{}, &daemonLaunchInput{
+			ExternalID: sessionID,
+			OpenCodeServerURL: "http://localhost:4096",
+			CWD:        "/work/opencode",
+		})
+		if err != nil {
+			t.Fatalf("maybeSpawnDaemon (Opencode) failed: %v", err)
+		}
+		if !spawned {
+			t.Fatal("expected spawned=true for OpenCode session")
+		}
+		if !spawnCalled {
+			t.Fatal("expected spawnDaemonFunc to be called")
+		}
+		if spawnedInput.ExternalID != sessionID {
+			t.Errorf("external_id = %q, want %q", spawnedInput.ExternalID, sessionID)
+		}
+		if spawnedInput.OpenCodeServerURL != "http://localhost:4096" {
+			t.Errorf("OpenCodeServerURL = %q, want %q", spawnedInput.OpenCodeServerURL, "http://localhost:4096")
+		}
+		if spawnedInput.Provider != provider.NameOpencode {
+			t.Errorf("Provider = %q, want %q", spawnedInput.Provider, provider.NameOpencode)
+		}
+	})
+
+	t.Run("does not spawn when daemon already running", func(t *testing.T) {
+		_ = setupSyncTestEnv(t)
+
+		spawnDaemonFunc = func(launch *daemonLaunchInput) error {
+			t.Fatal("should not spawn when daemon is already running")
+			return nil
+		}
+
+		sessionID := "oc-session-5678-5678-5678-567890abcdef"
+		state := daemon.NewStateForProviderWithURL(provider.NameOpencode, sessionID, "http://localhost:4096", "/work/opencode", 0)
+		state.PID = os.Getpid()
+		if err := state.Save(); err != nil {
+			t.Fatalf("save state: %v", err)
+		}
+
+		spawned, err := maybeSpawnDaemon(provider.Opencode{}, &daemonLaunchInput{
+			ExternalID: sessionID,
+			OpenCodeServerURL: "http://localhost:4096",
+			CWD:        "/work/opencode",
+		})
+		if err != nil {
+			t.Fatalf("maybeSpawnDaemon (Opencode) failed: %v", err)
+		}
+		if spawned {
+			t.Fatal("expected spawned=false when daemon is already running")
+		}
+	})
+
+	t.Run("fails when both transcript_path and server_url are empty", func(t *testing.T) {
+		setupSyncTestEnv(t)
+
+		spawnDaemonFunc = func(launch *daemonLaunchInput) error {
+			t.Fatal("should not spawn when both paths are missing")
+			return nil
+		}
+
+		spawned, err := maybeSpawnDaemon(provider.Opencode{}, &daemonLaunchInput{
+			ExternalID: "oc-session-missing",
+			CWD:        "/work/opencode",
+		})
+		if err == nil {
+			t.Fatal("expected error when both transcript_path and server_url are missing")
+		}
+		if spawned {
+			t.Fatal("expected spawned=false when both paths are missing")
+		}
+	})
+
+	t.Run("spawns when state exists but daemon is dead", func(t *testing.T) {
+		_ = setupSyncTestEnv(t)
+
+		var spawnCalled bool
+		spawnDaemonFunc = func(launch *daemonLaunchInput) error {
+			spawnCalled = true
+			return nil
+		}
+
+		sessionID := "oc-session-stale"
+		state := daemon.NewStateForProviderWithURL(provider.NameOpencode, sessionID, "http://localhost:4096", "/work/opencode", 0)
+		state.PID = 999999
+		if err := state.Save(); err != nil {
+			t.Fatalf("save stale state: %v", err)
+		}
+
+		spawned, err := maybeSpawnDaemon(provider.Opencode{}, &daemonLaunchInput{
+			ExternalID: sessionID,
+			OpenCodeServerURL: "http://localhost:4096",
+			CWD:        "/work/opencode",
+		})
+		if err != nil {
+			t.Fatalf("maybeSpawnDaemon (Opencode) failed: %v", err)
+		}
+		if !spawned || !spawnCalled {
+			t.Fatal("expected stale state to allow respawn")
+		}
+	})
+}
+
 func TestMatchesClaudeProcess(t *testing.T) {
 	tests := []struct {
 		name    string

@@ -77,7 +77,7 @@ var hooksRemoveCmd = &cobra.Command{
 }
 
 func init() {
-	hooksCmd.PersistentFlags().StringVar(&hooksProviderName, "provider", provider.NameClaudeCode, "Provider to manage hooks for (claude-code or codex)")
+	hooksCmd.PersistentFlags().StringVar(&hooksProviderName, "provider", provider.NameClaudeCode, "Provider to manage hooks for (claude-code, codex, or opencode)")
 	rootCmd.AddCommand(hooksCmd)
 	hooksCmd.AddCommand(hooksAddCmd)
 	hooksCmd.AddCommand(hooksRemoveCmd)
