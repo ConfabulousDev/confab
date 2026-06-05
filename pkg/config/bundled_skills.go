@@ -11,7 +11,17 @@ const (
 	SkillProviderCodex  = "codex"
 )
 
-var bundledSkillNames = []string{tilSkillName, retroSkillName}
+var bundledSkillNames = []string{retroSkillName}
+
+// retiredSkillNames are skills confab shipped previously but no longer bundles.
+// They are removed during ReconcileBundledSkills so a stale SKILL.md left by an
+// older confab version stops appearing after upgrade.
+//
+// TODO(2026-12-01): Remove retiredSkillNames and the prune loop in
+// ReconcileBundledSkills. By then users will have upgraded past the TIL-bundling
+// version, so the one-time cleanup is no longer needed — and keeping it risks
+// deleting a user's own custom skill that happens to be named "til".
+var retiredSkillNames = []string{"til"}
 
 // BundledSkillNames returns the shipped skill names in install order.
 func BundledSkillNames() []string {
@@ -25,11 +35,6 @@ func SkillPath(stateDir, name string) string {
 
 func bundledSkillTemplate(providerName, name string) (string, error) {
 	switch name {
-	case tilSkillName:
-		if providerName == SkillProviderCodex {
-			return codexTilSkillTemplate, nil
-		}
-		return tilSkillTemplate, nil
 	case retroSkillName:
 		if providerName == SkillProviderCodex {
 			return codexRetroSkillTemplate, nil
@@ -40,10 +45,17 @@ func bundledSkillTemplate(providerName, name string) (string, error) {
 	}
 }
 
-// InstallBundledSkills installs every shipped skill into stateDir.
-func InstallBundledSkills(stateDir, providerName string) error {
+// ReconcileBundledSkills installs every shipped skill into stateDir and removes
+// any retired skills left over from previous confab versions. It is idempotent:
+// pruning a retired skill that is already absent is a no-op.
+func ReconcileBundledSkills(stateDir, providerName string) error {
 	for _, name := range bundledSkillNames {
 		if err := InstallBundledSkill(stateDir, providerName, name); err != nil {
+			return err
+		}
+	}
+	for _, name := range retiredSkillNames {
+		if err := UninstallBundledSkill(stateDir, name); err != nil {
 			return err
 		}
 	}

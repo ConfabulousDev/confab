@@ -96,7 +96,6 @@ Daemon shutdown stays parent-PID driven (see Codex provider differences above fo
 ## Skills
 
 Confab installs bundled skills for every configured provider: Claude Code uses `~/.claude/skills/`, and Codex uses `~/.codex/skills/`.
-- `/til`: Capture TILs (Today I Learned) during sessions — user types `/til "what I learned"`, the harness generates a summary from conversation context, and `confab til` posts it to the backend with the transcript position (message UUID when available). Claude uses `CLAUDE_SESSION_ID`; Codex uses `CODEX_THREAD_ID` and normalizes subagent threads to the root.
 - `/retro`: Review and discuss session transcripts — user types `/retro <session-id> [question]`, the harness fetches the condensed transcript via `confab retro`, optionally reads local raw JSONL for richer data, and engages in discussion about the session.
 
 Skills are managed separately from hooks: `confab skills add/remove` (vs `confab hooks add/remove`).

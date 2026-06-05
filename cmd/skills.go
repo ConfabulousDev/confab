@@ -24,7 +24,6 @@ var skillsAddCmd = &cobra.Command{
 	Long: `Installs bundled confab skills for detected providers by default.
 
 Installs:
-- /til skill for capturing TILs (Today I Learned) during sessions
 - /retro skill for reviewing and discussing session transcripts`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger.Info("Running skills add command")
@@ -52,7 +51,6 @@ Installs:
 		}
 		fmt.Println()
 		fmt.Println("Available skills:")
-		fmt.Println("  /til   — capture TILs during your session")
 		fmt.Println("  /retro — review and discuss session transcripts")
 
 		return nil

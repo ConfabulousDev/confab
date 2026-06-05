@@ -56,7 +56,7 @@ Open rollout TODOs:
 
 - [ ] Transcript normalization: add backend and frontend normalization keyed by provider before enabling analytics/Smart Recap for Codex.
 - [x] Codex subagents: discover descendant rollouts from Codex SQLite state and upload them as sidechain files under the root Confab session.
-- [x] Skills: bundled `/til` and `/retro` install into both Claude Code and Codex provider skill dirs. Claude `/til` uses `CLAUDE_SESSION_ID`; Codex `/til` uses `CODEX_THREAD_ID`.
+- [x] Skills: bundled `/retro` installs into both Claude Code and Codex provider skill dirs.
 - [ ] Post-rollout backend cleanup in `../confab-web`: backfill legacy `sessions.session_type='Claude Code'` to `claude-code`, then remove temporary dual-value lookup/normalization code.
 
 ## Decisions
@@ -65,7 +65,7 @@ Open rollout TODOs:
 - Hook payload formats are provider-specific. Do not introduce a generic normalized hook input until Codex requirements are confirmed.
 - `ClaudeSettings` remains Claude-specific because it wraps `~/.claude/settings.json`.
 - Parent PID monitoring is provider-owned. Codex uses it for shutdown because `Stop` fires too often for daemon lifecycle.
-- `/til` and `/retro` install for both Claude Code and Codex.
+- `/retro` installs for both Claude Code and Codex.
 - Public docs advertise Codex support.
 - Codex support starts CLI-first but includes the full local lifecycle: discovery, `list`, `save`, daemon sync, and hook installation.
 - Codex root session backend upload is enabled after backend provider support in CF-347. Codex sync init sends top-level `provider="codex"`.

@@ -27,7 +27,7 @@ The package defines a `Provider` interface and a `HookInput` interface (Phase 1 
 - Paths: `StateDir`, `SettingsPath`, `ProjectsDir`, transcript path validation against `CONFAB_CLAUDE_DIR`.
 - Discovery: `ScanSessions`, `FindSessionByID`, `ExtractMetadata`, `DefaultCWD` (the four `Provider` interface methods); plus `ExtractAgentIDsFromMessage` for classic sidechain agent file discovery and `DiscoverWorkflowFiles` for `Workflow`-tool subagent transcripts + run journals (directory-scanned, capability-gated — see `claude_workflows.go` and CF-533).
 - Hooks: `ReadHookInput`, `ReadSessionHookInput`, `InstallHooks`/`UninstallHooks`/`IsHooksInstalled` (delegate to `pkg/hookconfig`, which edits `~/.claude/settings.json`).
-- Skills: `InstallSkills` installs `/til` and `/retro` under `~/.claude/skills/`; `UninstallSkills` removes bundled skills; `IsSkillInstalled` reports per-skill state (delegates to `pkg/config`).
+- Skills: `InstallSkills` installs `/retro` under `~/.claude/skills/` (and prunes retired skills); `UninstallSkills` removes bundled skills; `IsSkillInstalled` reports per-skill state (delegates to `pkg/config`).
 - Hook response: `WriteHookResponse` writes a `types.ClaudeHookResponse`.
 - Parent detection: parent PID monitoring helpers, Claude-specific.
 
@@ -37,7 +37,7 @@ The package defines a `Provider` interface and a `HookInput` interface (Phase 1 
 - Additional rollout helpers: `ScanCodexSessions` (rich `CodexSessionInfo` form), `ReadSessionInfo`, `SessionIDFromRolloutPath`, `ExtractFirstUserMessageFromLines`, internal `walkRollouts` helper.
 - Filtering: `CodexSessionInfo.IsUserSession()` excludes subagents/memory rollouts by `thread_source` and `agent_*` metadata.
 - Hooks: `ReadHookInput`, `ReadSessionHookInput`, `InstallHooks`/`UninstallHooks`/`IsHooksInstalled` (delegate to `pkg/hookconfig`, which edits `~/.codex/config.toml`). Installs `SessionStart`, `PreToolUse`, and `PostToolUse`; shutdown remains parent-PID driven.
-- Skills: `InstallSkills` installs `/til` and `/retro` under `~/.codex/skills/`; `UninstallSkills` removes bundled skills; `IsSkillInstalled` reports per-skill state (delegates to `pkg/config`).
+- Skills: `InstallSkills` installs `/retro` under `~/.codex/skills/` (and prunes retired skills); `UninstallSkills` removes bundled skills; `IsSkillInstalled` reports per-skill state (delegates to `pkg/config`).
 - Hook response: `WriteHookResponse` writes a `types.CodexHookResponse`.
 - Parent detection: `FindParentPID`, `IsProcess`, `MatchesProcess` (regex `(?i)\bcodex\b`) for daemon parent-liveness monitoring, mirroring `ClaudeCode`.
 - Transcript metadata: `ExtractFirstUserMessageFromLines` reads the first `event_msg.user_message` from rollout lines, trims whitespace, and truncates to `types.MaxFirstUserMessageLength` on a UTF-8 boundary.

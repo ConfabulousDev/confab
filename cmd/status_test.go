@@ -84,7 +84,7 @@ func TestStatus_BothInstalled(t *testing.T) {
 		"Backend Sync:",
 		"Provider: claude-code",
 		"CLI: ✓ on PATH",
-		"Skills: /til",
+		"Skills: /retro",
 		"Provider: codex",
 	}
 	for _, want := range wantSnippets {
@@ -122,7 +122,7 @@ func TestStatus_ClaudeOnlyCLI(t *testing.T) {
 	if !strings.Contains(output, "CLI: ✗ not on PATH") {
 		t.Fatalf("expected `CLI: ✗ not on PATH` for codex\noutput:\n%s", output)
 	}
-	if strings.Count(output, "Skills: /til") != 2 {
+	if strings.Count(output, "Skills: /retro") != 2 {
 		t.Fatalf("expected skills row for both providers\noutput:\n%s", output)
 	}
 }

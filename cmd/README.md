@@ -27,7 +27,6 @@ CLI command layer built on [Cobra](https://github.com/spf13/cobra). Each file de
 | `save.go` | Manual session upload by ID (dispatches through `provider.Provider.FindSessionByID` + `DefaultCWD`) |
 | `install.go` | Copy binary to `~/.local/bin/` |
 | `update.go` | Check/install updates from GitHub Releases |
-| `til.go` | `confab til` — save a TIL to the backend (invoked by /til skill). Accepts `--provider` to pick the daemon-state namespace and normalizes Codex subagent thread IDs to the root thread before loading state. |
 | `retro.go` | `confab retro` — fetch session transcript for retrospective (invoked by /retro skill) |
 | `session.go` | Parent command for session subcommands (`confab session <cmd>`) |
 | `session_get_summary.go` | `confab session get-summary` — fetch condensed session transcript from backend |
@@ -62,7 +61,6 @@ confab
 │   ├── get-summary
 │   ├── download
 │   └── list-files
-├── til
 ├── retro
 ├── login / logout
 ├── setup
@@ -128,7 +126,7 @@ This is a cross-cutting change spanning multiple packages:
 
 **SessionStart keeps bundled skills aligned with hooks.** Claude runs announcements, which install missing skills and return a visible system message. Codex silently ensures bundled skills under `~/.codex/skills/` so users who installed hooks get the same Confab skills without extra setup.
 
-**`list`, `save`, `til` route discovery through the `Provider` interface (CF-398).** Adding a new provider requires only `pkg/provider/<name>.go` + `<name>_discovery.go` — no changes in `cmd/`. The remaining `provider.NameClaudeCode` / `provider.NameCodex` references in `cmd/` are flag defaults (entry-point handling) and a couple of user-facing copy gates in `cmd/list.go` for the Codex-specific "save" hint.
+**`list`, `save` route discovery through the `Provider` interface (CF-398).** Adding a new provider requires only `pkg/provider/<name>.go` + `<name>_discovery.go` — no changes in `cmd/`. The remaining `provider.NameClaudeCode` / `provider.NameCodex` references in `cmd/` are flag defaults (entry-point handling) and a couple of user-facing copy gates in `cmd/list.go` for the Codex-specific "save" hint.
 
 **Pre/PostToolUse hook handlers route by `--provider`.** `cmd/hook_pretooluse.go` and `cmd/hook_posttooluse.go` resolve the provider via `resolveCommitLinkingProvider()` (normalizes the flag and gates on `Provider.SupportsCommitLinking()`), then read hook input through `cmd/hook_tooluse_input.go`'s `readToolUseHookInput()` adapter that maps either `ClaudeHookInput` or `CodexHookInput` into a shared `toolUseHookInput` shape. `getConfabSessionID(p, sessionID)` tries the firing UUID's daemon state first and walks up via `p.WalkUpToRoot` on miss — identity for Claude, SQLite walk for Codex (so subagent-initiated commits/PRs link to the root session). `hook_userpromptsubmit.go` remains hard-bound to `provider.ClaudeCode{}`: Codex's daemon liveness is parent-PID monitored, so the teleport case UserPromptSubmit addresses doesn't apply.
 

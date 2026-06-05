@@ -11,8 +11,7 @@ Hook install/uninstall logic lives in `pkg/hookconfig`. This package owns the ge
 | `config.go` | `ClaudeSettings` struct + `AtomicUpdateSettings` (read/modify/write `~/.claude/settings.json` with mtime-based optimistic locking). Generic accessor helpers: `GetHooksMap`, `GetEventHooks`, `SetEventHooks`. Tool-name constants used by `pkg/hookconfig`. |
 | `upload.go` | Confab config: read/write `~/.confab/config.json`, validation, default redaction patterns, `ParseLogLevel` |
 | `paths.go` | Claude state-dir resolution (`~/.claude`) with `CONFAB_CLAUDE_DIR` override. `~/.confab` paths use `pkg/confabpath`. |
-| `bundled_skills.go` | Shared bundled-skill registry and install/uninstall/check helpers for provider-local `skills/<name>/SKILL.md` layouts |
-| `skill_til.go` | `/til` templates for Claude Code and Codex plus legacy Claude helper wrappers |
+| `bundled_skills.go` | Shared bundled-skill registry plus install/uninstall/check and `ReconcileBundledSkills` (install current + prune retired) helpers for provider-local `skills/<name>/SKILL.md` layouts |
 | `skill_retro.go` | `/retro` templates for Claude Code and Codex plus legacy Claude helper wrappers |
 
 ## Two Config Systems
@@ -64,7 +63,7 @@ Hook install/uninstall lives in `pkg/hookconfig` — see that package's README. 
 
 **Mtime-based optimistic locking instead of flock.** `AtomicUpdateSettings()` checks that the file's mtime hasn't changed between read and write. If it has, it retries with backoff. This is simpler than file locking, works cross-platform, and is sufficient for the infrequent writes that hooks installation involves.
 
-**Bundled skills use provider-rendered templates.** The shipped skills share a registry, but content can differ where the harnesses expose different session IDs or local transcript layouts. Claude `/til` uses `CLAUDE_SESSION_ID`; Codex `/til` uses `CODEX_THREAD_ID`.
+**Bundled skills use provider-rendered templates.** The shipped skills share a registry, but content can differ where the harnesses expose different session IDs or local transcript layouts. `ReconcileBundledSkills` installs the current bundle and prunes any retired skills (e.g. the removed `/til`) left by older confab versions.
 
 
 ## Testing

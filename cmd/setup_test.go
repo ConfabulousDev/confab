@@ -457,7 +457,7 @@ func TestRunSetupCodexProviderOutput(t *testing.T) {
 	if !strings.Contains(content, "hook session-start --provider codex") {
 		t.Fatal("expected Codex session-start hook command")
 	}
-	for _, skill := range []string{"til", "retro"} {
+	for _, skill := range []string{"retro"} {
 		path := filepath.Join(codexDir, "skills", skill, "SKILL.md")
 		if _, err := os.Stat(path); err != nil {
 			t.Fatalf("expected Codex %s skill after setup: %v", skill, err)
@@ -1008,7 +1008,7 @@ func TestRunSetup_AutoDetect_Both(t *testing.T) {
 		filepath.Join(tmpDir, ".claude"),
 		codexDir,
 	} {
-		for _, skill := range []string{"til", "retro"} {
+		for _, skill := range []string{"retro"} {
 			path := filepath.Join(base, "skills", skill, "SKILL.md")
 			if _, err := os.Stat(path); err != nil {
 				t.Fatalf("expected %s skill after auto-detect setup: %v", path, err)
@@ -1096,7 +1096,7 @@ func TestRunSetup_AutoDetect_CodexOnly(t *testing.T) {
 	if _, err := os.Stat(codexCfg); err != nil {
 		t.Fatalf("expected Codex config.toml: %v", err)
 	}
-	for _, skill := range []string{"til", "retro"} {
+	for _, skill := range []string{"retro"} {
 		path := filepath.Join(codexDir, "skills", skill, "SKILL.md")
 		if _, err := os.Stat(path); err != nil {
 			t.Fatalf("expected Codex %s skill after Codex-only setup: %v", skill, err)
