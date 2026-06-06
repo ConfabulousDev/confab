@@ -18,6 +18,18 @@ jobs:
         with:
           go-version: "1.26.3"
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      # The OpenCode plugin tests (TestOpencodePluginVitest / ...TypeScript)
+      # run the locally installed vitest/tsc and never fetch on the fly, so
+      # the plugin's dev dependencies must be present before `go test`.
+      - name: Install OpenCode plugin deps
+        run: npm ci
+        working-directory: pkg/provider/plugins
+
       - name: Test
         run: go test ./...
 

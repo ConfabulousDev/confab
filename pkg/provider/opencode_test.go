@@ -329,10 +329,10 @@ func TestOpencodePluginSourceMatchesFile(t *testing.T) {
 // TestOpencodeHookInputJSON ensures the JSON round-trips correctly.
 func TestOpencodeHookInputJSON(t *testing.T) {
 	orig := types.OpenCodeHookInput{
-		SessionID: "test-session",
+		SessionID:         "test-session",
 		OpenCodeServerURL: "http://localhost:4096",
-		CWD:       "/work",
-		ParentPID: 1234,
+		CWD:               "/work",
+		ParentPID:         1234,
 	}
 	data, err := json.Marshal(orig)
 	if err != nil {
@@ -357,53 +357,41 @@ func TestOpencodeHookInputJSON(t *testing.T) {
 }
 
 func TestOpencodePluginVitest(t *testing.T) {
-	npxPath, err := exec.LookPath("npx")
+	npmPath, err := exec.LookPath("npm")
 	if err != nil {
-		t.Fatal("npx not found on PATH; install Node.js (https://nodejs.org) to run TypeScript plugin tests")
+		t.Fatal("npm not found on PATH; install Node.js (https://nodejs.org) to run TypeScript plugin tests")
 	}
 
 	pluginDir := opencodePluginDir(t)
 
-	cmd := exec.Command(npxPath, "--yes", "vitest", "run")
+	// Run the locally installed vitest via the package.json "test" script.
+	// We never fetch packages on the fly — dependencies must be installed
+	// beforehand (`npm ci` in pluginDir; CI does this). The test fails loudly
+	// if they are missing rather than reaching out to the network.
+	cmd := exec.Command(npmPath, "test")
 	cmd.Dir = pluginDir
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		t.Fatalf("vitest failed:\n%s", string(out))
+		t.Fatalf("vitest failed (run `npm ci` in %s if dependencies are missing):\n%s", pluginDir, string(out))
 	}
 }
 
 func TestOpencodePluginTypeScript(t *testing.T) {
-	npxPath, err := exec.LookPath("npx")
+	npmPath, err := exec.LookPath("npm")
 	if err != nil {
-		t.Fatal("npx not found on PATH; install Node.js (https://nodejs.org) to validate the TypeScript plugin")
+		t.Fatal("npm not found on PATH; install Node.js (https://nodejs.org) to validate the TypeScript plugin")
 	}
 
 	pluginDir := opencodePluginDir(t)
-	tmpDir := t.TempDir()
 
-	for _, rel := range []string{
-		"tsconfig.json",
-		"confab-sync.ts",
-		"types/opencode-plugin.d.ts",
-	} {
-		src := filepath.Join(pluginDir, rel)
-		dst := filepath.Join(tmpDir, rel)
-		if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
-			t.Fatalf("mkdir %s: %v", filepath.Dir(dst), err)
-		}
-		data, err := os.ReadFile(src)
-		if err != nil {
-			t.Fatalf("read %s: %v", src, err)
-		}
-		if err := os.WriteFile(dst, data, 0644); err != nil {
-			t.Fatalf("write %s: %v", dst, err)
-		}
-	}
-
-	cmd := exec.Command(npxPath, "--yes", "-p", "typescript", "tsc", "--noEmit")
-	cmd.Dir = tmpDir
+	// Type-check with the locally installed typescript via the package.json
+	// "typecheck" script (tsc --noEmit). tsconfig.json selects the files to
+	// check. As with the vitest test, dependencies must be pre-installed; we
+	// never install on the fly.
+	cmd := exec.Command(npmPath, "run", "typecheck")
+	cmd.Dir = pluginDir
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		t.Fatalf("TypeScript type check failed:\n%s", string(out))
+		t.Fatalf("TypeScript type check failed (run `npm ci` in %s if dependencies are missing):\n%s", pluginDir, string(out))
 	}
 }

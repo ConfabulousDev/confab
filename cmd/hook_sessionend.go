@@ -28,9 +28,9 @@ Stop-driven shutdown would prematurely kill the root sync daemon. Codex
 daemons shut down via parent-process liveness instead (see
 Codex.FindParentPID).
 
-For OpenCode, this command is called by the TS plugin when it receives a
-session.idle SSE event. The plugin pipes an OpenCodeHookInput JSON payload
-with session_id and opencode_server_url.`,
+For OpenCode, this command is called by the TS plugin's dispose hook (which
+runs when OpenCode unloads the plugin on exit). The plugin pipes an
+OpenCodeHookInput JSON payload with session_id and server_url.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		providerName, err := provider.NormalizeName(hookProviderName)
 		if err != nil {

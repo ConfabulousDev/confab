@@ -548,9 +548,9 @@ func TestMaybeSpawnDaemonOpencode(t *testing.T) {
 		sessionID := "oc-session-1234-1234-1234-123456789abc"
 
 		spawned, err := maybeSpawnDaemon(provider.Opencode{}, &daemonLaunchInput{
-			ExternalID: sessionID,
+			ExternalID:        sessionID,
 			OpenCodeServerURL: "http://localhost:4096",
-			CWD:        "/work/opencode",
+			CWD:               "/work/opencode",
 		})
 		if err != nil {
 			t.Fatalf("maybeSpawnDaemon (Opencode) failed: %v", err)
@@ -588,9 +588,9 @@ func TestMaybeSpawnDaemonOpencode(t *testing.T) {
 		}
 
 		spawned, err := maybeSpawnDaemon(provider.Opencode{}, &daemonLaunchInput{
-			ExternalID: sessionID,
+			ExternalID:        sessionID,
 			OpenCodeServerURL: "http://localhost:4096",
-			CWD:        "/work/opencode",
+			CWD:               "/work/opencode",
 		})
 		if err != nil {
 			t.Fatalf("maybeSpawnDaemon (Opencode) failed: %v", err)
@@ -637,9 +637,9 @@ func TestMaybeSpawnDaemonOpencode(t *testing.T) {
 		}
 
 		spawned, err := maybeSpawnDaemon(provider.Opencode{}, &daemonLaunchInput{
-			ExternalID: sessionID,
+			ExternalID:        sessionID,
 			OpenCodeServerURL: "http://localhost:4096",
-			CWD:        "/work/opencode",
+			CWD:               "/work/opencode",
 		})
 		if err != nil {
 			t.Fatalf("maybeSpawnDaemon (Opencode) failed: %v", err)

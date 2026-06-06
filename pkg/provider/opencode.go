@@ -210,7 +210,15 @@ export const ConfabSync: Plugin = async ({ $, serverUrl }) => {
       server_url: serverUrl.href,
       cwd,
     })
-    await $§BT§echo ${input} | confab hook session-start --provider opencode§BT§.quiet()
+    try {
+      await $§BT§echo ${input} | confab hook session-start --provider opencode§BT§.quiet()
+    } catch (err) {
+      // Spawn failed (e.g. confab not on PATH). Drop the session from the
+      // running set so dispose doesn't try to stop a daemon that never
+      // started, and a later event can retry.
+      running.delete(sessionID)
+      console.error(§BT§[confab] failed to start sync daemon for ${sessionID}:§BT§, err)
+    }
   }
 
   async function stop(sessionID: string) {
@@ -220,7 +228,12 @@ export const ConfabSync: Plugin = async ({ $, serverUrl }) => {
       session_id: sessionID,
       server_url: serverUrl.href,
     })
-    await $§BT§echo ${input} | confab hook session-end --provider opencode§BT§.quiet()
+    try {
+      await $§BT§echo ${input} | confab hook session-end --provider opencode§BT§.quiet()
+    } catch (err) {
+      // Don't let one failed stop abort shutdown of the remaining sessions.
+      console.error(§BT§[confab] failed to stop sync daemon for ${sessionID}:§BT§, err)
+    }
   }
 
   return {

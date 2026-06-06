@@ -389,9 +389,9 @@ func runOpencodeSessionStart(t *testing.T, in []byte) error {
 func opencodeHookInputJSON(t *testing.T, sessionID, serverURL string) []byte {
 	t.Helper()
 	b, err := json.Marshal(types.OpenCodeHookInput{
-		SessionID: sessionID,
+		SessionID:         sessionID,
 		OpenCodeServerURL: serverURL,
-		CWD:       "/work/opencode",
+		CWD:               "/work/opencode",
 	})
 	if err != nil {
 		t.Fatalf("marshal hook input: %v", err)
