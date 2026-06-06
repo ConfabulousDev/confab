@@ -2,7 +2,7 @@
 
 Provider-specific local behavior for Confab integrations. Current providers: Claude Code, Codex, and OpenCode. Each concrete provider owns paths, hook parsing, session discovery, and transcript metadata extraction. OpenCode is the exception to on-disk "discovery": it has no transcript file, so its live data is read from a local SQLite DB and materialized to a JSONL file (see the `Opencode` surface below).
 
-The package defines a `Provider` interface and a `HookInput` interface (Phase 1 + 2 of the abstraction work — see CF-394). Both concrete provider types satisfy `Provider`; hook-input adapters in `hookinput.go` satisfy `HookInput`. As of CF-397 (Phase 3), `pkg/sync/engine.go` dispatches sync-loop behavior (root metadata, descendant discovery, chunk annotation) through the interface; as of CF-398 (Phase 4), session discovery (`ScanSessions`, `FindSessionByID`, `ExtractMetadata`, `DefaultCWD`) is also routed through the interface. `cmd/` has no discovery-related provider-name branches.
+The package defines a `Provider` interface and a `HookInput` interface (Phase 1 + 2 of the abstraction work — see CF-394). All three concrete provider types (`ClaudeCode`, `Codex`, `Opencode`) satisfy `Provider`; hook-input adapters in `hookinput.go` satisfy `HookInput`. As of CF-397 (Phase 3), `pkg/sync/engine.go` dispatches sync-loop behavior (root metadata, descendant discovery, chunk annotation) through the interface; as of CF-398 (Phase 4), session discovery (`ScanSessions`, `FindSessionByID`, `ExtractMetadata`, `DefaultCWD`) is also routed through the interface. `cmd/` has no discovery-related provider-name branches.
 
 ## Files
 
@@ -12,7 +12,7 @@ The package defines a `Provider` interface and a `HookInput` interface (Phase 1 
 | `detect.go` | `DetectInstalled() []string` returns the canonical names of providers whose CLI binary is on `PATH`, in fixed registry order. Uses the exported package-level `LookPath` var (defaults to `exec.LookPath`) so tests can stub it. Backs `confab setup` auto-detect (CF-422) and `confab status` per-provider CLI presence. |
 | `session.go` | `SessionInfo` and `SessionMetadata` — cross-provider shapes returned by the discovery interface methods. Also defines `maxLinesForExtraction` and the shared `readHeadLines` helper. |
 | `codex_rollout.go` | `CodexRolloutMetadata` — wire-format metadata transmitted on the first chunk of every Codex rollout. Lives here (not pkg/sync) so the Codex implementation can construct one without a cycle; pkg/sync aliases it. |
-| `hookinput.go` | `claudeHookInputAdapter` and `codexHookInputAdapter` — wrap the typed structs in `pkg/types` so they satisfy `HookInput`. Required because the structs' existing exported `SessionID` field collides with a `SessionID()` method |
+| `hookinput.go` | `claudeHookInputAdapter`, `codexHookInputAdapter`, and `opencodeHookInputAdapter` — wrap the typed structs in `pkg/types` so they satisfy `HookInput`. Required because the structs' existing exported `SessionID` field collides with a `SessionID()` method. The OpenCode adapter returns empty `TranscriptPath()`/`HookEventName()` (OpenCode has neither). |
 | `claude.go` | `ClaudeCode` — paths, transcript validation, parent-process detection, and the `Provider` methods. Sync-loop methods are no-ops except `AnnotateChunk`, which delegates to `ExtractMetadata` to extract summary + first user message + summary links from transcript chunks. Hook install/uninstall delegates to `pkg/hookconfig`; skill install/uninstall/status delegates to `pkg/config` |
 | `claude_discovery.go` | Claude session scanning (`ScanSessions`, `FindSessionByID`) and metadata extraction (`ExtractMetadata`, `DefaultCWD`). Walks `~/.claude/projects/`, parses Claude transcript JSONL for summaries + first user messages, sanitizes HTML, truncates to `maxMetadataFieldSize/2` bytes. |
 | `claude_agentids.go` | `ClaudeCode.ExtractAgentIDsFromMessage` and `IsValidAgentID` — Claude-only transcript-schema parsing for sidechain agent file discovery. Called from `pkg/sync/tracker.go` during chunk reads. |
@@ -59,8 +59,12 @@ Codex fires `Stop` at every agent/turn boundary, including root rollout stops wh
 
 ### `Opencode`
 
-OpenCode has no on-disk transcript file and no native hook system. A tiny TS plugin (`plugins/confab-sync.ts`, installed to `~/.config/opencode/plugins/`) bridges lifecycle: on `session.created` it pipes `{session_id, cwd, parent_id?}` to `confab hook session-start --provider opencode`; on `dispose` it stops the daemon. All data sync is the daemon's job — it reads OpenCode's local SQLite DB via `OpenCodeDBReader` (see `opencode_db.go`).
+OpenCode has no on-disk transcript file and no native hook system. A tiny TS plugin (`plugins/confab-sync.ts`, installed to `~/.config/opencode/plugins/`) bridges lifecycle: on `session.created` it pipes `{session_id, cwd, parent_id?}` to `confab hook session-start --provider opencode`; on `dispose` it fires `confab hook session-end --provider opencode` for each session it started. All data sync is the daemon's job — it reads OpenCode's local SQLite DB via `OpenCodeDBReader` (see `opencode_db.go`).
 
+- Paths: `StateDir` is `~/.config/opencode` (override `CONFAB_OPENCODE_CONFIG_DIR`); `PluginDir` is `<state>/plugins`. The SQLite DB path is resolved separately by `OpenCodeDBPath` (`CONFAB_OPENCODE_DB` → `$XDG_DATA_HOME/opencode/opencode.db` → `~/.local/share/opencode/opencode.db`).
+- Hooks: `InstallHooks`/`UninstallHooks`/`IsHooksInstalled` write/remove/stat the plugin file (no `pkg/hookconfig`). `WriteHookResponse` is a no-op — the plugin does not read a hook response from stdout.
+- Skills: `InstallSkills` installs `/retro` under `~/.config/opencode/skills/` via `config.ReconcileBundledSkills` (generic template); `UninstallSkills` / `IsSkillInstalled` mirror Claude/Codex.
+- Shutdown: signalled by the plugin's `dispose` → `session-end`, with parent-PID liveness as a backstop (`FindParentPID` matches `\bopencode\b`). `SupportsCommitLinking` is false — no GitHub commit/PR linking.
 - Discovery methods (`ScanSessions`, `FindSessionByID`) return errors — OpenCode sessions are captured live by the daemon's collector, and offline manual mode is deferred (would need its own SQLite session enumeration). `ExtractMetadata` is minimal; `DefaultCWD` returns `filepath.Dir(transcriptPath)`.
 - `ShouldSpawnForInput` suppresses non-root sessions: it type-asserts an optional `SessionParentID() string` accessor on the input (satisfied by `cmd.launchAsHookInput`, fed from the plugin's `parent_id`) and returns false when a parent is present. Kept off the shared `HookInput` interface so Claude/Codex inputs need not implement it.
 - The collector (`opencode_db.go` + `opencode_collector.go` + `opencode_session.go`) is driven by the daemon, not the `Provider` interface — see `pkg/daemon` and the CLAUDE.md "OpenCode provider differences" section.
@@ -71,17 +75,17 @@ OpenCode has no on-disk transcript file and no native hook system. A tiny TS plu
 
 Methods every provider must implement:
 
-- `Name() string` — canonical name (one of `NameClaudeCode`, `NameCodex`).
-- `CLIBinaryName() string` — OS-level binary name used by `DetectInstalled` / `confab status` (`"claude"` for Claude Code, `"codex"` for Codex). Distinct from `Name()` because the canonical name (`claude-code`) is not the binary name.
+- `Name() string` — canonical name (one of `NameClaudeCode`, `NameCodex`, `NameOpencode`).
+- `CLIBinaryName() string` — OS-level binary name used by `DetectInstalled` / `confab status` (`"claude"` for Claude Code, `"codex"` for Codex, `"opencode"` for OpenCode). Distinct from `Name()` because the canonical name (`claude-code`) is not the binary name.
 - `StateDir() (string, error)` — local state directory.
 - `FindParentPID() int`, `IsProcess(pid int) bool` — parent-process detection.
 - `ParseSessionHook(io.Reader) (HookInput, error)` — read a SessionStart hook payload and return the provider-agnostic view.
-- `InstallHooks() (string, error)` / `UninstallHooks() (string, error)` / `IsHooksInstalled() (bool, error)` — install/check the full hook set the provider requires. Claude installs 4 bundles (sync, PreToolUse, PostToolUse, UserPromptSubmit). Codex installs 3 events (SessionStart, PreToolUse, PostToolUse). Both methods delegate to `pkg/hookconfig`.
-- `SupportsCommitLinking() bool` — true if the provider installs the PreToolUse + PostToolUse events that drive bidirectional GitHub linking. Used by `cmd/hook_pretooluse.go` and `cmd/hook_posttooluse.go` to silently no-op for any future provider that doesn't yet support the flow. Both Claude Code and Codex return true.
+- `InstallHooks() (string, error)` / `UninstallHooks() (string, error)` / `IsHooksInstalled() (bool, error)` — install/check the full hook set the provider requires. Claude installs 4 bundles (sync, PreToolUse, PostToolUse, UserPromptSubmit) and Codex installs 3 events (SessionStart, PreToolUse, PostToolUse), both delegating to `pkg/hookconfig`. OpenCode has no settings/config hooks: it writes a TS plugin to `~/.config/opencode/plugins/` directly (no `pkg/hookconfig` involvement).
+- `SupportsCommitLinking() bool` — true if the provider installs the PreToolUse + PostToolUse events that drive bidirectional GitHub linking. Used by `cmd/hook_pretooluse.go` and `cmd/hook_posttooluse.go` to silently no-op for any provider that doesn't support the flow. Claude Code and Codex return true; OpenCode returns false.
 - `InstallSkills() error` / `UninstallSkills() error` / `IsSkillInstalled(name string) bool` — manage bundled Confab skills in the provider's local skill layout.
 - `WalkUpToRoot(sessionID string) (rootID, rootPath string, error)` — Codex walks `thread_spawn_edges`; Claude is identity with empty `rootPath`.
-- `ShouldSpawnForInput(in HookInput) bool` — Codex returns false for subagent rollouts and for unreadable rollout files; Claude always returns true. `os.IsNotExist` is treated as a race-tolerance "spawn anyway" case.
-- `WriteHookResponse(w, suppressOutput, systemMessage) error` — write the provider-specific hook response JSON (`ClaudeHookResponse` vs `CodexHookResponse`).
+- `ShouldSpawnForInput(in HookInput) bool` — Codex returns false for subagent rollouts and for unreadable rollout files; OpenCode returns false for any session with a parent (subagents); Claude always returns true. `os.IsNotExist` is treated as a race-tolerance "spawn anyway" case.
+- `WriteHookResponse(w, suppressOutput, systemMessage) error` — write the provider-specific hook response JSON (`ClaudeHookResponse` vs `CodexHookResponse`). OpenCode is a no-op — its plugin reads no response from stdout.
 - `InitTranscript(target TranscriptRegistrar, transcriptPath, externalID string) error` — called from `sync.Engine.Init` after the tracker is initialized. Codex attaches root rollout metadata via `target.SetCodexRollout`; Claude is a no-op. Implementations never surface read failures as errors — they log warn and fall through.
 - `DiscoverDescendants(reg DescendantRegistrar, externalID string) error` — called once per `SyncAll` cycle, before the BFS loop. Codex walks the SQLite subtree and calls `reg.RegisterCodexRollout` per verified descendant. Claude is a no-op (its agents are discovered transitively from transcript content inside `tracker.DiscoverNewFiles`). Must be idempotent across calls.
 - `DiscoverWorkflowFiles(reg WorkflowRegistrar, allow func(fileType string) bool) (int, error)` — called once per `SyncAll` cycle (CF-533). Claude scans `subagents/workflows/<runId>/` and registers agent transcripts + run journals via `reg.RegisterWorkflowFile` under path-encoded names, gating each file on `allow(fileType)` (the engine's per-flag capability predicate). The provider invokes `allow` only after finding a candidate file, so non-workflow sessions never trigger a backend probe. Codex is a no-op. Returns the count of newly-registered files; idempotent across calls.
@@ -97,7 +101,7 @@ Methods every provider must implement:
 
 ## Invariants
 
-- `NameClaudeCode` and `NameCodex` are the canonical wire values. Backend session uniqueness is `(user_id, provider, external_id)`.
+- `NameClaudeCode`, `NameCodex`, and `NameOpencode` are the canonical wire values. Backend session uniqueness is `(user_id, provider, external_id)`.
 - `NormalizeName(name)` returns `claude-code` for empty input (legacy default) and rejects unknown providers.
 - `ClaudeStateDirEnv` is duplicated between `pkg/config/paths.go` and `pkg/provider/claude.go` to break a circular import. The two MUST stay in sync; reviewers should catch any drift.
 - `ClaudeCode` preserves existing Claude Code behavior, including `CONFAB_CLAUDE_DIR`.
@@ -111,8 +115,8 @@ Methods every provider must implement:
 - Parent PID detection is part of the `Provider` interface (`FindParentPID`, `IsProcess`); the bodies remain provider-specific (different process-name patterns) and share the package-level `getProcCmdline` / `getParentPID` helpers in `claude.go`.
 - Agent-ID extraction (`ClaudeCode.ExtractAgentIDsFromMessage`) is intentionally Claude-only. Codex tracks subagents via its SQLite thread tree and never grows agent IDs in rollout JSONL — `pkg/sync/tracker.go` calls the Claude method on every chunk regardless of provider; the method's `msgType != "user"` early-return safely no-ops on Codex data.
 - `Codex.FindSessionByID` returns the ROOT thread for any partial UUID matching a subagent. The package-private `findRolloutByID` helper resolves concrete rollout files before the walk-up step.
-- `DetectInstalled()` returns names in fixed `detectOrder` (`claude-code` first, then `codex`) regardless of `LookPath` lookup order. This determinism is load-bearing for setup output and tests.
-- `CLIBinaryName()` is the OS binary name (`"claude"`, `"codex"`) — never the canonical provider name. The two diverge for Claude Code (`claude-code` vs `claude`).
+- `DetectInstalled()` returns names in fixed `detectOrder` (`claude-code`, then `codex`, then `opencode`) regardless of `LookPath` lookup order. This determinism is load-bearing for setup output and tests.
+- `CLIBinaryName()` is the OS binary name (`"claude"`, `"codex"`, `"opencode"`) — never the canonical provider name. The two diverge for Claude Code (`claude-code` vs `claude`).
 - `Codex.InstallHooks` installs `SessionStart`, `PreToolUse`, and `PostToolUse`. Daemon shutdown is driven by parent-PID liveness, never by Codex `Stop`.
 - `Codex.InstallSkills` writes only `SKILL.md` files under `~/.codex/skills/<name>/`; optional Codex UI metadata such as `agents/openai.yaml` is not generated for Confab's bundled skills.
 - `CodexRolloutMetadata` JSON tags are wire-format pins. Existing rows in the backend's `codex_rollouts` table were written against these tags; renaming any field is a backwards-incompatible change. Adding new optional fields (with `omitempty`) is safe.

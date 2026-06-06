@@ -10,21 +10,21 @@ CLI command layer built on [Cobra](https://github.com/spf13/cobra). Each file de
 | `helpers.go` | Shared command helpers for authenticated HTTP clients and session API error translation |
 | `hook.go` | Parent command for hook handlers (`confab hook <type>`) |
 | `hook_sessionstart.go` | `session-start` hook: spawns sync daemon. Provider-agnostic — selects via `--provider` flag and routes through `provider.Provider`. |
-| `hook_sessionend.go` | `session-end` hook: stops sync daemon (Claude only; Codex shutdown is parent-PID driven and explicitly rejects this command) |
+| `hook_sessionend.go` | `session-end` hook: stops sync daemon. Claude and OpenCode handle it (OpenCode's plugin fires it on `dispose`, routed to `sessionEndOpencode`); Codex shutdown is parent-PID driven and explicitly rejects this command. |
 | `hook_pretooluse.go` | `pre-tool-use` hook: injects Confab links into git commits and PRs |
 | `hook_posttooluse.go` | `post-tool-use` hook: links GitHub artifacts to Confab sessions |
 | `hook_userpromptsubmit.go` | `user-prompt-submit` hook: ensures daemon is running |
 | `hook_tooluse_input.go` | `readToolUseHookInput()` adapter mapping `ClaudeHookInput` / `CodexHookInput` into a shared `toolUseHookInput` shape for the pre/post-tool-use handlers |
 | `hooks.go` | `confab hooks add/remove --provider <name>` — install/uninstall hooks for the selected provider via `p.InstallHooks()` |
 | `sync.go` | `confab sync start/stop/status` — daemon management |
-| `spawn.go` | Generic `maybeSpawnDaemon(p, *daemonLaunchInput)` — single dispatch for Claude and Codex daemon spawn. `daemonLaunchInput` is the canonical wire format between the hook and the freshly-spawned daemon process. |
+| `spawn.go` | Generic `maybeSpawnDaemon(p, *daemonLaunchInput)` — single dispatch for Claude, Codex, and OpenCode daemon spawn. `daemonLaunchInput` is the canonical wire format between the hook and the freshly-spawned daemon process. For OpenCode, `TranscriptPath` is empty at spawn time — the daemon's collector materializes the transcript from the local SQLite DB. |
 | `login.go` | Device code auth flow and API key login |
 | `logout.go` | Clear stored credentials |
 | `setup.go` | One-command setup: auth + hooks + bundled skills. Bare `confab setup --backend-url ...` auto-detects every provider CLI on `PATH` (via `provider.DetectInstalled`) and installs hooks/skills for each. `--provider X` overrides to single-provider mode. Best-effort across providers: per-provider failure is reported in a summary but doesn't abort the loop. |
 | `status.go` | Show backend auth + per-provider hook/skill state for every supported provider. No `--provider` flag — output always covers all providers, with orphan-hook detection (hooks installed but CLI missing) and a remediation footer. |
-| `list.go` | List local sessions (dispatches through `provider.Provider.ScanSessions`) |
+| `list.go` | List local sessions (dispatches through `provider.Provider.ScanSessions`). Unsupported for OpenCode — `Opencode.ScanSessions` returns an explicit "live-sync only" error. |
 | `list_utils.go` | Duration parsing, session filtering — fully provider-agnostic |
-| `save.go` | Manual session upload by ID (dispatches through `provider.Provider.FindSessionByID` + `DefaultCWD`) |
+| `save.go` | Manual session upload by ID (dispatches through `provider.Provider.FindSessionByID` + `DefaultCWD`). Unsupported for OpenCode — `Opencode.FindSessionByID` returns an explicit "live-sync only" error. |
 | `install.go` | Copy binary to `~/.local/bin/` |
 | `update.go` | Check/install updates from GitHub Releases |
 | `retro.go` | `confab retro` — fetch session transcript for retrospective (invoked by /retro skill) |
@@ -129,6 +129,8 @@ This is a cross-cutting change spanning multiple packages:
 **`list`, `save` route discovery through the `Provider` interface (CF-398).** Adding a new provider requires only `pkg/provider/<name>.go` + `<name>_discovery.go` — no changes in `cmd/`. The remaining `provider.NameClaudeCode` / `provider.NameCodex` references in `cmd/` are flag defaults (entry-point handling) and a couple of user-facing copy gates in `cmd/list.go` for the Codex-specific "save" hint.
 
 **Pre/PostToolUse hook handlers route by `--provider`.** `cmd/hook_pretooluse.go` and `cmd/hook_posttooluse.go` resolve the provider via `resolveCommitLinkingProvider()` (normalizes the flag and gates on `Provider.SupportsCommitLinking()`), then read hook input through `cmd/hook_tooluse_input.go`'s `readToolUseHookInput()` adapter that maps either `ClaudeHookInput` or `CodexHookInput` into a shared `toolUseHookInput` shape. `getConfabSessionID(p, sessionID)` tries the firing UUID's daemon state first and walks up via `p.WalkUpToRoot` on miss — identity for Claude, SQLite walk for Codex (so subagent-initiated commits/PRs link to the root session). `hook_userpromptsubmit.go` remains hard-bound to `provider.ClaudeCode{}`: Codex's daemon liveness is parent-PID monitored, so the teleport case UserPromptSubmit addresses doesn't apply.
+
+**OpenCode lifecycle is plugin-driven; data sync is the daemon's job.** OpenCode has no settings/config hook system, so `confab setup` installs a TS plugin into `~/.config/opencode/plugins/`. The plugin only fires `confab hook session-start` / `session-end --provider opencode` for lifecycle; it never streams transcript data. The spawned daemon's collector reads OpenCode's local SQLite DB and materializes a transcript file. Because discovery (`list`/`save`) needs an on-disk transcript, those commands are unsupported for OpenCode (the provider returns explicit errors); OpenCode is live-sync only.
 
 **Backend session commands share auth/client setup.** `helpers.go` owns the repeated `EnsureAuthenticated` + `pkg/http.NewClient` path and the common "session not found" translation for session fetch/list/download commands. Keep endpoint-specific behavior in the command files, not in the helper.
 

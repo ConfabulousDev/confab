@@ -16,7 +16,7 @@ Internal packages for the Confab CLI. Each package has its own README with exten
 | [http](http/) | HTTP client with compression + retries | Adding error types, changing retry logic |
 | [logger](logger/) | Singleton file logger with rotation | Changing log format, adding levels |
 | [loginit](loginit/) | Startup-time wiring of config → logger level (avoids config↔logger import cycle) | Adding new config-driven logger options |
-| [provider](provider/) | `Provider` interface + Claude Code / Codex implementations: paths, hooks, parent-PID, root walk, hook payloads, session discovery (scan/find), metadata extraction, agent-ID parsing | Adding a new provider or changing tool-specific behavior |
+| [provider](provider/) | `Provider` interface + Claude Code / Codex / OpenCode implementations: paths, hooks, parent-PID, root walk, hook payloads, session discovery (scan/find), metadata extraction, agent-ID parsing, OpenCode SQLite collector | Adding a new provider or changing tool-specific behavior |
 | [redactor](redactor/) | JSON-aware sensitive data redaction | Adding pattern types (patterns themselves live in config) |
 | [sync](sync/) | Sync engine, API client, file tracking | Adding API endpoints, changing chunking |
 | [types](types/) | Shared type definitions | Adding cross-package types |
@@ -56,11 +56,13 @@ Leaf packages (no confab dependencies):
 ## Data Flow
 
 ```
-Claude Code / Codex writes transcript
+Claude Code / Codex writes transcript; OpenCode writes to its SQLite DB
         │
         ▼
   ~/.claude/projects/<path>/<session-id>.jsonl   (Claude Code)
   ~/.codex/sessions/<yyyy>/<mm>/<dd>/rollout-*.jsonl   (Codex)
+  ~/.local/share/opencode/opencode.db → daemon's collector materializes
+      ~/.confab/opencode/<id>/messages.jsonl   (OpenCode)
         │
         ▼
   daemon (pkg/daemon) watches file

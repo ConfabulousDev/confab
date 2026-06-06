@@ -2,6 +2,8 @@
 
 Owns the install/uninstall/check logic for Confab hooks in Claude Code's `~/.claude/settings.json` and Codex's `~/.codex/config.toml`. Provider methods (`pkg/provider/{claude,codex}.go`) delegate here so the provider package stays focused on paths, process detection, and rollout metadata.
 
+OpenCode is **not** handled here. It has no settings/config hook system; `Opencode.InstallHooks` (in `pkg/provider/opencode.go`) writes a TS plugin to `~/.config/opencode/plugins/` directly. This package covers the two settings-file providers only.
+
 ## Why a separate package
 
 Before CF-396 (Phase 2), hook install logic lived in `pkg/config` (Claude side) and `pkg/provider/codex.go` (Codex side). Three problems pushed it out:
@@ -67,4 +69,4 @@ The hash blob covers `{event_name, hooks: [{async, command, statusMessage, timeo
 
 ## Used By
 
-`pkg/provider/claude.go` and `pkg/provider/codex.go`. No other package imports this directly — `cmd/` routes through the `Provider` interface.
+`pkg/provider/claude.go` and `pkg/provider/codex.go` (not `opencode.go` — it manages its own plugin file). No other package imports this directly — `cmd/` routes through the `Provider` interface.
