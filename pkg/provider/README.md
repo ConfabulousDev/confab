@@ -1,6 +1,6 @@
 # pkg/provider
 
-Provider-specific local behavior for Confab integrations. Current providers: Claude Code and Codex. Each concrete provider owns paths, hook parsing, session discovery, and transcript metadata extraction.
+Provider-specific local behavior for Confab integrations. Current providers: Claude Code, Codex, and OpenCode. Each concrete provider owns paths, hook parsing, session discovery, and transcript metadata extraction. OpenCode is the exception to on-disk "discovery": it has no transcript file, so its live data is collected from a local HTTP server and materialized to a JSONL file (see the `Opencode` surface below).
 
 The package defines a `Provider` interface and a `HookInput` interface (Phase 1 + 2 of the abstraction work — see CF-394). Both concrete provider types satisfy `Provider`; hook-input adapters in `hookinput.go` satisfy `HookInput`. As of CF-397 (Phase 3), `pkg/sync/engine.go` dispatches sync-loop behavior (root metadata, descendant discovery, chunk annotation) through the interface; as of CF-398 (Phase 4), session discovery (`ScanSessions`, `FindSessionByID`, `ExtractMetadata`, `DefaultCWD`) is also routed through the interface. `cmd/` has no discovery-related provider-name branches.
 
@@ -8,7 +8,7 @@ The package defines a `Provider` interface and a `HookInput` interface (Phase 1 
 
 | File | Role |
 |------|------|
-| `provider.go` | `Provider` and `HookInput` interfaces, sync-loop interfaces (`TranscriptRegistrar`, `DescendantRegistrar`, `WorkflowRegistrar`, `ChunkView`), `SummaryLink` / `AnnotationResult` types, provider name constants (`NameClaudeCode`, `NameCodex`), the `FileTypeWorkflowJournal` file-type constant, the registry (`Get(name)`), and `NormalizeName(name)` |
+| `provider.go` | `Provider` and `HookInput` interfaces, sync-loop interfaces (`TranscriptRegistrar`, `DescendantRegistrar`, `WorkflowRegistrar`, `ChunkView`), `SummaryLink` / `AnnotationResult` types, provider name constants (`NameClaudeCode`, `NameCodex`, `NameOpencode`), the `FileTypeWorkflowJournal` file-type constant, the registry (`Get(name)`), and `NormalizeName(name)` |
 | `detect.go` | `DetectInstalled() []string` returns the canonical names of providers whose CLI binary is on `PATH`, in fixed registry order. Uses the exported package-level `LookPath` var (defaults to `exec.LookPath`) so tests can stub it. Backs `confab setup` auto-detect (CF-422) and `confab status` per-provider CLI presence. |
 | `session.go` | `SessionInfo` and `SessionMetadata` — cross-provider shapes returned by the discovery interface methods. Also defines `maxLinesForExtraction` and the shared `readHeadLines` helper. |
 | `codex_rollout.go` | `CodexRolloutMetadata` — wire-format metadata transmitted on the first chunk of every Codex rollout. Lives here (not pkg/sync) so the Codex implementation can construct one without a cycle; pkg/sync aliases it. |
@@ -20,6 +20,10 @@ The package defines a `Provider` interface and a `HookInput` interface (Phase 1 
 | `codex.go` | `Codex` — paths, transcript validation, parent-process detection, hook handling, and the `Provider` methods. `InitTranscript` attaches root rollout metadata from session_meta; `DiscoverDescendants` walks the SQLite subtree; `DiscoverWorkflowFiles` is a no-op (no Codex equivalent — the predicate is never invoked, so a Codex session never probes capabilities); `AnnotateChunk` attaches codex_rollout on FirstLine==1 and extracts first_user_message once per session via `ExtractMetadata`. Hook install/uninstall delegates to `pkg/hookconfig`; skill install/uninstall/status delegates to `pkg/config` |
 | `codex_discovery.go` | Codex rollout discovery: `ScanSessions` (interface), `ScanCodexSessions` (rich type), `FindSessionByID` (walks subagent UUIDs up to the root), package-private rollout resolution, `ReadSessionInfo`, `ExtractFirstUserMessageFromLines`, `ExtractMetadata`, `DefaultCWD`. Also houses `CodexSessionInfo` and the rollout-filename regex. |
 | `codex_state.go` | Codex local SQLite reader: `StateDBPath()`, `WalkUpToRoot(threadUUID)`, `ListSubtree(rootUUID)`. Used by the hook handler, `confab save` (via `FindSessionByID`'s walk-up), and `Codex.DiscoverDescendants` to discover subagent rollouts and route them to the top-most root |
+| `opencode.go` | `Opencode` — paths (`~/.config/opencode`), TS plugin install/uninstall, parent-process detection, and the `Provider` methods. `ShouldSpawnForInput` returns false for subagent sessions (via an optional `SessionParentID()` accessor on the input); `ScanSessions`/`FindSessionByID` error (live-sync only; manual mode deferred); `InitTranscript`/`DiscoverDescendants`/`DiscoverWorkflowFiles`/`AnnotateChunk` are no-ops. Embeds `opencodePluginSourceRaw` (kept byte-identical to `plugins/confab-sync.ts` by `TestOpencodePluginSourceMatchesFile`). |
+| `opencode_client.go` | `OpenCodeClient` — minimal HTTP client for a running OpenCode server: `SessionMessages(GET /session/{id}/message)` returning raw `{info, parts}` envelopes, and `SubscribeEvents(GET /event)` returning a channel of SSE `{type, properties}` events. No global timeout (SSE streams); no auth (local server). Trimmed to the live collector's needs — no session-list/health probes yet. |
+| `opencode_collector.go` | `OpenCodeCollector` — materializes one session's complete messages into a local JSONL file. `Run(ctx)` seeds emitted ids from the existing file, then reconciles on SSE events + a fallback ticker, reconnecting with capped backoff. `reconcile` fetches authoritative state and appends complete messages in id order, stopping at the first incomplete one (append-only, monotonic, idempotent). |
+| `opencode_session.go` | OpenCode assembly + completeness gating (pure, no I/O): `ocRawEnvelope` (`{info, parts}` kept raw), shallow `ocPeekInfo`/`ocPeekPart`, `ocIsComplete` (user always; assistant on `finish`/`error`), `ocKeepParts` (terminal tool parts only), `ocSerializeLine` (preserves raw bytes, filters part set), `ocSortByID`. |
 
 ## Provider surfaces
 
@@ -52,6 +56,15 @@ Codex fires `Stop` at every agent/turn boundary, including root rollout stops wh
 - The daemon's main loop (`pkg/daemon/daemon.go`) monitors that PID and shuts down when the interactive Codex process exits — same mechanism Claude Code uses.
 - `confab hook session-end --provider codex` is rejected with an explicit error pointing users at their `~/.codex/config.toml`.
 - Local state DB (`codex_state.go`): reads Codex's `~/.codex/state_*.sqlite` (read-only, highest numeric suffix wins; `CONFAB_CODEX_STATE_DB` overrides). `WalkUpToRoot(threadUUID)` walks the `thread_spawn_edges` chain to the top-most root with a 5×50ms retry budget for the spawn-vs-edge race (and a `thread_source='user'` fast-path that skips retries for known roots). `ListSubtree(rootUUID)` returns every descendant via a recursive CTE. All paths degrade gracefully when the DB is unavailable — callers see `(threadUUID, "", nil)` for `WalkUpToRoot` and a nil slice for `ListSubtree`.
+
+### `Opencode`
+
+OpenCode has no on-disk transcript and no native hook system. A tiny TS plugin (`plugins/confab-sync.ts`, installed to `~/.config/opencode/plugins/`) bridges lifecycle: on `session.created` it pipes `{session_id, server_url, cwd, parent_id?}` to `confab hook session-start --provider opencode`; on `dispose` it stops the daemon. All data sync is the daemon's job.
+
+- Discovery methods (`ScanSessions`, `FindSessionByID`) return errors — OpenCode sessions are captured live by the daemon's collector, and offline manual mode is deferred. `ExtractMetadata` is minimal; `DefaultCWD` returns `filepath.Dir(transcriptPath)`.
+- `ShouldSpawnForInput` suppresses non-root sessions: it type-asserts an optional `SessionParentID() string` accessor on the input (satisfied by `cmd.launchAsHookInput`, fed from the plugin's `parent_id`) and returns false when a parent is present. Kept off the shared `HookInput` interface so Claude/Codex inputs need not implement it.
+- The collector (`opencode_client.go` + `opencode_collector.go` + `opencode_session.go`) is driven by the daemon, not the `Provider` interface — see `pkg/daemon` and the CLAUDE.md "OpenCode provider differences" section.
+- Subagent capture as sidechain files under the root is deferred (CF-538); CF-537 only suppresses subagent daemons.
 
 ## `Provider` interface
 

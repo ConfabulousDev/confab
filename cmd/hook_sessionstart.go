@@ -159,6 +159,7 @@ func buildOpencodeLaunchArgs(r io.Reader) (*daemonLaunchInput, error) {
 		ExternalID:        in.SessionID,
 		OpenCodeServerURL: in.OpenCodeServerURL,
 		CWD:               in.CWD,
+		SessionParentID:   in.ParentID,
 	}, nil
 }
 

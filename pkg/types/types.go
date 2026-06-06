@@ -126,6 +126,11 @@ type OpenCodeHookInput struct {
 	OpenCodeServerURL string `json:"server_url"`
 	CWD               string `json:"cwd"`
 	ParentPID         int    `json:"parent_pid,omitempty"`
+	// ParentID is the OpenCode session's parent session id, set by the plugin
+	// only for subagent (non-root) sessions. Used to suppress daemons for
+	// non-root sessions (CF-537); root sessions omit it. Distinct from
+	// ParentPID, which is an OS process id.
+	ParentID string `json:"parent_id,omitempty"`
 }
 
 // sessionIDPattern validates session IDs contain only safe characters.

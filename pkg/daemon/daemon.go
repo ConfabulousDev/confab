@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ConfabulousDev/confab/pkg/confabpath"
 	"github.com/ConfabulousDev/confab/pkg/config"
 	"github.com/ConfabulousDev/confab/pkg/http"
 	"github.com/ConfabulousDev/confab/pkg/logger"
@@ -73,6 +74,13 @@ type Daemon struct {
 	stopOnce            sync.Once
 	doneCh              chan struct{}
 	consecutiveNotFound int // tracks consecutive 404 errors for session deletion detection
+
+	// collectorCancel stops the OpenCode collector goroutine (nil for
+	// Claude/Codex); collectorDone closes when that goroutine has exited.
+	// shutdown() cancels then waits on these so the final sync reads a quiesced
+	// materialized file (no concurrent append).
+	collectorCancel context.CancelFunc
+	collectorDone   chan struct{}
 }
 
 // Config holds daemon configuration
@@ -149,6 +157,32 @@ func (d *Daemon) Run(ctx context.Context) error {
 	}
 	if err := d.state.Save(); err != nil {
 		logger.Warn("Failed to save initial state: %v", err)
+	}
+
+	// OpenCode has no transcript file: derive a local materialized path and
+	// start the collector that fills it from the HTTP API (SSE + REST). The
+	// path is set here — after the no-op waitForTranscript above — so the
+	// collector creates the file asynchronously and backendSyncEnabled() gates
+	// the backend session on its existence (no empty sessions). The collector
+	// runs until the daemon shuts down (parent-PID driven); shutdown() cancels
+	// it before the final sync.
+	if d.opencodeServerURL != "" {
+		path, err := openCodeMaterializedPath(d.externalID)
+		if err != nil {
+			return fmt.Errorf("failed to derive OpenCode materialized path: %w", err)
+		}
+		d.transcriptPath = path
+		collectorCtx, cancel := context.WithCancel(ctx)
+		d.collectorCancel = cancel
+		d.collectorDone = make(chan struct{})
+		collector := provider.NewOpenCodeCollector(
+			provider.NewOpenCodeClient(d.opencodeServerURL), d.externalID, path)
+		go func() {
+			defer close(d.collectorDone)
+			if err := collector.Run(collectorCtx); err != nil && !errors.Is(err, context.Canceled) {
+				logger.Warn("OpenCode collector exited: %v", err)
+			}
+		}()
 	}
 
 	// Log panics before crashing. We skip final sync since the program is in an
@@ -298,7 +332,25 @@ func (d *Daemon) waitForTranscript(ctx context.Context, sigCh chan os.Signal) er
 // must not contact the backend — otherwise every OpenCode session would create
 // an empty backend session. Phase 2 will enable sync from opencodeServerURL.
 func (d *Daemon) backendSyncEnabled() bool {
-	return d.transcriptPath != ""
+	if d.transcriptPath == "" {
+		return false
+	}
+	if d.opencodeServerURL != "" {
+		// OpenCode: only sync once the collector has materialized at least one
+		// complete message, so we never Init an empty backend session before a
+		// session has produced any settled output.
+		_, err := os.Stat(d.transcriptPath)
+		return err == nil
+	}
+	return true
+}
+
+// openCodeMaterializedPath is where the OpenCode collector writes a session's
+// assembled {info, parts} JSONL. It doubles as the daemon's transcriptPath, so
+// the ordinary file-based sync pipeline uploads it; the backend file_name is
+// its base ("messages.jsonl"), unique within the session.
+func openCodeMaterializedPath(externalID string) (string, error) {
+	return confabpath.Subpath("opencode", externalID, "messages.jsonl")
 }
 
 // tryInit attempts to initialize the sync engine and session with the backend.
@@ -366,6 +418,19 @@ func (d *Daemon) shutdown(reason string) error {
 	defer close(d.doneCh)
 
 	logger.Info("Daemon shutting down: reason=%s", reason)
+
+	// Stop the OpenCode collector (if any) and wait for it to exit before the
+	// final sync, so no append races the final read (which would drop the last
+	// materialized message). The collector honors ctx on its in-flight HTTP
+	// call, so this returns promptly; the timeout is a safety net.
+	if d.collectorCancel != nil {
+		d.collectorCancel()
+		select {
+		case <-d.collectorDone:
+		case <-time.After(2 * time.Second):
+			logger.Warn("OpenCode collector did not stop within timeout; proceeding with final sync")
+		}
+	}
 
 	// Read inbox events (e.g., SessionEnd payload from sync stop)
 	// We need to extract the session_end event to send to backend after final sync
