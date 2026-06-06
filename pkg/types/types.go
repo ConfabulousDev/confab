@@ -116,16 +116,15 @@ type CodexHookResponse struct {
 
 // OpenCodeHookInput represents hook data from OpenCode.
 // Unlike Claude/Codex, OpenCode doesn't pipe hook data via stdin from a
-// settings-file hook system. Instead, the TypeScript plugin constructs this
-// struct from the event payload and passes it via stdin to the confab hook
-// commands. ServerURL is the OpenCode HTTP server address (e.g.
-// "http://localhost:4096") — the daemon uses this to connect to the OpenCode
-// server for session discovery and SSE event subscription.
+// settings-file hook system. Instead, the TypeScript plugin constructs
+// this struct from the event payload and passes it via stdin to the
+// confab hook commands. The daemon then reads OpenCode session data
+// directly from the local SQLite DB at ~/.local/share/opencode/opencode.db
+// (or CONFAB_OPENCODE_DB), so no per-session URL is required.
 type OpenCodeHookInput struct {
-	SessionID         string `json:"session_id"`
-	OpenCodeServerURL string `json:"server_url"`
-	CWD               string `json:"cwd"`
-	ParentPID         int    `json:"parent_pid,omitempty"`
+	SessionID string `json:"session_id"`
+	CWD       string `json:"cwd"`
+	ParentPID int    `json:"parent_pid,omitempty"`
 	// ParentID is the OpenCode session's parent session id, set by the plugin
 	// only for subagent (non-root) sessions. Used to suppress daemons for
 	// non-root sessions (CF-537); root sessions omit it. Distinct from

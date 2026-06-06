@@ -30,7 +30,7 @@ Codex.FindParentPID).
 
 For OpenCode, this command is called by the TS plugin's dispose hook (which
 runs when OpenCode unloads the plugin on exit). The plugin pipes an
-OpenCodeHookInput JSON payload with session_id and server_url.`,
+OpenCodeHookInput JSON payload with just session_id (and optional cwd).`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		providerName, err := provider.NormalizeName(hookProviderName)
 		if err != nil {

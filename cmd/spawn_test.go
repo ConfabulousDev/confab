@@ -534,7 +534,7 @@ func TestMaybeSpawnDaemonOpencode(t *testing.T) {
 	origSpawnDaemon := spawnDaemonFunc
 	defer func() { spawnDaemonFunc = origSpawnDaemon }()
 
-	t.Run("spawns daemon with OpenCodeServerURL when TranscriptPath is empty", func(t *testing.T) {
+	t.Run("spawns daemon with empty TranscriptPath (SQLite-backed)", func(t *testing.T) {
 		_ = setupSyncTestEnv(t)
 
 		var spawnCalled bool
@@ -548,9 +548,8 @@ func TestMaybeSpawnDaemonOpencode(t *testing.T) {
 		sessionID := "oc-session-1234-1234-1234-123456789abc"
 
 		spawned, err := maybeSpawnDaemon(provider.Opencode{}, &daemonLaunchInput{
-			ExternalID:        sessionID,
-			OpenCodeServerURL: "http://localhost:4096",
-			CWD:               "/work/opencode",
+			ExternalID: sessionID,
+			CWD:        "/work/opencode",
 		})
 		if err != nil {
 			t.Fatalf("maybeSpawnDaemon (Opencode) failed: %v", err)
@@ -563,9 +562,6 @@ func TestMaybeSpawnDaemonOpencode(t *testing.T) {
 		}
 		if spawnedInput.ExternalID != sessionID {
 			t.Errorf("external_id = %q, want %q", spawnedInput.ExternalID, sessionID)
-		}
-		if spawnedInput.OpenCodeServerURL != "http://localhost:4096" {
-			t.Errorf("OpenCodeServerURL = %q, want %q", spawnedInput.OpenCodeServerURL, "http://localhost:4096")
 		}
 		if spawnedInput.Provider != provider.NameOpencode {
 			t.Errorf("Provider = %q, want %q", spawnedInput.Provider, provider.NameOpencode)
@@ -581,16 +577,15 @@ func TestMaybeSpawnDaemonOpencode(t *testing.T) {
 		}
 
 		sessionID := "oc-session-5678-5678-5678-567890abcdef"
-		state := daemon.NewStateForProviderWithURL(provider.NameOpencode, sessionID, "http://localhost:4096", "/work/opencode", 0)
+		state := daemon.NewStateForProvider(provider.NameOpencode, sessionID, "", "/work/opencode", 0)
 		state.PID = os.Getpid()
 		if err := state.Save(); err != nil {
 			t.Fatalf("save state: %v", err)
 		}
 
 		spawned, err := maybeSpawnDaemon(provider.Opencode{}, &daemonLaunchInput{
-			ExternalID:        sessionID,
-			OpenCodeServerURL: "http://localhost:4096",
-			CWD:               "/work/opencode",
+			ExternalID: sessionID,
+			CWD:        "/work/opencode",
 		})
 		if err != nil {
 			t.Fatalf("maybeSpawnDaemon (Opencode) failed: %v", err)
@@ -600,23 +595,23 @@ func TestMaybeSpawnDaemonOpencode(t *testing.T) {
 		}
 	})
 
-	t.Run("fails when both transcript_path and server_url are empty", func(t *testing.T) {
+	t.Run("non-opencode provider with empty transcript_path is rejected", func(t *testing.T) {
 		setupSyncTestEnv(t)
 
 		spawnDaemonFunc = func(launch *daemonLaunchInput) error {
-			t.Fatal("should not spawn when both paths are missing")
+			t.Fatal("should not spawn when transcript_path is missing for Claude")
 			return nil
 		}
 
-		spawned, err := maybeSpawnDaemon(provider.Opencode{}, &daemonLaunchInput{
-			ExternalID: "oc-session-missing",
-			CWD:        "/work/opencode",
+		spawned, err := maybeSpawnDaemon(provider.ClaudeCode{}, &daemonLaunchInput{
+			ExternalID: "claude-session-missing",
+			CWD:        "/work",
 		})
 		if err == nil {
-			t.Fatal("expected error when both transcript_path and server_url are missing")
+			t.Fatal("expected error when transcript_path is missing for non-opencode provider")
 		}
 		if spawned {
-			t.Fatal("expected spawned=false when both paths are missing")
+			t.Fatal("expected spawned=false when transcript_path is missing")
 		}
 	})
 
@@ -630,16 +625,15 @@ func TestMaybeSpawnDaemonOpencode(t *testing.T) {
 		}
 
 		sessionID := "oc-session-stale"
-		state := daemon.NewStateForProviderWithURL(provider.NameOpencode, sessionID, "http://localhost:4096", "/work/opencode", 0)
+		state := daemon.NewStateForProvider(provider.NameOpencode, sessionID, "", "/work/opencode", 0)
 		state.PID = 999999
 		if err := state.Save(); err != nil {
 			t.Fatalf("save stale state: %v", err)
 		}
 
 		spawned, err := maybeSpawnDaemon(provider.Opencode{}, &daemonLaunchInput{
-			ExternalID:        sessionID,
-			OpenCodeServerURL: "http://localhost:4096",
-			CWD:               "/work/opencode",
+			ExternalID: sessionID,
+			CWD:        "/work/opencode",
 		})
 		if err != nil {
 			t.Fatalf("maybeSpawnDaemon (Opencode) failed: %v", err)

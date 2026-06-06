@@ -46,7 +46,7 @@ func TestOpencodeDefaultCWD(t *testing.T) {
 }
 
 func TestOpencodeReadSessionHookInput_Valid(t *testing.T) {
-	input := `{"session_id":"test-0199","server_url":"http://localhost:4096","cwd":"/work"}`
+	input := `{"session_id":"test-0199","cwd":"/work"}`
 	p := Opencode{}
 	got, err := p.ReadSessionHookInput(strings.NewReader(input))
 	if err != nil {
@@ -55,33 +55,19 @@ func TestOpencodeReadSessionHookInput_Valid(t *testing.T) {
 	if got.SessionID != "test-0199" {
 		t.Errorf("SessionID = %q, want %q", got.SessionID, "test-0199")
 	}
-	if got.OpenCodeServerURL != "http://localhost:4096" {
-		t.Errorf("OpenCodeServerURL = %q, want %q", got.OpenCodeServerURL, "http://localhost:4096")
-	}
 	if got.CWD != "/work" {
 		t.Errorf("CWD = %q, want %q", got.CWD, "/work")
 	}
 }
 
 func TestOpencodeReadSessionHookInput_MissingSessionID(t *testing.T) {
-	input := `{"server_url":"http://localhost:4096","cwd":"/work"}`
+	input := `{"cwd":"/work"}`
 	_, err := (Opencode{}).ReadSessionHookInput(strings.NewReader(input))
 	if err == nil {
 		t.Fatal("expected error for missing session_id")
 	}
 	if !strings.Contains(err.Error(), "session_id") {
 		t.Errorf("error = %q, want session_id error", err)
-	}
-}
-
-func TestOpencodeReadSessionHookInput_MissingServerURL(t *testing.T) {
-	input := `{"session_id":"test-0199","cwd":"/work"}`
-	_, err := (Opencode{}).ReadSessionHookInput(strings.NewReader(input))
-	if err == nil {
-		t.Fatal("expected error for missing server_url")
-	}
-	if !strings.Contains(err.Error(), "server_url") {
-		t.Errorf("error = %q, want server_url error", err)
 	}
 }
 
@@ -93,7 +79,7 @@ func TestOpencodeReadSessionHookInput_InvalidJSON(t *testing.T) {
 }
 
 func TestOpencodeReadSessionHookInput_InvalidSessionID(t *testing.T) {
-	input := `{"session_id":"../../evil","server_url":"http://localhost:4096","cwd":"/work"}`
+	input := `{"session_id":"../../evil","cwd":"/work"}`
 	_, err := (Opencode{}).ReadSessionHookInput(strings.NewReader(input))
 	if err == nil {
 		t.Fatal("expected error for invalid session_id (path traversal)")
@@ -101,7 +87,7 @@ func TestOpencodeReadSessionHookInput_InvalidSessionID(t *testing.T) {
 }
 
 func TestOpencodeReadSessionHookInput_SetsParentPID(t *testing.T) {
-	input := `{"session_id":"test-0199","server_url":"http://localhost:4096","cwd":"/work","parent_pid":4242}`
+	input := `{"session_id":"test-0199","cwd":"/work","parent_pid":4242}`
 	got, err := (Opencode{}).ReadSessionHookInput(strings.NewReader(input))
 	if err != nil {
 		t.Fatalf("ReadSessionHookInput: %v", err)
@@ -112,7 +98,7 @@ func TestOpencodeReadSessionHookInput_SetsParentPID(t *testing.T) {
 }
 
 func TestOpencodeParseSessionHook(t *testing.T) {
-	input := `{"session_id":"test-parse","server_url":"http://localhost:4096","cwd":"/work"}`
+	input := `{"session_id":"test-parse","cwd":"/work"}`
 	hookInput, err := (Opencode{}).ParseSessionHook(strings.NewReader(input))
 	if err != nil {
 		t.Fatalf("ParseSessionHook: %v", err)
@@ -329,10 +315,9 @@ func TestOpencodePluginSourceMatchesFile(t *testing.T) {
 // TestOpencodeHookInputJSON ensures the JSON round-trips correctly.
 func TestOpencodeHookInputJSON(t *testing.T) {
 	orig := types.OpenCodeHookInput{
-		SessionID:         "test-session",
-		OpenCodeServerURL: "http://localhost:4096",
-		CWD:               "/work",
-		ParentPID:         1234,
+		SessionID: "test-session",
+		CWD:       "/work",
+		ParentPID: 1234,
 	}
 	data, err := json.Marshal(orig)
 	if err != nil {
@@ -345,14 +330,24 @@ func TestOpencodeHookInputJSON(t *testing.T) {
 	if got.SessionID != orig.SessionID {
 		t.Errorf("SessionID = %q, want %q", got.SessionID, orig.SessionID)
 	}
-	if got.OpenCodeServerURL != orig.OpenCodeServerURL {
-		t.Errorf("OpenCodeServerURL = %q, want %q", got.OpenCodeServerURL, orig.OpenCodeServerURL)
-	}
 	if got.CWD != orig.CWD {
 		t.Errorf("CWD = %q, want %q", got.CWD, orig.CWD)
 	}
 	if got.ParentPID != orig.ParentPID {
 		t.Errorf("ParentPID = %d, want %d", got.ParentPID, orig.ParentPID)
+	}
+}
+
+// TestOpencodePluginSourceDropsServerURL pins that the bundled plugin
+// (the canonical source string) no longer references serverUrl. The
+// canonical .ts file and the bundled Go string are linted against each
+// other elsewhere; this guards the bundled copy directly.
+func TestOpencodePluginSourceDropsServerURL(t *testing.T) {
+	if strings.Contains(opencodePluginSourceRaw, "serverUrl") {
+		t.Error("bundled plugin source still references serverUrl")
+	}
+	if strings.Contains(opencodePluginSourceRaw, "server_url") {
+		t.Error("bundled plugin source still emits server_url field")
 	}
 }
 

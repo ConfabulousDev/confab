@@ -3,7 +3,6 @@ import { ConfabSync } from "./confab-sync"
 
 describe("ConfabSync", () => {
   const mock$ = vi.fn() as any
-  const serverUrl = new URL("http://localhost:4096")
 
   function mkPromise() {
     const p = Promise.resolve({ stdout: "", exitCode: 0 }) as any
@@ -40,7 +39,7 @@ describe("ConfabSync", () => {
 
   describe("plugin setup", () => {
     it("returns hooks object with expected keys", async () => {
-      const hooks = await ConfabSync({ $: mock$, serverUrl })
+      const hooks = await ConfabSync({ $: mock$ })
       expect(hooks).toHaveProperty("event")
       expect(hooks).toHaveProperty("dispose")
     })
@@ -48,7 +47,7 @@ describe("ConfabSync", () => {
 
   describe("session.created event", () => {
     it("spawns daemon for a new session", async () => {
-      const hooks = await ConfabSync({ $: mock$, serverUrl })
+      const hooks = await ConfabSync({ $: mock$ })
       await hooks.event!({
         event: {
           type: "session.created",
@@ -62,13 +61,13 @@ describe("ConfabSync", () => {
       const cmd = reconstructCmd(0)
       expect(cmd).toContain("confab hook session-start --provider opencode")
       expect(cmd).toContain('"session_id":"test-session-1"')
-      expect(cmd).toContain('"server_url":"http://localhost:4096/')
+      expect(cmd).not.toContain("server_url")
       expect(cmd).toContain('"cwd":"/home/user/project"')
       expectQuietCalled(0)
     })
 
     it("does not spawn duplicate daemon for same session", async () => {
-      const hooks = await ConfabSync({ $: mock$, serverUrl })
+      const hooks = await ConfabSync({ $: mock$ })
       await hooks.event!({
         event: {
           type: "session.created",
@@ -90,7 +89,7 @@ describe("ConfabSync", () => {
     })
 
     it("spawns separate daemons for different sessions", async () => {
-      const hooks = await ConfabSync({ $: mock$, serverUrl })
+      const hooks = await ConfabSync({ $: mock$ })
       await hooks.event!({
         event: {
           type: "session.created",
@@ -114,7 +113,7 @@ describe("ConfabSync", () => {
     })
 
     it("forwards parent_id for subagent (non-root) sessions", async () => {
-      const hooks = await ConfabSync({ $: mock$, serverUrl })
+      const hooks = await ConfabSync({ $: mock$ })
       await hooks.event!({
         event: {
           type: "session.created",
@@ -128,7 +127,7 @@ describe("ConfabSync", () => {
     })
 
     it("omits parent_id for root sessions", async () => {
-      const hooks = await ConfabSync({ $: mock$, serverUrl })
+      const hooks = await ConfabSync({ $: mock$ })
       await hooks.event!({
         event: {
           type: "session.created",
@@ -144,7 +143,7 @@ describe("ConfabSync", () => {
 
   describe("session.idle event (regression)", () => {
     it("does NOT stop daemon — idle fires after every AI response, not session end", async () => {
-      const hooks = await ConfabSync({ $: mock$, serverUrl })
+      const hooks = await ConfabSync({ $: mock$ })
       await hooks.event!({
         event: {
           type: "session.created",
@@ -168,7 +167,7 @@ describe("ConfabSync", () => {
 
   describe("dispose", () => {
     it("stops all active sessions", async () => {
-      const hooks = await ConfabSync({ $: mock$, serverUrl })
+      const hooks = await ConfabSync({ $: mock$ })
       await hooks.event!({
         event: {
           type: "session.created",
@@ -208,7 +207,7 @@ describe("ConfabSync", () => {
     })
 
     it("does nothing when no sessions are active", async () => {
-      const hooks = await ConfabSync({ $: mock$, serverUrl })
+      const hooks = await ConfabSync({ $: mock$ })
       await hooks.dispose!()
 
       expect(mock$).not.toHaveBeenCalled()

@@ -31,67 +31,34 @@ func TestNewStateForProvider(t *testing.T) {
 	}
 }
 
-func TestNewStateForProviderWithURL(t *testing.T) {
-	state := NewStateForProviderWithURL("opencode", "ext-789", "http://localhost:4096", "/work/dir", 0)
-
-	if state.ExternalID != "ext-789" {
-		t.Errorf("ExternalID = %q, want %q", state.ExternalID, "ext-789")
-	}
-	if state.OpenCodeServerURL != "http://localhost:4096" {
-		t.Errorf("OpenCodeServerURL = %q, want %q", state.OpenCodeServerURL, "http://localhost:4096")
-	}
-	if state.TranscriptPath != "" {
-		t.Errorf("TranscriptPath = %q, want \"\"", state.TranscriptPath)
-	}
-	if state.CWD != "/work/dir" {
-		t.Errorf("CWD = %q, want %q", state.CWD, "/work/dir")
-	}
-	if state.Provider != "opencode" {
-		t.Errorf("Provider = %q, want %q", state.Provider, "opencode")
-	}
-	if state.PID != os.Getpid() {
-		t.Errorf("PID = %d, want %d", state.PID, os.Getpid())
-	}
-	if state.ParentPID != 0 {
-		t.Errorf("ParentPID = %d, want 0", state.ParentPID)
-	}
-	if time.Since(state.StartedAt) > time.Second {
-		t.Error("expected StartedAt to be recent")
-	}
-}
-
-func TestNewStateForProviderWithURL_SaveAndLoadRoundTrip(t *testing.T) {
+// TestState_LegacyServerURLFieldIgnored asserts a state file written by
+// a previous CLI version (which carried a "server_url" field) loads
+// cleanly into the slimmer struct. encoding/json drops the unknown key;
+// re-Save() will write the file without it, completing self-heal.
+func TestState_LegacyServerURLFieldIgnored(t *testing.T) {
 	tmpDir := t.TempDir()
 	origHome := os.Getenv("HOME")
 	os.Setenv("HOME", tmpDir)
 	defer os.Setenv("HOME", origHome)
 
-	state := NewStateForProviderWithURL("opencode", "roundtrip-id", "http://localhost:4096", "/work/dir", 0)
-	state.PID = os.Getpid()
-	if err := state.Save(); err != nil {
-		t.Fatalf("save state: %v", err)
+	stateDir := filepath.Join(tmpDir, ".confab", "sync", "opencode")
+	if err := os.MkdirAll(stateDir, 0700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	legacyJSON := `{"provider":"opencode","external_id":"legacy-url","transcript_path":"","server_url":"http://localhost:4096","cwd":"/work","pid":1,"inbox_path":"","started_at":"2026-01-01T00:00:00Z"}`
+	if err := os.WriteFile(filepath.Join(stateDir, "legacy-url.json"), []byte(legacyJSON), 0600); err != nil {
+		t.Fatalf("write legacy state: %v", err)
 	}
 
-	statePath := filepath.Join(tmpDir, ".confab", "sync", "opencode", "roundtrip-id.json")
-	if _, err := os.Stat(statePath); err != nil {
-		t.Fatalf("state file not created: %v", err)
-	}
-
-	loaded, err := LoadStateForProvider("opencode", "roundtrip-id")
+	loaded, err := LoadStateForProvider("opencode", "legacy-url")
 	if err != nil {
-		t.Fatalf("load state: %v", err)
+		t.Fatalf("load legacy state: %v", err)
 	}
 	if loaded == nil {
 		t.Fatal("loaded state is nil")
 	}
-	if loaded.ExternalID != "roundtrip-id" {
+	if loaded.ExternalID != "legacy-url" {
 		t.Errorf("ExternalID = %q", loaded.ExternalID)
-	}
-	if loaded.OpenCodeServerURL != "http://localhost:4096" {
-		t.Errorf("OpenCodeServerURL = %q", loaded.OpenCodeServerURL)
-	}
-	if loaded.TranscriptPath != "" {
-		t.Errorf("TranscriptPath = %q", loaded.TranscriptPath)
 	}
 	if loaded.Provider != "opencode" {
 		t.Errorf("Provider = %q", loaded.Provider)
