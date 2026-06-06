@@ -1,4 +1,4 @@
-import type { Event, Plugin } from "@opencode-ai/plugin"
+import type { Plugin } from "@opencode-ai/plugin"
 
 export const ConfabSync: Plugin = async ({ $, serverUrl }) => {
   const running = new Set<string>()

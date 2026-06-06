@@ -197,7 +197,7 @@ func (Opencode) ExtractMetadata([]string) SessionMetadata {
 //
 // The canonical source lives at pkg/provider/plugins/confab-sync.ts (with real
 // backticks). Tests validate the two stay in sync.
-var opencodePluginSourceRaw = `import type { Event, Plugin } from "@opencode-ai/plugin"
+var opencodePluginSourceRaw = `import type { Plugin } from "@opencode-ai/plugin"
 
 export const ConfabSync: Plugin = async ({ $, serverUrl }) => {
   const running = new Set<string>()
