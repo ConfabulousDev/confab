@@ -16,6 +16,7 @@ func TestGet(t *testing.T) {
 	}{
 		{"explicit claude-code", NameClaudeCode, NameClaudeCode, ""},
 		{"explicit codex", NameCodex, NameCodex, ""},
+		{"explicit opencode", NameOpencode, NameOpencode, ""},
 		{"empty string defaults to claude-code", "", NameClaudeCode, ""},
 		{"unknown provider returns error", "openai", "", "unsupported provider"},
 	}
@@ -53,6 +54,7 @@ func TestNormalizeName(t *testing.T) {
 	}{
 		{"explicit claude-code", NameClaudeCode, NameClaudeCode, false},
 		{"explicit codex", NameCodex, NameCodex, false},
+		{"explicit opencode", NameOpencode, NameOpencode, false},
 		{"empty defaults to claude-code", "", NameClaudeCode, false},
 		{"unknown provider errors", "openai", "", true},
 	}
@@ -84,6 +86,7 @@ func TestNormalizeName(t *testing.T) {
 var (
 	_ Provider = ClaudeCode{}
 	_ Provider = Codex{}
+	_ Provider = Opencode{}
 )
 
 // TestSupportsCommitLinking pins the contract that both currently-shipped
@@ -98,6 +101,7 @@ func TestSupportsCommitLinking(t *testing.T) {
 	}{
 		{"claude-code", ClaudeCode{}, true},
 		{"codex", Codex{}, true},
+		{"opencode", Opencode{}, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

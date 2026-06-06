@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/ConfabulousDev/confab/pkg/loginit"
 	"github.com/ConfabulousDev/confab/pkg/logger"
+	"github.com/ConfabulousDev/confab/pkg/loginit"
 	"github.com/spf13/cobra"
 )
 

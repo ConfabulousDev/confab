@@ -16,15 +16,16 @@ import (
 
 // State represents the daemon's persistent state
 type State struct {
-	Provider        string    `json:"provider,omitempty"`
-	ExternalID      string    `json:"external_id"`
-	TranscriptPath  string    `json:"transcript_path"`
-	CWD             string    `json:"cwd"`
-	PID             int       `json:"pid"`
-	ParentPID       int       `json:"parent_pid,omitempty"` // Claude Code process ID
-	InboxPath       string    `json:"inbox_path"`           // Path to event inbox (JSONL)
-	StartedAt       time.Time `json:"started_at"`
-	ConfabSessionID string    `json:"confab_session_id,omitempty"` // Backend session ID (set after Init)
+	Provider          string    `json:"provider,omitempty"`
+	ExternalID        string    `json:"external_id"`
+	TranscriptPath    string    `json:"transcript_path"`
+	OpenCodeServerURL string    `json:"server_url,omitempty"` // OpenCode HTTP server address
+	CWD               string    `json:"cwd"`
+	PID               int       `json:"pid"`
+	ParentPID         int       `json:"parent_pid,omitempty"` // Claude Code process ID
+	InboxPath         string    `json:"inbox_path"`           // Path to event inbox (JSONL)
+	StartedAt         time.Time `json:"started_at"`
+	ConfabSessionID   string    `json:"confab_session_id,omitempty"` // Backend session ID (set after Init)
 }
 
 // NewStateForProvider creates a daemon state under a provider namespace.
@@ -41,6 +42,15 @@ func NewStateForProvider(provider, externalID, transcriptPath, cwd string, paren
 		InboxPath:      inboxPath,
 		StartedAt:      time.Now(),
 	}
+}
+
+// NewStateForProviderWithURL creates a daemon state with an explicit
+// OpenCodeServerURL, used by the OpenCode provider which connects to an
+// HTTP API instead of a file.
+func NewStateForProviderWithURL(provider, externalID, opencodeServerURL, cwd string, parentPID int) *State {
+	s := NewStateForProvider(provider, externalID, "", cwd, parentPID)
+	s.OpenCodeServerURL = opencodeServerURL
+	return s
 }
 
 func legacyStatePath(externalID string) (string, error) {

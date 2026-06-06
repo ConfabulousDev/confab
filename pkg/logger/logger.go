@@ -18,10 +18,10 @@ const (
 	// LogDirEnv is the environment variable to override the default log directory
 	LogDirEnv   = "CONFAB_LOG_DIR"
 	logFileName = "confab.log"
-	maxSizeMB   = 1     // 1MB per file
-	maxAgeDays  = 14    // Keep 2 weeks
-	maxBackups  = 20    // Max old log files (safety limit)
-	compressOld = true  // Compress rotated logs
+	maxSizeMB   = 1    // 1MB per file
+	maxAgeDays  = 14   // Keep 2 weeks
+	maxBackups  = 20   // Max old log files (safety limit)
+	compressOld = true // Compress rotated logs
 )
 
 // Level represents the log level

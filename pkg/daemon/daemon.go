@@ -53,14 +53,19 @@ var shutdownTimeout = 30 * time.Second
 // If ParentPID is set, the daemon monitors the parent process and shuts down
 // gracefully when it exits. This handles cases where Claude Code crashes or
 // is killed without firing the SessionEnd hook.
+//
+// For OpenCode, transcriptPath is empty and opencodeServerURL is set
+// instead. The daemon connects to the OpenCode HTTP API for session
+// discovery.
 type Daemon struct {
-	providerName   string
-	externalID     string
-	transcriptPath string
-	cwd            string
-	parentPID      int
-	syncInterval   time.Duration
-	syncJitter     time.Duration
+	providerName      string
+	externalID        string
+	transcriptPath    string
+	opencodeServerURL string // OpenCode HTTP server address
+	cwd               string
+	parentPID         int
+	syncInterval      time.Duration
+	syncJitter        time.Duration
 
 	state               *State
 	engine              *pkgsync.Engine
@@ -75,6 +80,7 @@ type Config struct {
 	Provider           string
 	ExternalID         string
 	TranscriptPath     string
+	OpenCodeServerURL  string // OpenCode HTTP server address
 	CWD                string
 	ParentPID          int // Claude Code process ID to monitor (0 to disable)
 	SyncInterval       time.Duration
@@ -100,15 +106,16 @@ func New(cfg Config) *Daemon {
 	}
 
 	return &Daemon{
-		providerName:   providerName,
-		externalID:     cfg.ExternalID,
-		transcriptPath: cfg.TranscriptPath,
-		cwd:            cfg.CWD,
-		parentPID:      cfg.ParentPID,
-		syncInterval:   interval,
-		syncJitter:     jitter,
-		stopCh:         make(chan struct{}),
-		doneCh:         make(chan struct{}),
+		providerName:      providerName,
+		externalID:        cfg.ExternalID,
+		transcriptPath:    cfg.TranscriptPath,
+		opencodeServerURL: cfg.OpenCodeServerURL,
+		cwd:               cfg.CWD,
+		parentPID:         cfg.ParentPID,
+		syncInterval:      interval,
+		syncJitter:        jitter,
+		stopCh:            make(chan struct{}),
+		doneCh:            make(chan struct{}),
 	}
 }
 
@@ -133,7 +140,13 @@ func (d *Daemon) Run(ctx context.Context) error {
 
 	// Save state for duplicate detection. Done after transcript exists so we
 	// don't leave stale state files for sessions that never produced transcripts.
-	d.state = NewStateForProvider(d.providerName, d.externalID, d.transcriptPath, d.cwd, d.parentPID)
+	// OpenCode has no transcript path; persist its server URL instead so state
+	// listings and Phase 2 reconnection can recover it.
+	if d.opencodeServerURL != "" {
+		d.state = NewStateForProviderWithURL(d.providerName, d.externalID, d.opencodeServerURL, d.cwd, d.parentPID)
+	} else {
+		d.state = NewStateForProvider(d.providerName, d.externalID, d.transcriptPath, d.cwd, d.parentPID)
+	}
 	if err := d.state.Save(); err != nil {
 		logger.Warn("Failed to save initial state: %v", err)
 	}
@@ -194,6 +207,14 @@ func (d *Daemon) Run(ctx context.Context) error {
 				return d.shutdown("parent process exited")
 			}
 
+			// OpenCode (Phase 1) has no data source yet: file-based sync needs a
+			// transcript, and HTTP-based sync from opencodeServerURL is Phase 2.
+			// Run lifecycle-only — monitor the parent but never contact the
+			// backend, so we don't create empty sessions on the server.
+			if !d.backendSyncEnabled() {
+				continue
+			}
+
 			// If not initialized yet, try to connect to backend
 			if d.engine == nil || !d.engine.IsInitialized() {
 				if err := d.tryInit(); err != nil {
@@ -234,7 +255,12 @@ func (d *Daemon) Run(ctx context.Context) error {
 
 // waitForTranscript waits for the transcript file to exist before proceeding.
 // For fresh sessions, Claude Code may not have written the transcript yet.
+// For OpenCode (empty transcriptPath), there is no file to watch — returns immediately.
 func (d *Daemon) waitForTranscript(ctx context.Context, sigCh chan os.Signal) error {
+	if d.transcriptPath == "" {
+		logger.Info("Skipping transcript wait (OpenCode mode, HTTP API)")
+		return nil
+	}
 	// Check if file already exists
 	if _, err := os.Stat(d.transcriptPath); err == nil {
 		return nil
@@ -264,6 +290,15 @@ func (d *Daemon) waitForTranscript(ctx context.Context, sigCh chan os.Signal) er
 			}
 		}
 	}
+}
+
+// backendSyncEnabled reports whether this daemon has a data source to sync.
+// Claude/Codex always have a transcript path. OpenCode (Phase 1) has neither a
+// transcript nor an implemented HTTP sync path, so it runs lifecycle-only and
+// must not contact the backend — otherwise every OpenCode session would create
+// an empty backend session. Phase 2 will enable sync from opencodeServerURL.
+func (d *Daemon) backendSyncEnabled() bool {
+	return d.transcriptPath != ""
 }
 
 // tryInit attempts to initialize the sync engine and session with the backend.

@@ -2641,3 +2641,71 @@ func TestDaemonShutsDownWhenParentPIDDies(t *testing.T) {
 		t.Fatal("daemon did not exit within 2s after parent PID died; parent-PID monitoring is broken")
 	}
 }
+
+// TestDaemonSurvivesPastFirstSyncInterval guards against the bug where
+// the daemon was killed by session.idle events (which fire after every
+// AI response, not session end). The daemon must stay alive as long as
+// its parent process is running.
+func TestDaemonSurvivesPastFirstSyncInterval(t *testing.T) {
+	mock := newMockBackend(t)
+	server := httptest.NewServer(mock)
+	defer server.Close()
+
+	tmpDir, transcriptPath := setupTestEnv(t, server.URL)
+	os.WriteFile(transcriptPath, []byte(`{"type":"system"}`+"\n"), 0644)
+
+	// Spawn a real child process to serve as the parent PID.
+	cmd := exec.Command("sleep", "10")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("failed to spawn child process: %v", err)
+	}
+	parentPID := cmd.Process.Pid
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		_, _ = cmd.Process.Wait()
+	})
+
+	d := New(Config{
+		ExternalID:         "survival-test",
+		TranscriptPath:     transcriptPath,
+		CWD:                tmpDir,
+		ParentPID:          parentPID,
+		SyncInterval:       100 * time.Millisecond,
+		SyncIntervalJitter: 0,
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- d.Run(ctx) }()
+
+	// Wait for multiple sync cycles — the daemon should NOT exit on its own.
+	time.Sleep(1 * time.Second)
+
+	// Check if daemon exited prematurely.
+	select {
+	case err := <-errCh:
+		// Daemon exited — this is a bug unless context was cancelled.
+		if ctx.Err() == nil {
+			t.Fatalf("daemon exited prematurely after ~1s: %v; daemon should survive while parent is alive", err)
+		}
+	default:
+		// Good — daemon is still running.
+	}
+
+	// Wait a bit more to confirm it survives multiple cycles.
+	time.Sleep(1 * time.Second)
+
+	select {
+	case err := <-errCh:
+		if ctx.Err() == nil {
+			t.Fatalf("daemon exited prematurely after ~2s: %v; daemon should survive while parent is alive", err)
+		}
+	default:
+		// Good — daemon is still running after 2+ seconds.
+	}
+
+	cancel()
+	<-errCh
+}

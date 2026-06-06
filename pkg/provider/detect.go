@@ -7,7 +7,7 @@ var LookPath = exec.LookPath
 
 // detectOrder is the fixed registry order DetectInstalled returns, so
 // callers see deterministic output regardless of LookPath call order.
-var detectOrder = []string{NameClaudeCode, NameCodex}
+var detectOrder = []string{NameClaudeCode, NameCodex, NameOpencode}
 
 // DetectInstalled returns the canonical names of providers whose CLI
 // binary is on PATH, in fixed registry order. Result is never nil but

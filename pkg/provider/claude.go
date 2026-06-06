@@ -320,6 +320,21 @@ func getProcCmdline(pid int) string {
 	return strings.TrimSpace(string(out))
 }
 
+func getProcName(pid int) string {
+	out, err := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "comm=").Output()
+	if err != nil {
+		return ""
+	}
+	name := strings.TrimSpace(string(out))
+	if name == "" {
+		return ""
+	}
+	// macOS `ps -o comm=` returns the full executable path; Linux returns just
+	// the basename. Normalize to the basename so process matching and the
+	// getProcName contract behave identically on every supported platform.
+	return filepath.Base(name)
+}
+
 func getParentPID(pid int) int {
 	out, err := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "ppid=").Output()
 	if err != nil {

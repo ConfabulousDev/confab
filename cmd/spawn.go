@@ -20,12 +20,16 @@ var spawnDaemonFunc = spawnDaemonImpl
 // handler to a freshly-spawned daemon process. It is also the mutable
 // spawn-side representation that hooks may mutate (e.g., after
 // WalkUpToRoot resolves a Codex subagent to its root).
+//
+// For OpenCode, TranscriptPath is empty and OpenCodeServerURL holds the
+// OpenCode HTTP server address (e.g. "http://localhost:4096").
 type daemonLaunchInput struct {
-	Provider       string `json:"provider"`
-	ExternalID     string `json:"external_id"`
-	TranscriptPath string `json:"transcript_path"`
-	CWD            string `json:"cwd"`
-	ParentPID      int    `json:"parent_pid,omitempty"`
+	Provider          string `json:"provider"`
+	ExternalID        string `json:"external_id"`
+	TranscriptPath    string `json:"transcript_path"`
+	OpenCodeServerURL string `json:"server_url,omitempty"`
+	CWD               string `json:"cwd"`
+	ParentPID         int    `json:"parent_pid,omitempty"`
 }
 
 // launchAsHookInput satisfies provider.HookInput for the sole purpose
@@ -45,9 +49,12 @@ func (a launchAsHookInput) ParentPID() int         { return a.l.ParentPID }
 // false if one was already running or the provider gate refused. The
 // caller pre-fills launch with parsed hook fields and any WalkUpToRoot
 // rewrites; this function sets ParentPID + Provider before spawn.
+//
+// For OpenCode, TranscriptPath may be empty and OpenCodeServerURL
+// provides the OpenCode HTTP server address instead.
 func maybeSpawnDaemon(p provider.Provider, launch *daemonLaunchInput) (bool, error) {
-	if launch.TranscriptPath == "" {
-		return false, fmt.Errorf("transcript_path is required to spawn daemon")
+	if launch.TranscriptPath == "" && launch.OpenCodeServerURL == "" {
+		return false, fmt.Errorf("transcript_path or server_url is required to spawn daemon")
 	}
 
 	if !p.ShouldSpawnForInput(launchAsHookInput{launch}) {
@@ -92,14 +99,27 @@ func spawnDaemonImpl(launch *daemonLaunchInput) error {
 	cmd := exec.Command(executable, "hook", "session-start",
 		"--provider", launch.Provider, "--bg-daemon", string(launchJSON))
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Stdout, cmd.Stderr, cmd.Stdin = nil, nil, nil
+	devNull, _ := os.OpenFile(os.DevNull, os.O_RDWR, 0)
+	cmd.Stdin = devNull
+	cmd.Stdout = devNull
+	cmd.Stderr = devNull
+
+	if devNull != nil {
+		defer devNull.Close()
+	}
 
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("failed to start daemon: %w", err)
 	}
 
-	state := daemon.NewStateForProvider(launch.Provider, launch.ExternalID,
-		launch.TranscriptPath, launch.CWD, launch.ParentPID)
+	var state *daemon.State
+	if launch.OpenCodeServerURL != "" {
+		state = daemon.NewStateForProviderWithURL(launch.Provider, launch.ExternalID,
+			launch.OpenCodeServerURL, launch.CWD, launch.ParentPID)
+	} else {
+		state = daemon.NewStateForProvider(launch.Provider, launch.ExternalID,
+			launch.TranscriptPath, launch.CWD, launch.ParentPID)
+	}
 	state.PID = cmd.Process.Pid
 	if err := state.Save(); err != nil {
 		logger.Warn("Failed to save initial state: %v", err)

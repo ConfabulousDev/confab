@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/klauspost/compress/zstd"
 	"github.com/ConfabulousDev/confab/pkg/config"
+	"github.com/klauspost/compress/zstd"
 )
 
 func TestClient_CompressionThreshold(t *testing.T) {
