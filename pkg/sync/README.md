@@ -112,7 +112,7 @@ SyncAll() loop:
 
 **Adding a new API endpoint:** Add request/response types in `client.go`, add a method on `Client`, call it from the engine or command layer.
 
-**Adding new metadata extraction:** Modify the appropriate provider's `AnnotateChunk` in `pkg/provider/{claude,codex}.go`. Metadata is extracted from **raw lines before redaction**, then the extracted values are redacted via the closure passed to `AnnotateChunk` before being attached to the chunk via the `ChunkView` setters.
+**Adding new metadata extraction:** Modify the appropriate provider's `AnnotateChunk` in `pkg/provider/{claude,codex,opencode}.go`. Metadata is extracted from **raw lines before redaction**, then the extracted values are redacted via the closure passed to `AnnotateChunk` before being attached to the chunk via the `ChunkView` setters.
 
 **Tracking a new file type:** Add discovery logic in `DiscoverNewFiles()` (for content-driven discovery), the provider's `DiscoverDescendants` (for external-state discovery), or `DiscoverWorkflowFiles` (for directory-scanned, capability-gated workflow files). Set the file type in `TrackedFile.Type`. The rest of the pipeline (read, chunk, upload) is file-type agnostic.
 

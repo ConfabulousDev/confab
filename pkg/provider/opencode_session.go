@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 )
 
 // OpenCode message/part assembly + completeness gating.
@@ -21,7 +22,9 @@ import (
 // redaction happens later in pkg/sync's ReadChunk.
 
 const (
+	ocRoleUser            = "user"
 	ocRoleAssistant       = "assistant"
+	ocPartTypeText        = "text"
 	ocPartTypeTool        = "tool"
 	ocToolStatusCompleted = "completed"
 	ocToolStatusError     = "error"
@@ -51,6 +54,13 @@ type ocPartPeek struct {
 	State struct {
 		Status string `json:"status"`
 	} `json:"state"`
+}
+
+// ocTextPart decodes a text part's content, used to extract the first user
+// message preview (first_user_message) in AnnotateChunk.
+type ocTextPart struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
 }
 
 // ocPeekInfo decodes the gating fields from a raw message-info object.
@@ -145,4 +155,43 @@ func ocSortByID(envs []ocRawEnvelope) ([]ocRawEnvelope, error) {
 // ocHasError reports whether a raw error field is present and non-null.
 func ocHasError(raw json.RawMessage) bool {
 	return len(raw) > 0 && !bytes.Equal(bytes.TrimSpace(raw), []byte("null"))
+}
+
+// ocFirstUserMessageText returns the trimmed text of the first user message's
+// first text part across the given materialized {info, parts} JSONL lines, or
+// "" if none is found. Used for the first_user_message preview (CF-540): a
+// non-empty value makes a synced OpenCode session visible in the web session
+// list. Blank lines are skipped; a malformed line returns an error so the
+// caller can decide how to degrade.
+func ocFirstUserMessageText(lines []string) (string, error) {
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var env ocRawEnvelope
+		if err := json.Unmarshal([]byte(line), &env); err != nil {
+			return "", fmt.Errorf("decode envelope: %w", err)
+		}
+		info, err := ocPeekInfo(env.Info)
+		if err != nil {
+			return "", err
+		}
+		if info.Role != ocRoleUser {
+			continue
+		}
+		for _, raw := range env.Parts {
+			var part ocTextPart
+			if err := json.Unmarshal(raw, &part); err != nil {
+				return "", fmt.Errorf("decode text part: %w", err)
+			}
+			if part.Type != ocPartTypeText {
+				continue
+			}
+			if text := strings.TrimSpace(part.Text); text != "" {
+				return text, nil
+			}
+		}
+		return "", nil // first user message has no usable text part
+	}
+	return "", nil
 }

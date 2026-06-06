@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/ConfabulousDev/confab/pkg/config"
+	"github.com/ConfabulousDev/confab/pkg/logger"
 	"github.com/ConfabulousDev/confab/pkg/types"
 )
 
@@ -128,8 +129,34 @@ func (Opencode) DiscoverWorkflowFiles(WorkflowRegistrar, func(string) bool) (int
 	return 0, nil
 }
 
-func (Opencode) AnnotateChunk(_ ChunkView, _ bool, _ func(string) string) AnnotationResult {
-	return AnnotationResult{}
+// AnnotateChunk sets first_user_message on the first transcript chunk so synced
+// OpenCode sessions appear in the web session list (CF-540) — the backend's
+// list query hides any session with neither a summary nor a first_user_message,
+// and the CLI is the only source for those fields. OpenCode has no summary
+// concept, so only first_user_message is set (mirroring Codex). The text is the
+// first user message's first text part, trimmed and redacted (redact is
+// nil-safe). A malformed materialized line degrades to "no message found"
+// rather than failing the sync — we wrote these lines ourselves, so a parse
+// error signals a collector bug worth a debug log, not a blocked upload.
+func (Opencode) AnnotateChunk(c ChunkView, sentFirstUserMessage bool, redact func(string) string) AnnotationResult {
+	var result AnnotationResult
+	if sentFirstUserMessage || c.FileType() != "transcript" {
+		return result
+	}
+	msg, err := ocFirstUserMessageText(c.Lines())
+	if err != nil {
+		logger.Debug("opencode: failed to extract first user message: %v", err)
+		return result
+	}
+	if msg == "" {
+		return result
+	}
+	if redact != nil {
+		msg = redact(msg)
+	}
+	c.SetFirstUserMessage(msg)
+	result.IncludedFirstUserMessage = true
+	return result
 }
 
 func (Opencode) DefaultCWD(transcriptPath string) string {

@@ -151,3 +151,84 @@ func TestOpencodePeekInfoMalformed(t *testing.T) {
 		t.Error("expected error on malformed info")
 	}
 }
+
+// ---- ocFirstUserMessageText (CF-540) ----
+
+func TestOpencodeFirstUserMessageText(t *testing.T) {
+	cases := []struct {
+		name    string
+		lines   []string
+		want    string
+		wantErr bool
+	}{
+		{
+			name:  "first user text part",
+			lines: []string{`{"info":{"id":"m1","role":"user"},"parts":[{"type":"text","text":"hi there"}]}`},
+			want:  "hi there",
+		},
+		{
+			name: "skips assistant before user",
+			lines: []string{
+				`{"info":{"id":"m1","role":"assistant","finish":"stop"},"parts":[{"type":"text","text":"greeting"}]}`,
+				`{"info":{"id":"m2","role":"user"},"parts":[{"type":"text","text":"the prompt"}]}`,
+			},
+			want: "the prompt",
+		},
+		{
+			name: "first user message wins",
+			lines: []string{
+				`{"info":{"id":"m1","role":"user"},"parts":[{"type":"text","text":"first"}]}`,
+				`{"info":{"id":"m2","role":"user"},"parts":[{"type":"text","text":"second"}]}`,
+			},
+			want: "first",
+		},
+		{
+			name:  "first text part within message",
+			lines: []string{`{"info":{"id":"m1","role":"user"},"parts":[{"type":"file","filename":"a.png"},{"type":"text","text":"caption"}]}`},
+			want:  "caption",
+		},
+		{
+			name:  "user with no text part",
+			lines: []string{`{"info":{"id":"m1","role":"user"},"parts":[{"type":"file","filename":"a.png"}]}`},
+			want:  "",
+		},
+		{
+			name:  "no user message",
+			lines: []string{`{"info":{"id":"m1","role":"assistant","finish":"stop"},"parts":[{"type":"text","text":"x"}]}`},
+			want:  "",
+		},
+		{
+			name:  "empty lines",
+			lines: nil,
+			want:  "",
+		},
+		{
+			name:  "blank line skipped",
+			lines: []string{"", `{"info":{"id":"m1","role":"user"},"parts":[{"type":"text","text":"after blank"}]}`},
+			want:  "after blank",
+		},
+		{
+			name:    "malformed line errors",
+			lines:   []string{`{not json`},
+			want:    "",
+			wantErr: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := ocFirstUserMessageText(tc.lines)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tc.want {
+				t.Errorf("ocFirstUserMessageText = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
