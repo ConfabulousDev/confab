@@ -1,8 +1,8 @@
 # confab
 
-Sync and explore Claude Code and Codex sessions. Connect `confab` to your Confab backend to capture transcripts in real time for exploration, sharing, and analysis.
+Sync and explore Claude Code, Codex, and OpenCode sessions. Connect `confab` to your Confab backend to capture transcripts in real time for exploration, sharing, and analysis.
 
-Your `claude` and `codex` workflows stay unchanged.
+Your `claude`, `codex`, and `opencode` workflows stay unchanged.
 
 ![How Confab works](docs/how-it-works.svg)
 
@@ -16,7 +16,7 @@ curl -fsSL https://raw.githubusercontent.com/ConfabulousDev/confab/main/install.
 confab setup --backend-url https://confab.yourcompany.com
 ```
 
-`confab setup` detects provider CLIs (`claude`, `codex`) on `PATH` and wires hooks for each. Claude Code and Codex sessions sync in the same setup pass.
+`confab setup` detects provider CLIs (`claude`, `codex`, `opencode`) on `PATH` and wires each one. Claude Code, Codex, and OpenCode sessions sync in the same setup pass.
 
 ## Connect to Your Backend
 
@@ -110,9 +110,31 @@ Codex stores rollouts under `~/.codex/sessions/<yyyy>/<mm>/<dd>/rollout-*.jsonl`
 
 ### Caveats
 
-- Bundled skills (`/retro`) install for both Claude Code and Codex.
+- Bundled skills (`/retro`) install for Claude Code, Codex, and OpenCode.
 - GitHub commit/PR linking is wired for Claude Code and Codex. Claude also supports the GitHub MCP PR matcher; Codex uses Bash hooks.
 - Codex sync daemons shut down via parent-process liveness, not a `SessionEnd`/`Stop` hook.
+
+## OpenCode
+
+Confab supports OpenCode alongside Claude Code and Codex. `confab setup` detects `opencode` on `PATH` and wires it automatically. Use `--provider opencode` to configure only OpenCode.
+
+```bash
+# Auto-detect: wires every provider CLI on PATH
+confab setup --backend-url https://confab.yourcompany.com
+
+# OpenCode-only (explicit override)
+confab setup --provider opencode --backend-url https://confab.yourcompany.com
+```
+
+OpenCode has no on-disk transcript file — session data lives in a local SQLite database (`~/.local/share/opencode/opencode.db`). Confab does not edit OpenCode's config; instead `setup` installs a small TypeScript plugin into `~/.config/opencode/plugins/` that starts and stops the sync daemon on session lifecycle events. The daemon reads the SQLite database, materializes each session into a local transcript file, and uploads it through the same incremental, redacted pipeline as the other providers.
+
+### Caveats
+
+- **Live sync only.** OpenCode sessions are captured while you work. Offline commands (`confab list --provider opencode`, `confab save --provider opencode`) are not supported.
+- **No GitHub commit/PR linking.** The bidirectional GitHub linking wired for Claude Code and Codex is not available for OpenCode.
+- **Root sessions only.** OpenCode subagent sessions are suppressed; only the user-initiated root session is captured.
+- **Plugin-based install.** Lifecycle is driven by the installed plugin (not an OpenCode-native hook system). The daemon also monitors the parent OpenCode process and exits if it dies.
+- Bundled skills (`/retro`) install under `~/.config/opencode/skills/`.
 
 ## Configuration
 
@@ -127,6 +149,8 @@ Codex stores rollouts under `~/.codex/sessions/<yyyy>/<mm>/<dd>/rollout-*.jsonl`
 |----------|---------|---------|
 | `CONFAB_CLAUDE_DIR` | `~/.claude` | Override the Claude Code state directory |
 | `CONFAB_CODEX_DIR` | `~/.codex` | Override the Codex state directory |
+| `CONFAB_OPENCODE_CONFIG_DIR` | `~/.config/opencode` | Override the OpenCode config directory (plugin + skills) |
+| `CONFAB_OPENCODE_DB` | `~/.local/share/opencode/opencode.db` | Override the OpenCode SQLite database location |
 | `CONFAB_CONFIG_PATH` | `~/.confab/config.json` | Config file location |
 | `CONFAB_LOG_DIR` | `~/.confab/logs` | Log directory |
 

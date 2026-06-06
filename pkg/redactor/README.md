@@ -38,7 +38,7 @@ redacted := redactor.Redact(plainText)                // text-only fallback
 ## Invariants
 
 - **JSON structure must never be corrupted by redaction.** The parse-walk-redact-serialize pipeline ensures this. Never apply regex replacement directly to raw JSON strings.
-- **The engine is JSON-shape- and provider-agnostic.** `RedactJSONLine` walks any JSON value tree; Claude transcripts, Claude agent JSONL, and Codex rollouts all flow through the same pattern set. The backend's per-provider Redactions analytics cards depend on this CLI-side guarantee.
+- **The engine is JSON-shape- and provider-agnostic.** `RedactJSONLine` walks any JSON value tree; Claude transcripts, Claude agent JSONL, Codex rollouts, and OpenCode materialized JSONL all flow through the same pattern set. The backend's per-provider Redactions analytics cards depend on this CLI-side guarantee.
 - **Redaction markers use `[REDACTED:TYPE]` format.** The `TYPE` comes from the pattern's `Type` field. Must be consistent — the backend may parse these markers.
 - **Field-based patterns only work in JSON context.** They're skipped in plain text `Redact()` because there's no field name to match against.
 - **Must handle lines up to 10MB.** Uses a local `maxLineSize` constant (10MB, same value as `types.MaxJSONLLineSize`). Large tool results in transcripts can approach this limit.

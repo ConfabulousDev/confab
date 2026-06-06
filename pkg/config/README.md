@@ -23,7 +23,7 @@ Managed by `upload.go`. Contains backend URL, API key, log level, auto-update fl
 Managed by `config.go`. Contains hooks that Claude Code reads to fire events. We install/uninstall hooks here, but Claude Code owns the file and other tools may write to it concurrently.
 
 ### Bundled provider skills
-Managed by `bundled_skills.go`, `skill_til.go`, and `skill_retro.go` (and future `skill_*.go` files). Skills are standalone `SKILL.md` files installed by provider clients into their local skill layouts: Claude uses `~/.claude/skills/<name>/SKILL.md`; Codex uses `~/.codex/skills/<name>/SKILL.md`. If an existing `SKILL.md` has been customized by the user, install backs it up to `SKILL.md.bak` before overwriting; if the backup write fails, the install aborts rather than silently overwrite.
+Managed by `bundled_skills.go` and `skill_retro.go` (and future `skill_*.go` files). Skills are standalone `SKILL.md` files installed by provider clients into their local skill layouts: Claude uses `~/.claude/skills/<name>/SKILL.md`; Codex uses `~/.codex/skills/<name>/SKILL.md`; OpenCode uses `~/.config/opencode/skills/<name>/SKILL.md`. If an existing `SKILL.md` has been customized by the user, install backs it up to `SKILL.md.bak` before overwriting; if the backup write fails, the install aborts rather than silently overwrite.
 
 ## Key Types
 
@@ -46,9 +46,9 @@ Hook install/uninstall lives in `pkg/hookconfig` — see that package's README. 
 
 ### Adding a new bundled skill
 1. Add the provider-rendered template content in `skill_<name>.go`.
-2. Add the skill name to `bundledSkillNames` and route it in `bundledSkillTemplate`.
+2. Add the skill name to `bundledSkillNames` and route it in `bundledSkillTemplate` (keyed by `SkillProviderClaude` / `SkillProviderCodex` / `SkillProviderOpencode`; providers without a distinct template fall through to the generic one, as OpenCode does for `/retro`).
 3. Keep path/layout decisions in `pkg/provider`; `pkg/config` only receives a state directory and provider name.
-4. Add/update tests for Claude and Codex installs so both provider paths stay covered.
+4. Add/update tests for Claude, Codex, and OpenCode installs so all provider paths stay covered.
 
 ## Invariants
 
