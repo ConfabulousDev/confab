@@ -37,7 +37,19 @@ func (Opencode) WalkUpToRoot(sessionID string) (string, string, error) {
 	return sessionID, "", nil
 }
 
-func (Opencode) ShouldSpawnForInput(HookInput) bool { return true }
+// ShouldSpawnForInput refuses subagent (non-root) OpenCode sessions so only the
+// user-initiated root session spawns a daemon; CF-538 will capture subagents as
+// sidechain files under the root. A session is a subagent when the plugin
+// forwarded a parent session id (surfaced via an optional SessionParentID()
+// accessor on the input — kept off the shared HookInput interface so Claude/
+// Codex inputs need not implement it). Inputs without the accessor (or with an
+// empty parent id) are treated as root.
+func (Opencode) ShouldSpawnForInput(in HookInput) bool {
+	if sp, ok := in.(interface{ SessionParentID() string }); ok && sp.SessionParentID() != "" {
+		return false
+	}
+	return true
+}
 
 func (p Opencode) InstallHooks() (string, error) {
 	pluginDir, err := p.PluginDir()
@@ -179,12 +191,17 @@ func (p Opencode) ReadSessionHookInput(r io.Reader) (*types.OpenCodeHookInput, e
 	return &input, nil
 }
 
+// ScanSessions is unsupported for OpenCode: sessions live behind a running
+// OpenCode HTTP server (no on-disk transcript to scan), and offline manual mode
+// is deferred. Live capture happens via the sync daemon's collector instead.
 func (Opencode) ScanSessions() ([]SessionInfo, error) {
-	return nil, fmt.Errorf("ScanSessions not yet implemented for opencode (Phase 2)")
+	return nil, fmt.Errorf("opencode: manual session scan not supported (sessions sync live via the daemon; offline manual mode is not yet implemented)")
 }
 
+// FindSessionByID is unsupported for OpenCode for the same reason as
+// ScanSessions; manual `confab save <id>` is deferred.
 func (Opencode) FindSessionByID(string) (string, string, error) {
-	return "", "", fmt.Errorf("FindSessionByID not yet implemented for opencode (Phase 2)")
+	return "", "", fmt.Errorf("opencode: manual session lookup not supported (sessions sync live via the daemon; offline manual mode is not yet implemented)")
 }
 
 func (Opencode) ExtractMetadata([]string) SessionMetadata {
@@ -202,14 +219,18 @@ var opencodePluginSourceRaw = `import type { Plugin } from "@opencode-ai/plugin"
 export const ConfabSync: Plugin = async ({ $, serverUrl }) => {
   const running = new Set<string>()
 
-  async function spawn(sessionID: string, cwd: string) {
+  async function spawn(sessionID: string, cwd: string, parentID?: string) {
     if (running.has(sessionID)) return
     running.add(sessionID)
-    const input = JSON.stringify({
+    const payload: Record<string, unknown> = {
       session_id: sessionID,
       server_url: serverUrl.href,
       cwd,
-    })
+    }
+    // Forward the session's parent id (subagents only) so the CLI can suppress
+    // daemons for non-root sessions; omitted for root sessions.
+    if (parentID) payload.parent_id = parentID
+    const input = JSON.stringify(payload)
     try {
       await $§BT§echo ${input} | confab hook session-start --provider opencode§BT§.quiet()
     } catch (err) {
@@ -240,7 +261,7 @@ export const ConfabSync: Plugin = async ({ $, serverUrl }) => {
     event: async ({ event }) => {
       if (event.type === "session.created") {
         const session = event.properties.info
-        await spawn(session.id, session.directory)
+        await spawn(session.id, session.directory, session.parentID)
       }
     },
     dispose: async () => {

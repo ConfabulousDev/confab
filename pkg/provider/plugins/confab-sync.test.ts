@@ -112,6 +112,34 @@ describe("ConfabSync", () => {
       expectQuietCalled(0)
       expectQuietCalled(1)
     })
+
+    it("forwards parent_id for subagent (non-root) sessions", async () => {
+      const hooks = await ConfabSync({ $: mock$, serverUrl })
+      await hooks.event!({
+        event: {
+          type: "session.created",
+          properties: {
+            info: { id: "child-session", directory: "/tmp", parentID: "root-session" },
+          },
+        },
+      })
+      const cmd = reconstructCmd(0)
+      expect(cmd).toContain('"parent_id":"root-session"')
+    })
+
+    it("omits parent_id for root sessions", async () => {
+      const hooks = await ConfabSync({ $: mock$, serverUrl })
+      await hooks.event!({
+        event: {
+          type: "session.created",
+          properties: {
+            info: { id: "root-session", directory: "/tmp" },
+          },
+        },
+      })
+      const cmd = reconstructCmd(0)
+      expect(cmd).not.toContain("parent_id")
+    })
   })
 
   describe("session.idle event (regression)", () => {

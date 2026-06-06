@@ -2,6 +2,8 @@
 
 Sync engine that orchestrates incremental transcript uploads to the backend. Handles file tracking, chunking, agent discovery, and chunk upload. Provider-specific behavior (metadata extraction, descendant discovery, root metadata attachment) lives entirely in `pkg/provider`; the engine dispatches through the `provider.Provider` interface (see CF-397).
 
+The engine is fully **file-based** and provider-agnostic about its source: it reads whatever local file the daemon points `transcriptPath` at. For Claude/Codex that is the tool's own JSONL; for OpenCode the daemon **materializes** the HTTP-API session into `~/.confab/opencode/<id>/messages.jsonl` and points `transcriptPath` there, so the materialized file is tracked, redacted (`ReadChunk`), chunked, and uploaded exactly like any transcript — no OpenCode-specific code in this package. Because `TrackedFile` separates local `Path` from backend `Name`, the backend `file_name` is just the base (`messages.jsonl`).
+
 ## Files
 
 | File | Role |

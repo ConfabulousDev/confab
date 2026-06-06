@@ -30,6 +30,11 @@ type daemonLaunchInput struct {
 	OpenCodeServerURL string `json:"server_url,omitempty"`
 	CWD               string `json:"cwd"`
 	ParentPID         int    `json:"parent_pid,omitempty"`
+	// SessionParentID is the provider session's parent session id (OpenCode
+	// subagents only). Read by Opencode.ShouldSpawnForInput via the
+	// SessionParentID() accessor to suppress daemons for non-root sessions.
+	// Distinct from ParentPID (an OS process id).
+	SessionParentID string `json:"session_parent_id,omitempty"`
 }
 
 // launchAsHookInput satisfies provider.HookInput for the sole purpose
@@ -43,6 +48,11 @@ func (a launchAsHookInput) TranscriptPath() string { return a.l.TranscriptPath }
 func (a launchAsHookInput) CWD() string            { return a.l.CWD }
 func (a launchAsHookInput) HookEventName() string  { return "" }
 func (a launchAsHookInput) ParentPID() int         { return a.l.ParentPID }
+
+// SessionParentID exposes the provider session's parent session id so
+// Opencode.ShouldSpawnForInput can refuse non-root sessions. Accessed via an
+// interface type-assert, keeping the shared provider.HookInput surface minimal.
+func (a launchAsHookInput) SessionParentID() string { return a.l.SessionParentID }
 
 // maybeSpawnDaemon checks whether a daemon should be spawned for the
 // (provider, session) pair. Returns true if a fresh daemon was spawned;
