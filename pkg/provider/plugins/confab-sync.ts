@@ -1,6 +1,6 @@
 import type { Plugin } from "@opencode-ai/plugin"
 
-export const ConfabSync: Plugin = async ({ $, serverUrl }) => {
+export const ConfabSync: Plugin = async ({ $ }) => {
   const running = new Set<string>()
 
   async function spawn(sessionID: string, cwd: string, parentID?: string) {
@@ -8,7 +8,6 @@ export const ConfabSync: Plugin = async ({ $, serverUrl }) => {
     running.add(sessionID)
     const payload: Record<string, unknown> = {
       session_id: sessionID,
-      server_url: serverUrl.href,
       cwd,
     }
     // Forward the session's parent id (subagents only) so the CLI can suppress
@@ -29,10 +28,7 @@ export const ConfabSync: Plugin = async ({ $, serverUrl }) => {
   async function stop(sessionID: string) {
     if (!running.has(sessionID)) return
     running.delete(sessionID)
-    const input = JSON.stringify({
-      session_id: sessionID,
-      server_url: serverUrl.href,
-    })
+    const input = JSON.stringify({ session_id: sessionID })
     try {
       await $`echo ${input} | confab hook session-end --provider opencode`.quiet()
     } catch (err) {

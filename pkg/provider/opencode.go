@@ -212,15 +212,12 @@ func (p Opencode) ReadSessionHookInput(r io.Reader) (*types.OpenCodeHookInput, e
 	if err := types.ValidateSessionID(input.SessionID); err != nil {
 		return nil, err
 	}
-	if input.OpenCodeServerURL == "" {
-		return nil, fmt.Errorf("server_url is required")
-	}
 	return &input, nil
 }
 
-// ScanSessions is unsupported for OpenCode: sessions live behind a running
-// OpenCode HTTP server (no on-disk transcript to scan), and offline manual mode
-// is deferred. Live capture happens via the sync daemon's collector instead.
+// ScanSessions is unsupported for OpenCode: live capture happens via the
+// sync daemon's SQLite-backed collector, and offline manual mode is
+// deferred (would require its own SQLite session enumeration).
 func (Opencode) ScanSessions() ([]SessionInfo, error) {
 	return nil, fmt.Errorf("opencode: manual session scan not supported (sessions sync live via the daemon; offline manual mode is not yet implemented)")
 }
@@ -243,7 +240,7 @@ func (Opencode) ExtractMetadata([]string) SessionMetadata {
 // backticks). Tests validate the two stay in sync.
 var opencodePluginSourceRaw = `import type { Plugin } from "@opencode-ai/plugin"
 
-export const ConfabSync: Plugin = async ({ $, serverUrl }) => {
+export const ConfabSync: Plugin = async ({ $ }) => {
   const running = new Set<string>()
 
   async function spawn(sessionID: string, cwd: string, parentID?: string) {
@@ -251,7 +248,6 @@ export const ConfabSync: Plugin = async ({ $, serverUrl }) => {
     running.add(sessionID)
     const payload: Record<string, unknown> = {
       session_id: sessionID,
-      server_url: serverUrl.href,
       cwd,
     }
     // Forward the session's parent id (subagents only) so the CLI can suppress
@@ -272,10 +268,7 @@ export const ConfabSync: Plugin = async ({ $, serverUrl }) => {
   async function stop(sessionID: string) {
     if (!running.has(sessionID)) return
     running.delete(sessionID)
-    const input = JSON.stringify({
-      session_id: sessionID,
-      server_url: serverUrl.href,
-    })
+    const input = JSON.stringify({ session_id: sessionID })
     try {
       await $§BT§echo ${input} | confab hook session-end --provider opencode§BT§.quiet()
     } catch (err) {

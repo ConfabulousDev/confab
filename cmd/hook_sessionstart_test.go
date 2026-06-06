@@ -386,12 +386,11 @@ func runOpencodeSessionStart(t *testing.T, in []byte) error {
 	return sessionStartFromReader(bytes.NewReader(in), io.Discard)
 }
 
-func opencodeHookInputJSON(t *testing.T, sessionID, serverURL string) []byte {
+func opencodeHookInputJSON(t *testing.T, sessionID string) []byte {
 	t.Helper()
 	b, err := json.Marshal(types.OpenCodeHookInput{
-		SessionID:         sessionID,
-		OpenCodeServerURL: serverURL,
-		CWD:               "/work/opencode",
+		SessionID: sessionID,
+		CWD:       "/work/opencode",
 	})
 	if err != nil {
 		t.Fatalf("marshal hook input: %v", err)
@@ -418,7 +417,7 @@ func TestOpencodeHook_SessionStart_SpawnsDaemon(t *testing.T) {
 		return nil
 	}
 
-	in := opencodeHookInputJSON(t, "oc-session-0199", "http://localhost:4096")
+	in := opencodeHookInputJSON(t, "oc-session-0199")
 	if err := runOpencodeSessionStart(t, in); err != nil {
 		t.Fatalf("hook: %v", err)
 	}
@@ -427,9 +426,6 @@ func TestOpencodeHook_SessionStart_SpawnsDaemon(t *testing.T) {
 	}
 	if captured.ExternalID != "oc-session-0199" {
 		t.Errorf("session = %q, want %q", captured.ExternalID, "oc-session-0199")
-	}
-	if captured.OpenCodeServerURL != "http://localhost:4096" {
-		t.Errorf("OpenCodeServerURL = %q, want %q", captured.OpenCodeServerURL, "http://localhost:4096")
 	}
 	if captured.TranscriptPath != "" {
 		t.Errorf("TranscriptPath = %q, want \"\"", captured.TranscriptPath)
@@ -451,7 +447,7 @@ func TestOpencodeHook_SessionStart_NoDuplicateSpawn(t *testing.T) {
 	}
 
 	sessionID := "oc-session-duplicate"
-	state := daemon.NewStateForProviderWithURL(provider.NameOpencode, sessionID, "http://localhost:4096", "/work/opencode", 0)
+	state := daemon.NewStateForProvider(provider.NameOpencode, sessionID, "", "/work/opencode", 0)
 	state.PID = os.Getpid()
 	if err := state.Save(); err != nil {
 		t.Fatalf("save state: %v", err)
@@ -463,7 +459,7 @@ func TestOpencodeHook_SessionStart_NoDuplicateSpawn(t *testing.T) {
 		return nil
 	}
 
-	in := opencodeHookInputJSON(t, sessionID, "http://localhost:4096")
+	in := opencodeHookInputJSON(t, sessionID)
 	if err := runOpencodeSessionStart(t, in); err != nil {
 		t.Fatalf("hook: %v", err)
 	}
@@ -477,25 +473,18 @@ func TestBuildOpencodeLaunchArgs(t *testing.T) {
 		name      string
 		input     string
 		wantID    string
-		wantURL   string
 		wantCWD   string
 		wantError bool
 	}{
 		{
 			name:    "valid input",
-			input:   `{"session_id":"test-0199","server_url":"http://localhost:4096","cwd":"/work"}`,
+			input:   `{"session_id":"test-0199","cwd":"/work"}`,
 			wantID:  "test-0199",
-			wantURL: "http://localhost:4096",
 			wantCWD: "/work",
 		},
 		{
 			name:      "missing session_id",
-			input:     `{"server_url":"http://localhost:4096","cwd":"/work"}`,
-			wantError: true,
-		},
-		{
-			name:      "missing server_url",
-			input:     `{"session_id":"test-0199","cwd":"/work"}`,
+			input:     `{"cwd":"/work"}`,
 			wantError: true,
 		},
 		{
@@ -530,9 +519,6 @@ func TestBuildOpencodeLaunchArgs(t *testing.T) {
 			}
 			if launch.ExternalID != tt.wantID {
 				t.Errorf("ExternalID = %q, want %q", launch.ExternalID, tt.wantID)
-			}
-			if launch.OpenCodeServerURL != tt.wantURL {
-				t.Errorf("OpenCodeServerURL = %q, want %q", launch.OpenCodeServerURL, tt.wantURL)
 			}
 			if launch.CWD != tt.wantCWD {
 				t.Errorf("CWD = %q, want %q", launch.CWD, tt.wantCWD)

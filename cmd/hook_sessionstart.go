@@ -96,9 +96,6 @@ func sessionStartFromReader(r io.Reader, w io.Writer) error {
 	if launch.TranscriptPath != "" {
 		fmt.Fprintf(os.Stderr, "Path:     %s\n", launch.TranscriptPath)
 	}
-	if launch.OpenCodeServerURL != "" {
-		fmt.Fprintf(os.Stderr, "Server:   %s\n", launch.OpenCodeServerURL)
-	}
 	fmt.Fprintf(os.Stderr, "\n")
 
 	spawned, err := maybeSpawnDaemon(p, launch)
@@ -145,8 +142,9 @@ func buildStandardLaunchArgs(p provider.Provider, r io.Reader) (*daemonLaunchInp
 }
 
 // buildOpencodeLaunchArgs reads the JSON payload piped from the TS plugin.
-// The plugin constructs an OpenCodeHookInput with session_id, server_url, and
-// cwd — no transcript path since OpenCode data lives in the HTTP API.
+// The plugin constructs an OpenCodeHookInput with session_id, cwd, and
+// optional parent_id — no transcript path since OpenCode data lives in
+// the local SQLite DB, which the daemon resolves itself.
 func buildOpencodeLaunchArgs(r io.Reader) (*daemonLaunchInput, error) {
 	p := provider.Opencode{}
 	in, err := p.ReadSessionHookInput(r)
@@ -155,11 +153,10 @@ func buildOpencodeLaunchArgs(r io.Reader) (*daemonLaunchInput, error) {
 	}
 
 	return &daemonLaunchInput{
-		Provider:          p.Name(),
-		ExternalID:        in.SessionID,
-		OpenCodeServerURL: in.OpenCodeServerURL,
-		CWD:               in.CWD,
-		SessionParentID:   in.ParentID,
+		Provider:        p.Name(),
+		ExternalID:      in.SessionID,
+		CWD:             in.CWD,
+		SessionParentID: in.ParentID,
 	}, nil
 }
 
@@ -201,7 +198,6 @@ func runDaemon(hookInputJSON string) error {
 		Provider:           providerName,
 		ExternalID:         launch.ExternalID,
 		TranscriptPath:     launch.TranscriptPath,
-		OpenCodeServerURL:  launch.OpenCodeServerURL,
 		CWD:                launch.CWD,
 		ParentPID:          launch.ParentPID,
 		SyncInterval:       syncInterval,

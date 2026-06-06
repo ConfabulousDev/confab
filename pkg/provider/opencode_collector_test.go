@@ -4,26 +4,26 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
-// fakeOCClient serves a programmable set of envelopes; SubscribeEvents returns
-// an already-closed channel (collector falls back to polling/explicit calls).
-type fakeOCClient struct {
+// fakeOCSource serves a programmable set of envelopes (optionally an error)
+// and tracks the last sinceMessageID it was called with so tests can assert
+// the collector's HWM threading.
+type fakeOCSource struct {
 	envs []ocRawEnvelope
 	err  error
+
+	calls []string // sinceMessageID seen on each call, in order
 }
 
-func (f *fakeOCClient) SessionMessages(context.Context, string) ([]ocRawEnvelope, error) {
+func (f *fakeOCSource) ReadSession(_ context.Context, _ string, sinceMessageID string) ([]ocRawEnvelope, error) {
+	f.calls = append(f.calls, sinceMessageID)
 	return f.envs, f.err
-}
-
-func (f *fakeOCClient) SubscribeEvents(context.Context) (<-chan OpenCodeEvent, error) {
-	ch := make(chan OpenCodeEvent)
-	close(ch)
-	return ch, nil
 }
 
 func readLines(t *testing.T, path string) []string {
@@ -59,11 +59,11 @@ func lineID(t *testing.T, line string) string {
 
 func TestCollectorReconcileAppendsComplete(t *testing.T) {
 	out := filepath.Join(t.TempDir(), "opencode", "ses_1", "messages.jsonl")
-	client := &fakeOCClient{envs: []ocRawEnvelope{
+	source := &fakeOCSource{envs: []ocRawEnvelope{
 		env(`{"id":"msg_1","role":"user"}`, `{"type":"text","text":"hi"}`),
 		env(`{"id":"msg_2","role":"assistant","finish":"stop"}`, `{"type":"text","text":"yo"}`),
 	}}
-	c := NewOpenCodeCollector(client, "ses_1", out)
+	c := NewOpenCodeCollector(source, "ses_1", out, time.Second)
 	n, err := c.reconcile(context.Background())
 	if err != nil {
 		t.Fatalf("reconcile: %v", err)
@@ -80,12 +80,12 @@ func TestCollectorReconcileAppendsComplete(t *testing.T) {
 func TestCollectorReconcileGapStop(t *testing.T) {
 	out := filepath.Join(t.TempDir(), "messages.jsonl")
 	// Middle message incomplete: only the first (complete) user message emits.
-	client := &fakeOCClient{envs: []ocRawEnvelope{
+	source := &fakeOCSource{envs: []ocRawEnvelope{
 		env(`{"id":"msg_1","role":"user"}`),
 		env(`{"id":"msg_2","role":"assistant"}`), // no finish -> incomplete
 		env(`{"id":"msg_3","role":"user"}`),
 	}}
-	c := NewOpenCodeCollector(client, "ses_1", out)
+	c := NewOpenCodeCollector(source, "ses_1", out, time.Second)
 	n, err := c.reconcile(context.Background())
 	if err != nil {
 		t.Fatalf("reconcile: %v", err)
@@ -95,7 +95,7 @@ func TestCollectorReconcileGapStop(t *testing.T) {
 	}
 
 	// msg_2 completes -> next reconcile emits msg_2 then msg_3, in order.
-	client.envs[1] = env(`{"id":"msg_2","role":"assistant","finish":"stop"}`)
+	source.envs[1] = env(`{"id":"msg_2","role":"assistant","finish":"stop"}`)
 	n, err = c.reconcile(context.Background())
 	if err != nil {
 		t.Fatalf("reconcile 2: %v", err)
@@ -119,14 +119,14 @@ func TestCollectorIdempotentAcrossRestart(t *testing.T) {
 		env(`{"id":"msg_1","role":"user"}`),
 		env(`{"id":"msg_2","role":"assistant","finish":"stop"}`),
 	}
-	c1 := NewOpenCodeCollector(&fakeOCClient{envs: envs}, "ses_1", out)
+	c1 := NewOpenCodeCollector(&fakeOCSource{envs: envs}, "ses_1", out, time.Second)
 	if _, err := c1.reconcile(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 
 	// Fresh collector (simulating daemon restart) seeds from the file, then a
 	// reconcile over the same data appends nothing.
-	c2 := NewOpenCodeCollector(&fakeOCClient{envs: envs}, "ses_1", out)
+	c2 := NewOpenCodeCollector(&fakeOCSource{envs: envs}, "ses_1", out, time.Second)
 	if err := c2.seed(); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -144,12 +144,12 @@ func TestCollectorIdempotentAcrossRestart(t *testing.T) {
 
 func TestCollectorReconcileFiltersNonTerminalToolParts(t *testing.T) {
 	out := filepath.Join(t.TempDir(), "messages.jsonl")
-	client := &fakeOCClient{envs: []ocRawEnvelope{
+	source := &fakeOCSource{envs: []ocRawEnvelope{
 		env(`{"id":"msg_1","role":"assistant","finish":"tool-calls"}`,
 			`{"type":"tool","tool":"Bash","state":{"status":"running"}}`,
 			`{"type":"text","text":"done"}`),
 	}}
-	c := NewOpenCodeCollector(client, "ses_1", out)
+	c := NewOpenCodeCollector(source, "ses_1", out, time.Second)
 	if _, err := c.reconcile(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -165,5 +165,90 @@ func TestCollectorReconcileFiltersNonTerminalToolParts(t *testing.T) {
 	}
 	if len(got.Parts) != 1 {
 		t.Errorf("emitted %d parts, want 1 (running tool dropped)", len(got.Parts))
+	}
+}
+
+// TestCollectorAdvancesHWM asserts the collector passes its high-water
+// mark down to the source on each successive call. This is the efficiency
+// story: long sessions don't re-fetch the entire message history every
+// 30s, they fetch only what's new.
+func TestCollectorAdvancesHWM(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "messages.jsonl")
+	source := &fakeOCSource{envs: []ocRawEnvelope{
+		env(`{"id":"msg_a","role":"user"}`),
+		env(`{"id":"msg_b","role":"assistant","finish":"stop"}`),
+	}}
+	c := NewOpenCodeCollector(source, "ses_1", out, time.Second)
+
+	if _, err := c.reconcile(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.reconcile(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(source.calls) != 2 {
+		t.Fatalf("source called %d times, want 2", len(source.calls))
+	}
+	if source.calls[0] != "" {
+		t.Errorf("first call HWM = %q, want \"\"", source.calls[0])
+	}
+	if source.calls[1] != "msg_b" {
+		t.Errorf("second call HWM = %q, want msg_b", source.calls[1])
+	}
+}
+
+// TestCollectorErrorRecoveryResetsCadence asserts that a successful
+// reconcile clears the consecutive-error counter so the next failure
+// emits a fresh Warn (rather than being swallowed as "we already warned
+// about this kind 12 cycles ago"). Tests behavior; log-line capture is
+// covered separately if needed.
+func TestCollectorErrorRecoveryResetsCadence(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "messages.jsonl")
+	source := &fakeOCSource{err: errors.New("transient db error")}
+	c := NewOpenCodeCollector(source, "ses_1", out, time.Second)
+
+	c.tryReconcile(context.Background())
+	if c.consecutiveErr != 1 {
+		t.Errorf("after 1 failure: consecutiveErr=%d, want 1", c.consecutiveErr)
+	}
+	if c.lastErrKind == "" {
+		t.Error("lastErrKind not recorded")
+	}
+
+	// Recover.
+	source.err = nil
+	source.envs = []ocRawEnvelope{env(`{"id":"msg_1","role":"user"}`)}
+	c.tryReconcile(context.Background())
+	if c.consecutiveErr != 0 {
+		t.Errorf("after recovery: consecutiveErr=%d, want 0", c.consecutiveErr)
+	}
+	if c.lastErrKind != "" {
+		t.Errorf("lastErrKind=%q after recovery, want \"\"", c.lastErrKind)
+	}
+
+	// New failure: counter starts fresh at 1.
+	source.err = errors.New("different error")
+	source.envs = nil
+	c.tryReconcile(context.Background())
+	if c.consecutiveErr != 1 {
+		t.Errorf("after recovery+new failure: consecutiveErr=%d, want 1", c.consecutiveErr)
+	}
+}
+
+func TestWarnEveryNTargetsOnePerMinute(t *testing.T) {
+	cases := []struct {
+		interval time.Duration
+		wantN    int
+	}{
+		{5 * time.Second, 12},
+		{30 * time.Second, 2},
+		{60 * time.Second, 1},
+		{2 * time.Minute, 1},
+		{1 * time.Second, 60},
+	}
+	for _, c := range cases {
+		if got := warnEveryN(c.interval); got != c.wantN {
+			t.Errorf("warnEveryN(%v) = %d, want %d", c.interval, got, c.wantN)
+		}
 	}
 }

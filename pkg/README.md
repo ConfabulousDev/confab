@@ -7,6 +7,7 @@ Internal packages for the Confab CLI. Each package has its own README with exten
 | Package | Purpose | Change this when... |
 |---------|---------|---------------------|
 | [codextest](codextest/) | Reusable Codex SQLite + sessions-tree fixture for tests | Adding new fixture builders for cross-package Codex tests |
+| [opencodetest](opencodetest/) | Reusable OpenCode SQLite fixture for tests (real schema, programmatic seeding, no vendored DB) | Adding new fixture shapes for cross-package OpenCode tests |
 | [confabpath](confabpath/) | `~/.confab` path-builder helpers (`Dir`, `Subpath`) | Adding new top-level confab state files |
 | [config](config/) | Confab config (API key, redaction, settings.json read/write) | Adding config fields, changing settings.json plumbing |
 | [daemon](daemon/) | Background sync daemon lifecycle | Changing sync behavior, shutdown logic |
@@ -43,7 +44,8 @@ cmd/  (uses all packages)
  └── logger
 
 Test-only:
-  codextest (used by provider, sync, daemon, cmd test files)
+  codextest    (used by provider, sync, daemon, cmd test files)
+  opencodetest (used by provider, daemon test files)
 
 Leaf packages (no confab dependencies):
   types, utils, git, confabpath

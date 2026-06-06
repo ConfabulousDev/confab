@@ -1,12 +1,12 @@
 # pkg/daemon
 
-Background sync daemon for provider transcripts: Claude Code transcript JSONL, Codex rollout JSONL, or an OpenCode session materialized from its HTTP API. One daemon runs per active Claude session, Codex root tree, or OpenCode root session.
+Background sync daemon for provider transcripts: Claude Code transcript JSONL, Codex rollout JSONL, or an OpenCode session materialized from its local SQLite DB. One daemon runs per active Claude session, Codex root tree, or OpenCode root session.
 
 ## Files
 
 | File | Role |
 |------|------|
-| `daemon.go` | `Daemon` struct, `Run` loop, sync cycles, shutdown, inbox I/O, parent monitoring. For OpenCode (`opencodeServerURL` set) also starts/stops the `provider.OpenCodeCollector` goroutine and derives the materialized transcript path. |
+| `daemon.go` | `Daemon` struct, `Run` loop, sync cycles, shutdown, inbox I/O, parent monitoring. For OpenCode (`d.providerName == provider.NameOpencode`) also starts/stops the `provider.OpenCodeCollector` goroutine (backed by `provider.OpenCodeDBReader`) and derives the materialized transcript path. |
 | `state.go` | `State` persistence (`~/.confab/sync/{provider}/{id}.json`, with legacy flat-path fallback), process liveness checks, listing. Path builders are thin wrappers over `pkg/confabpath`. |
 
 ## Lifecycle
@@ -62,7 +62,7 @@ spawn ──> waitForTranscript (poll 2s, timeout 60s)
 - **Consecutive 404 detection.** After 3 consecutive 404 errors (`maxConsecutiveNotFound`), the daemon shuts down — the session was deleted from the backend.
 - **Auth recovery.** On `ErrUnauthorized`, the engine is reset to force config re-read on the next cycle. This allows users to fix their API key without restarting the daemon.
 - **Codex: one daemon per root tree, not per rollout.** The hook handler walks every Codex `SessionStart` event up to its top-most root before spawning, so state files are keyed by root UUID. The running root daemon calls provider descendant discovery each sync cycle and uploads verified subagent rollouts as sidechain files. `SessionStart` events for already-running trees become no-ops.
-- **OpenCode: collector materializes the data source.** OpenCode has no transcript file, so when `opencodeServerURL` is set the daemon derives `~/.confab/opencode/<id>/messages.jsonl` (via `openCodeMaterializedPath`), points `transcriptPath` at it, and runs a `provider.OpenCodeCollector` goroutine that fills it from the HTTP API. The collector is started **after** the no-op `waitForTranscript` (the file does not exist yet) and `backendSyncEnabled()` gates `Init`/`SyncAll` on the file existing — so no empty backend session is created before the first complete message. `shutdown()` cancels the collector and **waits** for it (`collectorDone`, 2s cap) before the final sync, so no append races the final read. Subagent sessions never reach here: `Opencode.ShouldSpawnForInput` refuses them at spawn time.
+- **OpenCode: collector materializes the data source.** OpenCode has no transcript file, so when `d.providerName == provider.NameOpencode` the daemon derives `~/.confab/opencode/<id>/messages.jsonl` (via `openCodeMaterializedPath`), points `transcriptPath` at it, and runs a `provider.OpenCodeCollector` goroutine. The collector reads OpenCode's local SQLite DB via `provider.NewOpenCodeDBReader(provider.OpenCodeDBPath())` (path is `CONFAB_OPENCODE_DB` → `$XDG_DATA_HOME/opencode/opencode.db` → `~/.local/share/opencode/opencode.db`) and polls at `d.syncInterval` — so the same `CONFAB_SYNC_INTERVAL_MS` knob tunes both backend sync + the SQLite poll. The collector is started **after** the no-op `waitForTranscript` (the file does not exist yet) and `backendSyncEnabled()` gates `Init`/`SyncAll` on the file existing — so no empty backend session is created before the first complete message. `shutdown()` cancels the collector and **waits** for it (`collectorDone`, 2s cap) before the final sync, so no append races the final read. Subagent sessions never reach here: `Opencode.ShouldSpawnForInput` refuses them at spawn time.
 
 ## Design Decisions
 

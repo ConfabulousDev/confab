@@ -2,8 +2,6 @@ package daemon
 
 import (
 	"context"
-	"fmt"
-	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -11,33 +9,17 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ConfabulousDev/confab/pkg/opencodetest"
 	"github.com/ConfabulousDev/confab/pkg/provider"
 )
 
-// opencodeServer stands in for a running OpenCode HTTP server: it serves a
-// session's messages and a minimal SSE stream that closes immediately (the
-// collector reconnects + re-reconciles, and its initial reconcile already
-// materializes data).
-func opencodeServer(sessionID, messagesJSON string) *httptest.Server {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/session/"+sessionID+"/message", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, messagesJSON)
-	})
-	mux.HandleFunc("/event", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, "data: {\"type\":\"server.connected\",\"properties\":{}}\n\n")
-	})
-	return httptest.NewServer(mux)
-}
-
-func runOpenCodeDaemon(t *testing.T, opencodeURL, externalID string, d time.Duration) {
+func runOpenCodeDaemon(t *testing.T, externalID string, d time.Duration) {
 	t.Helper()
 	dm := New(Config{
-		Provider:          provider.NameOpencode,
-		ExternalID:        externalID,
-		OpenCodeServerURL: opencodeURL,
-		CWD:               t.TempDir(),
-		SyncInterval:      50 * time.Millisecond,
+		Provider:     provider.NameOpencode,
+		ExternalID:   externalID,
+		CWD:          t.TempDir(),
+		SyncInterval: 50 * time.Millisecond,
 	})
 	ctx, cancel := context.WithCancel(context.Background())
 	errCh := make(chan error, 1)
@@ -57,15 +39,22 @@ func TestDaemonOpenCodeMaterializesAndUploads(t *testing.T) {
 	backend := httptest.NewServer(mock)
 	defer backend.Close()
 
-	ocMessages := `[
-		{"info":{"id":"msg_1","role":"user"},"parts":[{"type":"text","text":"hi"}]},
-		{"info":{"id":"msg_2","role":"assistant","finish":"stop","providerID":"anthropic","modelID":"claude-x"},"parts":[{"type":"text","text":"yo"}]}
-	]`
-	oc := opencodeServer(externalID, ocMessages)
-	defer oc.Close()
+	// Build a fixture DB with two complete messages.
+	db := opencodetest.NewDB(t)
+	db.AddSession(externalID, "")
+	db.AddMessage(externalID, "msg_1", opencodetest.UserTextMessage("hi"))
+	db.AddPart("msg_1", "prt_1", opencodetest.TextPart("hi"))
+	asst := opencodetest.AssistantMessageFinished("stop")
+	asst["modelID"] = "claude-x"
+	asst["providerID"] = "anthropic"
+	db.AddMessage(externalID, "msg_2", asst)
+	db.AddPart("msg_2", "prt_2", opencodetest.TextPart("yo"))
+
+	// Point the production reader at the fixture via the env-var hook.
+	t.Setenv(provider.OpenCodeDBEnv, db.Path())
 
 	tmpDir, _ := setupTestEnv(t, backend.URL)
-	runOpenCodeDaemon(t, oc.URL, externalID, 600*time.Millisecond)
+	runOpenCodeDaemon(t, externalID, 600*time.Millisecond)
 
 	// Materialized file exists with both complete messages.
 	matPath := filepath.Join(tmpDir, ".confab", "opencode", externalID, "messages.jsonl")
@@ -116,12 +105,15 @@ func TestDaemonOpenCodeNoEmptySession(t *testing.T) {
 	defer backend.Close()
 
 	// Only an incomplete assistant message (no finish) -> nothing to emit.
-	oc := opencodeServer(externalID,
-		`[{"info":{"id":"msg_1","role":"assistant"},"parts":[{"type":"text","text":"..."}]}]`)
-	defer oc.Close()
+	db := opencodetest.NewDB(t)
+	db.AddSession(externalID, "")
+	db.AddMessage(externalID, "msg_1", opencodetest.AssistantMessageStreaming())
+	db.AddPart("msg_1", "prt_1", opencodetest.TextPart("..."))
+
+	t.Setenv(provider.OpenCodeDBEnv, db.Path())
 
 	tmpDir, _ := setupTestEnv(t, backend.URL)
-	runOpenCodeDaemon(t, oc.URL, externalID, 400*time.Millisecond)
+	runOpenCodeDaemon(t, externalID, 400*time.Millisecond)
 
 	// No materialized file, so backendSyncEnabled stays false: no empty session.
 	matPath := filepath.Join(tmpDir, ".confab", "opencode", externalID, "messages.jsonl")
