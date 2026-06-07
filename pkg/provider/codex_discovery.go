@@ -350,6 +350,11 @@ func (p Codex) ExtractMetadata(lines []string) SessionMetadata {
 	}
 }
 
+// OnAlreadyRunning is a no-op for Codex: hook deduplication is the normal
+// path (Codex fires SessionStart for every spawned subagent). See Provider
+// interface doc for the OpenCode-specific behavior.
+func (Codex) OnAlreadyRunning(string) {}
+
 // DefaultCWD reads session_meta.cwd from the rollout. Falls back to
 // filepath.Dir on read failure or empty CWD so the upload still has a
 // directory to record.

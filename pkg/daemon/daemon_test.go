@@ -695,3 +695,118 @@ func TestDaemon_StateProviderIsolation_ClaudeAndCodexCoexist(t *testing.T) {
 		t.Errorf("provider state files crossed wires (both transcript=%q)", gotClaude.TranscriptPath)
 	}
 }
+
+// CF-549 R6 — monitorParent tests --------------------------------------------
+
+// TestMonitorParentSignalsOnDeath asserts the monitor closes
+// parentDeathCh when it observes the parent PID is no longer alive.
+// Uses a sentinel "dead" PID (999999 is well above the usual PID range
+// on Linux/macOS), so the very first tick should detect death.
+func TestMonitorParentSignalsOnDeath(t *testing.T) {
+	origInterval := parentCheckInterval
+	parentCheckInterval = 50 * time.Millisecond
+	defer func() { parentCheckInterval = origInterval }()
+
+	d := &Daemon{
+		parentPID:     999999, // very unlikely to be a live process
+		stopCh:        make(chan struct{}),
+		parentDeathCh: make(chan struct{}),
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go d.monitorParent(ctx)
+
+	select {
+	case <-d.parentDeathCh:
+		// success
+	case <-time.After(1 * time.Second):
+		t.Fatal("monitorParent did not signal within 1s")
+	}
+}
+
+// TestMonitorParentExitsOnStop asserts the monitor returns when stopCh
+// closes and does NOT close parentDeathCh (the daemon is shutting down
+// for a different reason; closing parentDeathCh would race-rebrand the
+// shutdown reason).
+func TestMonitorParentExitsOnStop(t *testing.T) {
+	d := &Daemon{
+		parentPID:     os.Getpid(), // alive
+		stopCh:        make(chan struct{}),
+		parentDeathCh: make(chan struct{}),
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	done := make(chan struct{})
+	go func() {
+		d.monitorParent(ctx)
+		close(done)
+	}()
+
+	close(d.stopCh)
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("monitorParent did not exit within 2s of stopCh close")
+	}
+
+	select {
+	case <-d.parentDeathCh:
+		t.Fatal("parentDeathCh closed despite stop-driven exit; would mislabel shutdown reason")
+	default:
+		// success
+	}
+}
+
+// TestMonitorParentExitsOnContext asserts the monitor returns when its
+// context is cancelled, again without closing parentDeathCh.
+func TestMonitorParentExitsOnContext(t *testing.T) {
+	d := &Daemon{
+		parentPID:     os.Getpid(),
+		stopCh:        make(chan struct{}),
+		parentDeathCh: make(chan struct{}),
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+
+	done := make(chan struct{})
+	go func() {
+		d.monitorParent(ctx)
+		close(done)
+	}()
+
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("monitorParent did not exit within 2s of context cancel")
+	}
+
+	select {
+	case <-d.parentDeathCh:
+		t.Fatal("parentDeathCh closed despite ctx-driven exit")
+	default:
+		// success
+	}
+}
+
+// TestNewDaemonHasParentDeathChannel asserts the Daemon constructor
+// initializes parentDeathCh so the main loop's select on it is safe
+// even when monitorParent is never started (parentPID == 0). Closing a
+// nil channel panics; receiving from one blocks forever, which is fine,
+// but the field must be non-nil to satisfy the select{} ergonomics
+// across the existing test code.
+func TestNewDaemonHasParentDeathChannel(t *testing.T) {
+	d := New(Config{ExternalID: "test-no-parent", ParentPID: 0})
+	if d.parentDeathCh == nil {
+		t.Fatal("New() should initialize parentDeathCh; nil channel breaks the main-loop select")
+	}
+	// Sanity: a non-nil unbuffered channel should not be closed.
+	select {
+	case <-d.parentDeathCh:
+		t.Fatal("freshly-constructed daemon has a closed parentDeathCh")
+	default:
+	}
+}

@@ -680,3 +680,119 @@ func TestMatchesClaudeProcess(t *testing.T) {
 		})
 	}
 }
+
+
+// CF-549 M1 + M2 — maybeSpawnDaemon tests ----------------------------------
+
+// recordingProvider wraps a real Provider and records calls to
+// OnAlreadyRunning, so tests can verify the call site without depending
+// on log-output inspection.
+type recordingProvider struct {
+	provider.Provider
+	alreadyRunningCalls []string
+}
+
+func (r *recordingProvider) OnAlreadyRunning(externalID string) {
+	r.alreadyRunningCalls = append(r.alreadyRunningCalls, externalID)
+	r.Provider.OnAlreadyRunning(externalID)
+}
+
+// TestMaybeSpawnDaemonUsesPluginParentPID asserts that when the launch
+// input carries a non-zero ParentPID (plugin-authoritative), the spawn
+// uses it verbatim instead of overriding with the regex walk. Decouples
+// daemon orphan-prevention from the fragility of FindParentPID.
+func TestMaybeSpawnDaemonUsesPluginParentPID(t *testing.T) {
+	origSpawnDaemon := spawnDaemonFunc
+	defer func() { spawnDaemonFunc = origSpawnDaemon }()
+
+	_ = setupSyncTestEnv(t)
+
+	var spawnedInput *daemonLaunchInput
+	spawnDaemonFunc = func(launch *daemonLaunchInput) error {
+		spawnedInput = launch
+		return nil
+	}
+
+	const pluginPID = 424242 // distinctive — must not match any walk result
+
+	launch := &daemonLaunchInput{
+		ExternalID: "ses_with_plugin_pid",
+		CWD:        "/work/opencode",
+		ParentPID:  pluginPID,
+	}
+	if _, err := maybeSpawnDaemon(provider.Opencode{}, launch); err != nil {
+		t.Fatalf("maybeSpawnDaemon: %v", err)
+	}
+	if spawnedInput == nil {
+		t.Fatal("spawnDaemonFunc not called")
+	}
+	if spawnedInput.ParentPID != pluginPID {
+		t.Errorf("ParentPID = %d, want %d (plugin-provided)", spawnedInput.ParentPID, pluginPID)
+	}
+}
+
+// TestMaybeSpawnDaemonFallsBackToWalkWhenParentPIDZero asserts the
+// observability walk is still authoritative when the plugin did not
+// provide a parent_pid. Mirrors the Claude/Codex code path that has no
+// plugin-side authoritative source.
+func TestMaybeSpawnDaemonFallsBackToWalkWhenParentPIDZero(t *testing.T) {
+	origSpawnDaemon := spawnDaemonFunc
+	defer func() { spawnDaemonFunc = origSpawnDaemon }()
+
+	_ = setupSyncTestEnv(t)
+
+	var spawnedInput *daemonLaunchInput
+	spawnDaemonFunc = func(launch *daemonLaunchInput) error {
+		spawnedInput = launch
+		return nil
+	}
+
+	launch := &daemonLaunchInput{
+		ExternalID:     "ses_no_plugin_pid",
+		TranscriptPath: filepath.Join(t.TempDir(), "transcript.jsonl"),
+		CWD:            "/work/claude",
+		// ParentPID: 0 — emulates Claude/Codex where the regex walk is the
+		// only source. The walk may return 0 in the test environment too;
+		// the contract is just "no override of the plugin's value". We
+		// allow any value here, but it must not be 424242 (the sentinel
+		// from the previous test).
+	}
+	if _, err := maybeSpawnDaemon(provider.ClaudeCode{}, launch); err != nil {
+		t.Fatalf("maybeSpawnDaemon: %v", err)
+	}
+	if spawnedInput == nil {
+		t.Fatal("spawnDaemonFunc not called")
+	}
+	if spawnedInput.ParentPID == 424242 {
+		t.Errorf("ParentPID = %d, must not be the plugin-sentinel; walk should have produced its own value or 0", spawnedInput.ParentPID)
+	}
+}
+
+// TestMaybeSpawnDaemonCallsProviderOnAlreadyRunning asserts the
+// already-running branch invokes p.OnAlreadyRunning so providers can
+// register provider-specific telemetry (M2: OpenCode logs a warning).
+func TestMaybeSpawnDaemonCallsProviderOnAlreadyRunning(t *testing.T) {
+	_ = setupSyncTestEnv(t)
+
+	const sessionID = "ses_already_running"
+	state := daemon.NewStateForProvider(provider.NameOpencode, sessionID, "", "/work/opencode", 0)
+	state.PID = os.Getpid()
+	if err := state.Save(); err != nil {
+		t.Fatalf("save state: %v", err)
+	}
+
+	rp := &recordingProvider{Provider: provider.Opencode{}}
+	spawned, err := maybeSpawnDaemon(rp, &daemonLaunchInput{
+		ExternalID: sessionID,
+		CWD:        "/work/opencode",
+	})
+	if err != nil {
+		t.Fatalf("maybeSpawnDaemon: %v", err)
+	}
+	if spawned {
+		t.Fatal("expected spawned=false (daemon already running)")
+	}
+	if len(rp.alreadyRunningCalls) != 1 || rp.alreadyRunningCalls[0] != sessionID {
+		t.Errorf("OnAlreadyRunning calls = %v, want [%q]", rp.alreadyRunningCalls, sessionID)
+	}
+}

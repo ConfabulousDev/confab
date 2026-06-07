@@ -79,11 +79,23 @@ func maybeSpawnDaemon(p provider.Provider, launch *daemonLaunchInput) (bool, err
 	}
 	if existingState != nil && existingState.IsDaemonRunning() {
 		logger.Info("%s daemon already running: pid=%d", p.Name(), existingState.PID)
+		p.OnAlreadyRunning(launch.ExternalID)
 		return false, nil
 	}
 
 	launch.Provider = p.Name()
-	launch.ParentPID = p.FindParentPID()
+	// CF-549 M1: prefer plugin-provided ParentPID (authoritative for
+	// OpenCode, where the plugin runs inside opencode's Bun process and
+	// knows process.pid directly). Always also walk the process tree so we
+	// can spot drift in FindParentPID before it bites in production. The
+	// walk return is used only when the plugin didn't provide a PID.
+	walkedPID := p.FindParentPID()
+	if launch.ParentPID == 0 {
+		launch.ParentPID = walkedPID
+	} else if walkedPID != 0 && walkedPID != launch.ParentPID {
+		logger.Warn("ParentPID mismatch for %s session %s: plugin=%d walked=%d; trusting plugin",
+			p.Name(), launch.ExternalID, launch.ParentPID, walkedPID)
+	}
 
 	if err := spawnDaemonFunc(launch); err != nil {
 		return false, fmt.Errorf("failed to spawn %s daemon: %w", p.Name(), err)

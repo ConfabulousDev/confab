@@ -2589,6 +2589,13 @@ func TestDaemonShutsDownWhenParentPIDDies(t *testing.T) {
 	server := httptest.NewServer(mock)
 	defer server.Close()
 
+	// CF-549 R6: parentCheckInterval drives the monitorParent goroutine,
+	// not the sync loop. Shorten it for this fast test; the new
+	// TestDaemonShutsDownWithin6sOfParentDeath covers the real interval.
+	origInterval := parentCheckInterval
+	parentCheckInterval = 100 * time.Millisecond
+	defer func() { parentCheckInterval = origInterval }()
+
 	tmpDir, transcriptPath := setupTestEnv(t, server.URL)
 	os.WriteFile(transcriptPath, []byte(`{"type":"system"}`+"\n"), 0644)
 
@@ -2708,4 +2715,65 @@ func TestDaemonSurvivesPastFirstSyncInterval(t *testing.T) {
 
 	cancel()
 	<-errCh
+}
+
+// TestDaemonShutsDownWithin6sOfParentDeath is the R6 integration test:
+// it asserts that the new monitorParent goroutine drives shutdown at the
+// real (production) parentCheckInterval, not just at the override used by
+// faster tests. Sleep budget: parentCheckInterval + 1s.
+func TestDaemonShutsDownWithin6sOfParentDeath(t *testing.T) {
+	mock := newMockBackend(t)
+	server := httptest.NewServer(mock)
+	defer server.Close()
+
+	tmpDir, transcriptPath := setupTestEnv(t, server.URL)
+	os.WriteFile(transcriptPath, []byte(`{"type":"system"}`+"\n"), 0644)
+
+	// Use the production parentCheckInterval; the budget below is sized to it.
+	cmd := exec.Command("sleep", "30")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("spawn parent: %v", err)
+	}
+	parentPID := cmd.Process.Pid
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		_, _ = cmd.Process.Wait()
+	})
+
+	d := New(Config{
+		ExternalID:         "r6-parent-death",
+		TranscriptPath:     transcriptPath,
+		CWD:                tmpDir,
+		ParentPID:          parentPID,
+		SyncInterval:       60 * time.Second, // long, so sync loop CANNOT do the parent check
+		SyncIntervalJitter: 0,
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), parentCheckInterval+5*time.Second)
+	defer cancel()
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- d.Run(ctx) }()
+
+	// Let the daemon get past startup, then kill the parent.
+	time.Sleep(500 * time.Millisecond)
+	if err := cmd.Process.Kill(); err != nil {
+		t.Fatalf("kill parent: %v", err)
+	}
+	if _, err := cmd.Process.Wait(); err != nil {
+		t.Logf("wait parent (expected after Kill): %v", err)
+	}
+
+	// Daemon must exit within parentCheckInterval + 1s, NOT wait for the
+	// 60s sync timer. If the inline check were still load-bearing, the
+	// daemon would not exit until that timer.
+	deadline := parentCheckInterval + 1*time.Second
+	select {
+	case <-errCh:
+		// good
+	case <-time.After(deadline):
+		cancel()
+		<-errCh
+		t.Fatalf("daemon did not exit within %v after parent died; monitorParent goroutine not driving shutdown", deadline)
+	}
 }

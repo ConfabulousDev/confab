@@ -12,6 +12,7 @@ import (
 
 	"github.com/ConfabulousDev/confab/pkg/codextest"
 	"github.com/ConfabulousDev/confab/pkg/daemon"
+	"github.com/ConfabulousDev/confab/pkg/opencodetest"
 	"github.com/ConfabulousDev/confab/pkg/provider"
 	"github.com/ConfabulousDev/confab/pkg/types"
 )
@@ -556,5 +557,111 @@ func TestCodexHook_RespondsWithoutPanic_WhenNoSpawn(t *testing.T) {
 	// Sanity: hook input was valid (no malformed-path errors swallowed).
 	if !strings.HasSuffix(root.Path(), ".jsonl") {
 		t.Errorf("fixture path looks wrong: %q", root.Path())
+	}
+}
+
+
+// CF-549 buildOpencodeLaunchArgs tests --------------------------------------
+
+// TestBuildOpencodeLaunchArgsUsesInlineCWD asserts the fast path: when the
+// plugin sends cwd inline (session.created flow), no SQLite lookup runs
+// and the launch input carries that cwd verbatim.
+func TestBuildOpencodeLaunchArgsUsesInlineCWD(t *testing.T) {
+	// Sentinel DB path that does not exist; if we accidentally do the
+	// lookup, it would surface the path in a log/error. The fast path
+	// must not touch the DB at all.
+	t.Setenv(provider.OpenCodeDBEnv, filepath.Join(t.TempDir(), "should-not-be-read.db"))
+
+	in := []byte(`{"session_id":"ses_inline","cwd":"/work/inline","parent_pid":42}`)
+	launch, err := buildOpencodeLaunchArgs(bytes.NewReader(in))
+	if err != nil {
+		t.Fatalf("buildOpencodeLaunchArgs: %v", err)
+	}
+	if launch.CWD != "/work/inline" {
+		t.Errorf("CWD = %q, want %q", launch.CWD, "/work/inline")
+	}
+	if launch.ParentPID != 42 {
+		t.Errorf("ParentPID = %d, want 42", launch.ParentPID)
+	}
+}
+
+// TestBuildOpencodeLaunchArgsResolvesFromDB asserts the resume path: with
+// an empty cwd, the handler reads directory + parent_id from the
+// OpenCode SQLite DB and stamps them into the launch input.
+func TestBuildOpencodeLaunchArgsResolvesFromDB(t *testing.T) {
+	const sid = "ses_resume_lookup"
+	const dir = "/work/resumed"
+	b := opencodetest.NewDB(t)
+	b.AddSessionWithDir(sid, "", dir)
+	t.Setenv(provider.OpenCodeDBEnv, b.Path())
+
+	in := []byte(`{"session_id":"` + sid + `","cwd":"","parent_pid":99}`)
+	launch, err := buildOpencodeLaunchArgs(bytes.NewReader(in))
+	if err != nil {
+		t.Fatalf("buildOpencodeLaunchArgs: %v", err)
+	}
+	if launch.CWD != dir {
+		t.Errorf("CWD = %q, want %q (resolved from DB)", launch.CWD, dir)
+	}
+	if launch.SessionParentID != "" {
+		t.Errorf("SessionParentID = %q, want \"\" for root session", launch.SessionParentID)
+	}
+	if launch.ParentPID != 99 {
+		t.Errorf("ParentPID = %d, want 99 (from input)", launch.ParentPID)
+	}
+}
+
+// TestBuildOpencodeLaunchArgsResolvesParentIDForSubagent asserts the
+// resume path surfaces the SessionParentID so ShouldSpawnForInput can
+// later refuse the spawn for a subagent.
+func TestBuildOpencodeLaunchArgsResolvesParentIDForSubagent(t *testing.T) {
+	const root = "ses_root_for_resume"
+	const child = "ses_child_for_resume"
+	b := opencodetest.NewDB(t)
+	b.AddSessionWithDir(root, "", "/work/parent")
+	b.AddSessionWithDir(child, root, "/work/child")
+	t.Setenv(provider.OpenCodeDBEnv, b.Path())
+
+	in := []byte(`{"session_id":"` + child + `","cwd":""}`)
+	launch, err := buildOpencodeLaunchArgs(bytes.NewReader(in))
+	if err != nil {
+		t.Fatalf("buildOpencodeLaunchArgs: %v", err)
+	}
+	if launch.SessionParentID != root {
+		t.Errorf("SessionParentID = %q, want %q (resolved from DB)", launch.SessionParentID, root)
+	}
+}
+
+// TestBuildOpencodeLaunchArgsDBErrorGraceful asserts that when the
+// SQLite DB is unreachable (path points to a missing file), the launch
+// still returns successfully with empty cwd/parent_id. Failure to
+// resolve must NOT block the spawn.
+func TestBuildOpencodeLaunchArgsDBErrorGraceful(t *testing.T) {
+	t.Setenv(provider.OpenCodeDBEnv, filepath.Join(t.TempDir(), "nonexistent.db"))
+
+	in := []byte(`{"session_id":"ses_nodb","cwd":""}`)
+	launch, err := buildOpencodeLaunchArgs(bytes.NewReader(in))
+	if err != nil {
+		t.Fatalf("buildOpencodeLaunchArgs returned error; resume must degrade gracefully: %v", err)
+	}
+	if launch.CWD != "" {
+		t.Errorf("CWD = %q, want \"\" (DB missing)", launch.CWD)
+	}
+}
+
+// TestBuildOpencodeLaunchArgsDBNotFoundGraceful asserts that when the DB
+// exists but the session_id is absent, launch still returns successfully
+// with empty fields (no error).
+func TestBuildOpencodeLaunchArgsDBNotFoundGraceful(t *testing.T) {
+	b := opencodetest.NewDB(t) // empty DB, no rows
+	t.Setenv(provider.OpenCodeDBEnv, b.Path())
+
+	in := []byte(`{"session_id":"ses_absent","cwd":""}`)
+	launch, err := buildOpencodeLaunchArgs(bytes.NewReader(in))
+	if err != nil {
+		t.Fatalf("buildOpencodeLaunchArgs: %v", err)
+	}
+	if launch.CWD != "" {
+		t.Errorf("CWD = %q, want \"\" (session not in DB)", launch.CWD)
 	}
 }

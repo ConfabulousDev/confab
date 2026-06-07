@@ -126,9 +126,17 @@ func NewDB(t *testing.T) *Builder {
 func (b *Builder) Path() string { return b.path }
 
 // AddSession inserts a session row. parentID="" for a root session.
-// NOT NULL columns get placeholder values; tests should not assert on
-// session.* fields the reader doesn't query.
+// NOT NULL columns get placeholder values; tests that exercise the
+// session.directory or session.parent_id columns should use
+// AddSessionWithDir instead.
 func (b *Builder) AddSession(id, parentID string) *Builder {
+	return b.AddSessionWithDir(id, parentID, "/tmp")
+}
+
+// AddSessionWithDir is the full-form session insert: it lets the caller
+// set the session.directory column, which the reader's ReadSessionInfo
+// surfaces. Used by CF-549 tests that assert on directory + parent_id.
+func (b *Builder) AddSessionWithDir(id, parentID, directory string) *Builder {
 	b.t.Helper()
 	var pid any
 	if parentID != "" {
@@ -136,9 +144,9 @@ func (b *Builder) AddSession(id, parentID string) *Builder {
 	}
 	const stmt = `INSERT INTO session
 		(id, project_id, parent_id, slug, directory, title, version, time_created, time_updated)
-		VALUES (?, 'proj_test', ?, 'slug', '/tmp', 'title', '1.15.13', 0, 0)`
-	if _, err := b.db.Exec(stmt, id, pid); err != nil {
-		b.t.Fatalf("opencodetest: AddSession(%q): %v", id, err)
+		VALUES (?, 'proj_test', ?, 'slug', ?, 'title', '1.15.13', 0, 0)`
+	if _, err := b.db.Exec(stmt, id, pid, directory); err != nil {
+		b.t.Fatalf("opencodetest: AddSessionWithDir(%q): %v", id, err)
 	}
 	return b
 }

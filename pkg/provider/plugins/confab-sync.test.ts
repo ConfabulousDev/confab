@@ -213,4 +213,156 @@ describe("ConfabSync", () => {
       expect(mock$).not.toHaveBeenCalled()
     })
   })
+
+  // CF-549 resume signal: any session.* event on the allowlist triggers a
+  // spawn for an active session. The allowlist is hardcoded — new event
+  // types upstream must be reviewed and explicitly added.
+  describe("resume signal", () => {
+    it("session.status spawns daemon with empty cwd and authoritative parent_pid", async () => {
+      const hooks = await ConfabSync({ $: mock$ })
+      await hooks.event!({
+        event: {
+          type: "session.status",
+          properties: { sessionID: "ses_resume_status", status: "busy" },
+        } as any,
+      })
+
+      expect(mock$).toHaveBeenCalledTimes(1)
+      const cmd = reconstructCmd(0)
+      expect(cmd).toContain("confab hook session-start --provider opencode")
+      expect(cmd).toContain('"session_id":"ses_resume_status"')
+      expect(cmd).toContain('"cwd":""')
+      expect(cmd).toContain(`"parent_pid":${process.pid}`)
+      expect(cmd).not.toContain("parent_id")
+    })
+
+    it("session.updated spawns daemon", async () => {
+      const hooks = await ConfabSync({ $: mock$ })
+      await hooks.event!({
+        event: { type: "session.updated", properties: { sessionID: "ses_updated" } } as any,
+      })
+      expect(mock$).toHaveBeenCalledTimes(1)
+    })
+
+    it("session.compacted spawns daemon (covers /compact-on-resume)", async () => {
+      const hooks = await ConfabSync({ $: mock$ })
+      await hooks.event!({
+        event: { type: "session.compacted", properties: { sessionID: "ses_compact" } } as any,
+      })
+      expect(mock$).toHaveBeenCalledTimes(1)
+    })
+
+    it("session.error spawns daemon (covers error-on-resume)", async () => {
+      const hooks = await ConfabSync({ $: mock$ })
+      await hooks.event!({
+        event: {
+          type: "session.error",
+          properties: { sessionID: "ses_err", error: "boom" },
+        } as any,
+      })
+      expect(mock$).toHaveBeenCalledTimes(1)
+    })
+
+    it("session.deleted does NOT spawn (would shell out for a dead row)", async () => {
+      const hooks = await ConfabSync({ $: mock$ })
+      await hooks.event!({
+        event: { type: "session.deleted", properties: { sessionID: "ses_del" } } as any,
+      })
+      expect(mock$).not.toHaveBeenCalled()
+    })
+
+    it("session.diff does NOT spawn (off the allowlist; unclear semantics)", async () => {
+      const hooks = await ConfabSync({ $: mock$ })
+      await hooks.event!({
+        event: { type: "session.diff", properties: { sessionID: "ses_diff" } } as any,
+      })
+      expect(mock$).not.toHaveBeenCalled()
+    })
+
+    it("session.idle does NOT spawn (off the allowlist; deprecated + redundant with session.status)", async () => {
+      const hooks = await ConfabSync({ $: mock$ })
+      await hooks.event!({
+        event: { type: "session.idle", properties: { sessionID: "ses_idle_off_list" } } as any,
+      })
+      expect(mock$).not.toHaveBeenCalled()
+    })
+
+    it("message.updated does NOT spawn (allowlist enforcement, F3 mitigation)", async () => {
+      const hooks = await ConfabSync({ $: mock$ })
+      await hooks.event!({
+        event: {
+          type: "message.updated",
+          properties: { sessionID: "ses_msg", messageID: "msg_1" },
+        } as any,
+      })
+      expect(mock$).not.toHaveBeenCalled()
+    })
+
+    it("dedups session.status then session.updated for the same session", async () => {
+      const hooks = await ConfabSync({ $: mock$ })
+      await hooks.event!({
+        event: { type: "session.status", properties: { sessionID: "ses_dup", status: "busy" } } as any,
+      })
+      await hooks.event!({
+        event: { type: "session.updated", properties: { sessionID: "ses_dup" } } as any,
+      })
+      expect(mock$).toHaveBeenCalledTimes(1)
+    })
+
+    it("dedups session.created then session.status; preserves inline cwd", async () => {
+      const hooks = await ConfabSync({ $: mock$ })
+      await hooks.event!({
+        event: {
+          type: "session.created",
+          properties: { info: { id: "ses_combo", directory: "/inline/dir" } },
+        } as any,
+      })
+      await hooks.event!({
+        event: { type: "session.status", properties: { sessionID: "ses_combo", status: "busy" } } as any,
+      })
+      expect(mock$).toHaveBeenCalledTimes(1)
+      const cmd = reconstructCmd(0)
+      expect(cmd).toContain('"cwd":"/inline/dir"')
+    })
+
+    it("dedups concurrent invocations via Promise.all (atomic has/add)", async () => {
+      const hooks = await ConfabSync({ $: mock$ })
+      await Promise.all([
+        hooks.event!({
+          event: { type: "session.status", properties: { sessionID: "ses_race", status: "busy" } } as any,
+        }),
+        hooks.event!({
+          event: { type: "session.status", properties: { sessionID: "ses_race", status: "idle" } } as any,
+        }),
+      ])
+      expect(mock$).toHaveBeenCalledTimes(1)
+    })
+
+    it("includes parent_pid on session.created spawns too (not just reconcile)", async () => {
+      const hooks = await ConfabSync({ $: mock$ })
+      await hooks.event!({
+        event: {
+          type: "session.created",
+          properties: { info: { id: "ses_created", directory: "/work" } },
+        } as any,
+      })
+      expect(mock$).toHaveBeenCalledTimes(1)
+      expect(reconstructCmd(0)).toContain(`"parent_pid":${process.pid}`)
+    })
+
+    it("enforces MAX_DAEMONS=32 with a console.error skip on the 33rd distinct session", async () => {
+      const errSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+      const hooks = await ConfabSync({ $: mock$ })
+      for (let i = 0; i < 33; i++) {
+        await hooks.event!({
+          event: { type: "session.status", properties: { sessionID: `ses_cap_${i}`, status: "busy" } } as any,
+        })
+      }
+      expect(mock$).toHaveBeenCalledTimes(32)
+      expect(errSpy).toHaveBeenCalled()
+      const calls = errSpy.mock.calls.map((c) => c.join(" "))
+      expect(calls.some((c) => c.includes("32") && c.includes("ses_cap_32"))).toBe(true)
+      errSpy.mockRestore()
+    })
+  })
 })

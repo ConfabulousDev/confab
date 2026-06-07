@@ -178,6 +178,28 @@ func (s *State) Delete() error {
 	return nil
 }
 
+// DeleteWithInbox removes both the state file and the per-state inbox
+// file. Best-effort: both deletes are attempted even if one fails. The
+// first non-nil error is returned so the caller can log it; both deletes
+// are tried regardless. Idempotent — missing files are not errors.
+//
+// Used by daemon shutdown and the reaper (CF-549 F-up A) so the two-file
+// cleanup is consistent and a single failure can't strand the other file.
+func (s *State) DeleteWithInbox() error {
+	var firstErr error
+	if s.InboxPath != "" {
+		if err := os.Remove(s.InboxPath); err != nil && !os.IsNotExist(err) {
+			firstErr = fmt.Errorf("delete inbox: %w", err)
+		}
+	}
+	if err := s.Delete(); err != nil {
+		if firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
+}
+
 // IsDaemonRunning checks if the daemon process is still alive
 func (s *State) IsDaemonRunning() bool {
 	return isProcessRunning(s.PID)

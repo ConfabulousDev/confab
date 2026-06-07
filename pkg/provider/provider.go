@@ -193,6 +193,13 @@ type Provider interface {
 	// upload for this transcript path. Claude derives from the path;
 	// Codex reads session_meta.cwd with a path-dir fallback.
 	DefaultCWD(transcriptPath string) string
+
+	// OnAlreadyRunning is invoked by maybeSpawnDaemon when a spawn is
+	// denied because a daemon for this externalID is already alive.
+	// Most providers no-op (hook deduplication is the normal path).
+	// OpenCode logs a warning because, for opencode, this state means a
+	// parallel process resumed the same session — an unsupported workflow.
+	OnAlreadyRunning(externalID string)
 }
 
 var registry = map[string]Provider{

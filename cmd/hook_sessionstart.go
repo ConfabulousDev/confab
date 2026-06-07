@@ -64,6 +64,18 @@ func sessionStartFromReader(r io.Reader, w io.Writer) error {
 
 	logger.Info("Starting %s sync daemon (hook mode)", p.Name())
 
+	// CF-549 F-up A: opportunistic cleanup of stale state files left by
+	// crashed/killed daemons. Provider-agnostic; runs in a goroutine so it
+	// can't slow the interactive hook. Failures are debug-level (cleanup
+	// is best-effort).
+	go func() {
+		if reaped, rerr := daemon.ReapStaleStates(); rerr != nil {
+			logger.Debug("reaper: %v", rerr)
+		} else if reaped > 0 {
+			logger.Info("reaper: cleaned %d stale state files", reaped)
+		}
+	}()
+
 	AutoUpdateIfNeeded()
 
 	var systemMessage string
@@ -143,8 +155,14 @@ func buildStandardLaunchArgs(p provider.Provider, r io.Reader) (*daemonLaunchInp
 
 // buildOpencodeLaunchArgs reads the JSON payload piped from the TS plugin.
 // The plugin constructs an OpenCodeHookInput with session_id, cwd, and
-// optional parent_id — no transcript path since OpenCode data lives in
-// the local SQLite DB, which the daemon resolves itself.
+// optional parent_id + parent_pid — no transcript path since OpenCode data
+// lives in the local SQLite DB, which the daemon resolves itself.
+//
+// CF-549: session.created carries cwd + parent_id inline (fast path).
+// Reconcile events (session.status/updated/compacted/error) carry only
+// session_id, so resolve cwd + parent_id from the SQLite DB. A DB
+// resolution failure is non-fatal: empty cwd just means we lose the
+// git-info-from-cwd fallback; empty parent_id is the correct root default.
 func buildOpencodeLaunchArgs(r io.Reader) (*daemonLaunchInput, error) {
 	p := provider.Opencode{}
 	in, err := p.ReadSessionHookInput(r)
@@ -152,12 +170,47 @@ func buildOpencodeLaunchArgs(r io.Reader) (*daemonLaunchInput, error) {
 		return nil, err
 	}
 
-	return &daemonLaunchInput{
+	launch := &daemonLaunchInput{
 		Provider:        p.Name(),
 		ExternalID:      in.SessionID,
 		CWD:             in.CWD,
 		SessionParentID: in.ParentID,
-	}, nil
+		ParentPID:       in.ParentPID,
+	}
+
+	if launch.CWD == "" {
+		cwd, parentID, lookupErr := resolveOpencodeSessionInfo(in.SessionID)
+		if lookupErr != nil {
+			logger.Warn("Failed to resolve OpenCode session info for %s: %v; using defaults",
+				in.SessionID, lookupErr)
+		} else {
+			launch.CWD = cwd
+			// Preserve inline parent_id when set: the DB read can return ""
+			// for sql.ErrNoRows (row not yet committed), and we must not
+			// clobber a plugin-supplied parent into root status, which
+			// would let ShouldSpawnForInput spawn a daemon for a subagent.
+			if launch.SessionParentID == "" {
+				launch.SessionParentID = parentID
+			}
+		}
+	}
+
+	return launch, nil
+}
+
+// resolveOpencodeSessionInfo reads directory + parent_id from the OpenCode
+// SQLite DB with a tight 2s context bound. This blocks the interactive
+// SessionStart hook, so we'd rather fall back to empty defaults than
+// visibly stall opencode under DB contention.
+func resolveOpencodeSessionInfo(sessionID string) (cwd, parentID string, _ error) {
+	dbPath, err := provider.OpenCodeDBPath()
+	if err != nil {
+		return "", "", fmt.Errorf("resolve db path: %w", err)
+	}
+	reader := provider.NewOpenCodeDBReader(dbPath)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	return reader.ReadSessionInfo(ctx, sessionID)
 }
 
 // parseSyncEnvConfig reads sync configuration from environment variables.

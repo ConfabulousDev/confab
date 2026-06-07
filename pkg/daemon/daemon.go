@@ -38,7 +38,15 @@ const (
 	// maxConsecutiveNotFound is how many consecutive 404 errors before stopping.
 	// This handles the case where a session is deleted from the backend.
 	maxConsecutiveNotFound = 3
+
 )
+
+// parentCheckInterval is how often the parent-PID monitor goroutine
+// (CF-549 R6) probes the parent process for liveness. Independent of
+// syncInterval so a hung SyncAll cannot delay shutdown after parent
+// death. Var (not const) so tests can shorten it; production paths
+// never modify it.
+var parentCheckInterval = 5 * time.Second
 
 // shutdownTimeout is the maximum time to wait for final sync during shutdown.
 // If the backend is slow or unresponsive, we give up and clean up anyway.
@@ -81,6 +89,12 @@ type Daemon struct {
 	// materialized file (no concurrent append).
 	collectorCancel context.CancelFunc
 	collectorDone   chan struct{}
+
+	// parentDeathCh is closed by the monitorParent goroutine (CF-549 R6)
+	// when the daemon's parent process is detected dead. The main loop's
+	// select drains it and triggers shutdown with reason "parent process
+	// exited". Unused when parentPID == 0 (no parent monitoring requested).
+	parentDeathCh chan struct{}
 }
 
 // Config holds daemon configuration
@@ -122,6 +136,31 @@ func New(cfg Config) *Daemon {
 		syncJitter:     jitter,
 		stopCh:         make(chan struct{}),
 		doneCh:         make(chan struct{}),
+		parentDeathCh:  make(chan struct{}),
+	}
+}
+
+// monitorParent polls the parent PID at parentCheckInterval and closes
+// parentDeathCh when it detects the parent has exited. Returns when the
+// context is cancelled, when stopCh is closed, or when parent death is
+// detected (after closing the channel). CF-549 R6: moved out of the sync
+// main loop so a hung SyncAll cannot delay shutdown.
+func (d *Daemon) monitorParent(ctx context.Context) {
+	ticker := time.NewTicker(parentCheckInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-d.stopCh:
+			return
+		case <-ticker.C:
+			if !isProcessRunning(d.parentPID) {
+				logger.Info("Parent process %d exited; signaling shutdown", d.parentPID)
+				close(d.parentDeathCh)
+				return
+			}
+		}
 	}
 }
 
@@ -199,6 +238,16 @@ func (d *Daemon) Run(ctx context.Context) error {
 
 	if d.parentPID > 0 {
 		logger.Info("Daemon running: pid=%d parent_pid=%d", os.Getpid(), d.parentPID)
+		// CF-549 R6: parent-PID monitoring runs in its own goroutine so a
+		// hung SyncAll cannot delay shutdown after parent death. The
+		// monitor closes parentDeathCh on detection; the main loop drains
+		// it and triggers shutdown with the "parent process exited" reason.
+		// Derive a cancellable subcontext + defer cancel so the goroutine
+		// exits on every Run() return path (sigCh, parentDeathCh, etc.),
+		// not just when the caller's ctx happens to cancel.
+		monitorCtx, monitorCancel := context.WithCancel(ctx)
+		defer monitorCancel()
+		go d.monitorParent(monitorCtx)
 	} else {
 		logger.Info("Daemon running: pid=%d (no parent monitoring)", os.Getpid())
 	}
@@ -232,13 +281,14 @@ func (d *Daemon) Run(ctx context.Context) error {
 			timer.Stop()
 			return d.shutdown(fmt.Sprintf("signal %v", sig))
 
-		case <-timer.C:
-			// Check if parent Claude Code process is still running.
-			// If it crashed or was killed, shut down gracefully.
-			if d.parentPID > 0 && !isProcessRunning(d.parentPID) {
-				return d.shutdown("parent process exited")
-			}
+		case <-d.parentDeathCh:
+			// CF-549 R6: monitorParent goroutine detected parent exit.
+			// Inline check inside `case <-timer.C` was removed so a hung
+			// SyncAll cannot delay this shutdown.
+			timer.Stop()
+			return d.shutdown("parent process exited")
 
+		case <-timer.C:
 			// For OpenCode, the collector materializes the transcript file
 			// asynchronously. Stay lifecycle-only — monitor the parent but
 			// never contact the backend — until at least one complete
@@ -486,13 +536,8 @@ func (d *Daemon) shutdown(reason string) error {
 
 	// Clean up state and inbox files
 	if d.state != nil {
-		if d.state.InboxPath != "" {
-			if err := os.Remove(d.state.InboxPath); err != nil && !os.IsNotExist(err) {
-				logger.Warn("Failed to delete inbox file: %v", err)
-			}
-		}
-		if err := d.state.Delete(); err != nil {
-			logger.Warn("Failed to delete state file: %v", err)
+		if err := d.state.DeleteWithInbox(); err != nil {
+			logger.Warn("Failed to delete state/inbox files: %v", err)
 		}
 	}
 

@@ -167,6 +167,11 @@ func (p ClaudeCode) AnnotateChunk(c ChunkView, _ bool, redact func(string) strin
 
 // DefaultCWD returns filepath.Dir(transcriptPath); Claude has no richer
 // per-session CWD source.
+// OnAlreadyRunning is a no-op for Claude Code: hook deduplication is the
+// normal path (Claude fires SessionStart on every turn). See Provider
+// interface doc for the OpenCode-specific behavior.
+func (ClaudeCode) OnAlreadyRunning(string) {}
+
 func (p ClaudeCode) DefaultCWD(transcriptPath string) string {
 	return filepath.Dir(transcriptPath)
 }

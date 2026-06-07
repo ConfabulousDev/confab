@@ -58,18 +58,9 @@ func NewOpenCodeDBReader(dbPath string) *OpenCodeDBReader {
 // as "wait, retry" by the caller). Returns a clear error when the DB file
 // is missing or unreadable.
 func (r *OpenCodeDBReader) ReadSession(ctx context.Context, sessionID, sinceMessageID string) ([]ocRawEnvelope, error) {
-	if _, err := os.Stat(r.path); err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil, fmt.Errorf("opencode db not found at %s", r.path)
-		}
-		return nil, fmt.Errorf("stat opencode db: %w", err)
-	}
-
-	dsn := fmt.Sprintf("file:%s?mode=ro&_pragma=busy_timeout(%d)",
-		url.PathEscape(r.path), opencodeReadBusyTimeoutMs)
-	db, err := sql.Open("sqlite", dsn)
+	db, err := r.openRO()
 	if err != nil {
-		return nil, fmt.Errorf("open opencode db: %w", err)
+		return nil, err
 	}
 	defer db.Close()
 
@@ -189,6 +180,55 @@ func injectIdentity(data []byte, fields map[string]string) (json.RawMessage, err
 		obj[k] = quoted
 	}
 	return json.Marshal(obj)
+}
+
+// ReadSessionInfo fetches a session row's directory and parent_id from the
+// OpenCode SQLite DB. Returns empty strings (not an error) when the row is
+// absent so the caller can proceed with best-effort defaults. Errors are
+// returned only when the DB itself is unreadable.
+//
+// Used by the resume path in cmd/hook_sessionstart.go to resolve the cwd +
+// parent session id from a session_id-only payload (CF-549).
+func (r *OpenCodeDBReader) ReadSessionInfo(ctx context.Context, sessionID string) (directory, parentID string, err error) {
+	db, err := r.openRO()
+	if err != nil {
+		return "", "", err
+	}
+	defer db.Close()
+
+	// COALESCE collapses NULL parent_id (root sessions) to the empty
+	// string. The Opencode.ShouldSpawnForInput gate treats "" as root.
+	const query = `SELECT directory, COALESCE(parent_id, '') FROM session WHERE id = ?`
+	var dir, pid string
+	err = db.QueryRowContext(ctx, query, sessionID).Scan(&dir, &pid)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", "", nil
+	}
+	if err != nil {
+		return "", "", fmt.Errorf("query opencode session %s: %w", sessionID, err)
+	}
+	return dir, pid, nil
+}
+
+// openRO opens the OpenCode SQLite DB read-only with the standard
+// busy_timeout pragma. Verifies the file exists first so the caller gets a
+// clear "db not found" error rather than a driver-internal one. Shared by
+// ReadSession (collector path) and ReadSessionInfo (resume path) so the
+// DSN flags stay in lockstep.
+func (r *OpenCodeDBReader) openRO() (*sql.DB, error) {
+	if _, err := os.Stat(r.path); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("opencode db not found at %s", r.path)
+		}
+		return nil, fmt.Errorf("stat opencode db: %w", err)
+	}
+	dsn := fmt.Sprintf("file:%s?mode=ro&_pragma=busy_timeout(%d)",
+		url.PathEscape(r.path), opencodeReadBusyTimeoutMs)
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		return nil, fmt.Errorf("open opencode db: %w", err)
+	}
+	return db, nil
 }
 
 // OpenCodeDBPath resolves the OpenCode SQLite DB path in this order:

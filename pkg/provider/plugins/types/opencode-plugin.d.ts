@@ -50,6 +50,13 @@ declare module "@opencode-ai/plugin" {
     client?: any
   }
 
+  // CF-549 M1: the plugin reads `process.pid` to send opencode's PID
+  // authoritatively to confab. Declared locally to avoid pulling in the
+  // full @types/node devDependency.
+  global {
+    var process: { pid: number }
+  }
+
   interface PluginHooks {
     event?: (input: { event: Event }) => Promise<void>
     dispose?: () => Promise<void>

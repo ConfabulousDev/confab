@@ -398,3 +398,81 @@ func TestOpenCodeDBPathFallsBackToHome(t *testing.T) {
 		t.Errorf("OpenCodeDBPath = %q, want %q", got, want)
 	}
 }
+
+
+// CF-549 ReadSessionInfo tests --------------------------------------------
+
+// TestReadSessionInfoReturnsDirAndParent asserts ReadSessionInfo reads
+// session.directory and session.parent_id from the OpenCode SQLite DB.
+// The resume path in cmd/hook_sessionstart.go relies on this to recover
+// cwd + parentID when the plugin only sent {session_id}.
+func TestReadSessionInfoReturnsDirAndParent(t *testing.T) {
+	const sid = "ses_info_basic"
+	const parent = "ses_info_parent"
+	const dir = "/home/user/proj"
+	b := opencodetest.NewDB(t)
+	b.AddSessionWithDir(parent, "", "/home/other/proj")
+	b.AddSessionWithDir(sid, parent, dir)
+
+	r := NewOpenCodeDBReader(b.Path())
+	gotDir, gotParent, err := r.ReadSessionInfo(context.Background(), sid)
+	if err != nil {
+		t.Fatalf("ReadSessionInfo: %v", err)
+	}
+	if gotDir != dir {
+		t.Errorf("directory = %q, want %q", gotDir, dir)
+	}
+	if gotParent != parent {
+		t.Errorf("parentID = %q, want %q", gotParent, parent)
+	}
+}
+
+// TestReadSessionInfoRootSessionHasEmptyParent asserts a root session
+// (NULL parent_id) returns "" for parentID via COALESCE in the query.
+// The Opencode.ShouldSpawnForInput gate treats empty parentID as "root".
+func TestReadSessionInfoRootSessionHasEmptyParent(t *testing.T) {
+	const sid = "ses_info_root"
+	const dir = "/work/root"
+	b := opencodetest.NewDB(t)
+	b.AddSessionWithDir(sid, "", dir)
+
+	r := NewOpenCodeDBReader(b.Path())
+	gotDir, gotParent, err := r.ReadSessionInfo(context.Background(), sid)
+	if err != nil {
+		t.Fatalf("ReadSessionInfo: %v", err)
+	}
+	if gotDir != dir {
+		t.Errorf("directory = %q, want %q", gotDir, dir)
+	}
+	if gotParent != "" {
+		t.Errorf("parentID = %q, want \"\" for root session", gotParent)
+	}
+}
+
+// TestReadSessionInfoNotFoundIsNotError asserts an unknown session id
+// returns ("", "", nil) instead of an error. The hook handler then
+// proceeds with best-effort defaults rather than failing the whole spawn.
+func TestReadSessionInfoNotFoundIsNotError(t *testing.T) {
+	b := opencodetest.NewDB(t)
+	b.AddSessionWithDir("ses_other", "", "/somewhere")
+
+	r := NewOpenCodeDBReader(b.Path())
+	gotDir, gotParent, err := r.ReadSessionInfo(context.Background(), "ses_does_not_exist")
+	if err != nil {
+		t.Fatalf("ReadSessionInfo on missing id should not error, got %v", err)
+	}
+	if gotDir != "" || gotParent != "" {
+		t.Errorf("got (%q, %q), want (\"\", \"\") for missing session", gotDir, gotParent)
+	}
+}
+
+// TestReadSessionInfoMissingDBReturnsError asserts that ReadSessionInfo
+// returns an error when the DB file does not exist, distinguishing
+// "DB unavailable" (worth logging) from "session not in DB" (silent).
+func TestReadSessionInfoMissingDBReturnsError(t *testing.T) {
+	r := NewOpenCodeDBReader(filepath.Join(t.TempDir(), "nonexistent.db"))
+	_, _, err := r.ReadSessionInfo(context.Background(), "anything")
+	if err == nil {
+		t.Fatal("expected error when DB file is missing, got nil")
+	}
+}

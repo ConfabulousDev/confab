@@ -6,8 +6,9 @@ Background sync daemon for provider transcripts: Claude Code transcript JSONL, C
 
 | File | Role |
 |------|------|
-| `daemon.go` | `Daemon` struct, `Run` loop, sync cycles, shutdown, inbox I/O, parent monitoring. For OpenCode (`d.providerName == provider.NameOpencode`) also starts/stops the `provider.OpenCodeCollector` goroutine (backed by `provider.OpenCodeDBReader`) and derives the materialized transcript path. |
-| `state.go` | `State` persistence (`~/.confab/sync/{provider}/{id}.json`, with legacy flat-path fallback), process liveness checks, listing. Path builders are thin wrappers over `pkg/confabpath`. |
+| `daemon.go` | `Daemon` struct, `Run` loop, sync cycles, shutdown, inbox I/O, parent monitoring. Parent-PID liveness lives in a dedicated `monitorParent` goroutine that ticks at `parentCheckInterval` (5s; `var` so tests can override) and closes `parentDeathCh` on death; the main loop's `select` drains that and shuts down with reason `"parent process exited"`. The goroutine runs under a `context.WithCancel(ctx)` deferred-cancel so it exits on every `Run()` return path, not just when the caller's ctx cancels. For OpenCode (`d.providerName == provider.NameOpencode`) also starts/stops the `provider.OpenCodeCollector` goroutine (backed by `provider.OpenCodeDBReader`) and derives the materialized transcript path. |
+| `state.go` | `State` persistence (`~/.confab/sync/{provider}/{id}.json`, with legacy flat-path fallback), process liveness checks, listing. Path builders are thin wrappers over `pkg/confabpath`. `(*State).DeleteWithInbox` removes both the state file and the inbox file together — used by both `shutdown` and the reaper so the two-file cleanup stays consistent. |
+| `reaper.go` | `ReapStaleStates()` — provider-agnostic sweep that removes state + inbox files whose PID is no longer alive. Files younger than `reapMinAge` (5s) are skipped to protect freshly-spawned daemons. Called as a goroutine from `cmd/hook_sessionstart.go` on every session-start so cleanup is opportunistic and invisible to the user (CF-549 F-up A). |
 
 ## Lifecycle
 

@@ -76,6 +76,26 @@ func ResetForTesting() {
 	once = sync.Once{}
 }
 
+// SetupForTesting wires the singleton logger to a fresh per-test temp
+// directory so a test can observe what was actually emitted. Registers
+// cleanup via t.Cleanup and returns the log directory; the canonical
+// log file path is <dir>/confab.log.
+//
+// Use this whenever a test needs to assert log content. For tests that
+// just need silence, no setup is required — the auto-discard sink in
+// Init() handles them.
+func SetupForTesting(t *testing.T) string {
+	t.Helper()
+	logDir := t.TempDir()
+	t.Setenv(LogDirEnv, logDir)
+	ResetForTesting()
+	t.Cleanup(ResetForTesting)
+	if err := Init(); err != nil {
+		t.Fatalf("logger.Init: %v", err)
+	}
+	return logDir
+}
+
 // Init initializes the logger (creates log directory and file).
 //
 // Test isolation: When running under `go test` (detected via testing.Testing()),

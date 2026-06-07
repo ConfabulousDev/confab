@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ConfabulousDev/confab/pkg/logger"
 	"github.com/ConfabulousDev/confab/pkg/types"
 )
 
@@ -388,5 +389,60 @@ func TestOpencodePluginTypeScript(t *testing.T) {
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("TypeScript type check failed (run `npm ci` in %s if dependencies are missing):\n%s", pluginDir, string(out))
+	}
+}
+
+
+// CF-549 OnAlreadyRunning tests --------------------------------------------
+
+// TestOpencodeOnAlreadyRunningLogsWarn asserts the OpenCode provider logs
+// a Warn-level message when invoked. The text mentions multi-process
+// resume so operators reading logs can identify the scenario.
+func TestOpencodeOnAlreadyRunningLogsWarn(t *testing.T) {
+	logDir := logger.SetupForTesting(t)
+
+	Opencode{}.OnAlreadyRunning("ses_resume_collision")
+
+	logBytes, err := os.ReadFile(filepath.Join(logDir, "confab.log"))
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	logOut := string(logBytes)
+	if !strings.Contains(logOut, "ses_resume_collision") {
+		t.Errorf("log missing externalID; got: %s", logOut)
+	}
+	if !strings.Contains(logOut, "WARN") {
+		t.Errorf("log missing WARN level; got: %s", logOut)
+	}
+	if !strings.Contains(logOut, "multi-process resume") {
+		t.Errorf("log missing diagnostic phrase \"multi-process resume\"; got: %s", logOut)
+	}
+}
+
+// TestClaudeOnAlreadyRunningSilent asserts ClaudeCode.OnAlreadyRunning is
+// a no-op (does not write to the log). Claude fires SessionStart on every
+// turn, so hook deduplication is the normal path — logging would be noise.
+func TestClaudeOnAlreadyRunningSilent(t *testing.T) {
+	logDir := logger.SetupForTesting(t)
+
+	ClaudeCode{}.OnAlreadyRunning("ses_anything")
+
+	logBytes, _ := os.ReadFile(filepath.Join(logDir, "confab.log"))
+	if strings.Contains(string(logBytes), "ses_anything") {
+		t.Errorf("ClaudeCode.OnAlreadyRunning should not log; got: %s", string(logBytes))
+	}
+}
+
+// TestCodexOnAlreadyRunningSilent asserts Codex.OnAlreadyRunning is a
+// no-op. Codex fires SessionStart for every subagent; the already-running
+// hit is normal hook dedup, not an error.
+func TestCodexOnAlreadyRunningSilent(t *testing.T) {
+	logDir := logger.SetupForTesting(t)
+
+	Codex{}.OnAlreadyRunning("ses_anything_codex")
+
+	logBytes, _ := os.ReadFile(filepath.Join(logDir, "confab.log"))
+	if strings.Contains(string(logBytes), "ses_anything_codex") {
+		t.Errorf("Codex.OnAlreadyRunning should not log; got: %s", string(logBytes))
 	}
 }

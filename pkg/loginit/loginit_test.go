@@ -70,18 +70,11 @@ func TestApplyLogLevel_MissingConfig(t *testing.T) {
 	}
 }
 
-// setupLogger points the logger at a temp dir (instead of the test-mode
-// discard sink) so we can observe what was actually emitted.
+// setupLogger thin wrapper preserved so existing call sites read the
+// same. Delegates to logger.SetupForTesting.
 func setupLogger(t *testing.T) string {
 	t.Helper()
-	logDir := t.TempDir()
-	t.Setenv("CONFAB_LOG_DIR", logDir)
-	logger.ResetForTesting()
-	t.Cleanup(logger.ResetForTesting)
-	if err := logger.Init(); err != nil {
-		t.Fatalf("logger.Init: %v", err)
-	}
-	return logDir
+	return logger.SetupForTesting(t)
 }
 
 // logFileContains reads the rotating log file and reports whether it
