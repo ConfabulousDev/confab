@@ -235,6 +235,44 @@ func TestCollectorErrorRecoveryResetsCadence(t *testing.T) {
 	}
 }
 
+func TestCollectorFinalReconcileOnShutdown(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "messages.jsonl")
+	source := &fakeOCSource{envs: []ocRawEnvelope{
+		env(`{"id":"msg_1","role":"user"}`),
+	}}
+	c := NewOpenCodeCollector(source, "ses_1", out, time.Hour) // long interval so ticker won't fire
+
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() { errCh <- c.Run(ctx) }()
+
+	// Wait for the initial reconcile (Run does one before entering the ticker loop).
+	time.Sleep(100 * time.Millisecond)
+
+	// Simulate a message arriving after the last poll but before shutdown.
+	source.envs = append(source.envs, env(`{"id":"msg_2","role":"assistant","finish":"stop"}`))
+
+	// Cancel context — this triggers the final reconcile.
+	cancel()
+
+	select {
+	case err := <-errCh:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("Run returned %v, want context.Canceled", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run did not return after cancel")
+	}
+
+	lines := readLines(t, out)
+	if len(lines) != 2 {
+		t.Fatalf("file has %d lines, want 2 (final reconcile should have caught msg_2)", len(lines))
+	}
+	if lineID(t, lines[0]) != "msg_1" || lineID(t, lines[1]) != "msg_2" {
+		t.Fatalf("lines = %v, want [msg_1, msg_2]", []string{lineID(t, lines[0]), lineID(t, lines[1])})
+	}
+}
+
 func TestWarnEveryNTargetsOnePerMinute(t *testing.T) {
 	cases := []struct {
 		interval time.Duration

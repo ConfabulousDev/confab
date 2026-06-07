@@ -154,6 +154,7 @@ func (Opencode) AnnotateChunk(c ChunkView, sentFirstUserMessage bool, redact fun
 	if redact != nil {
 		msg = redact(msg)
 	}
+	msg = truncateString(msg, maxMetadataFieldSize/2)
 	c.SetFirstUserMessage(msg)
 	result.IncludedFirstUserMessage = true
 	return result
