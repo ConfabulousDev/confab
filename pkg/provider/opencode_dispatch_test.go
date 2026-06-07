@@ -133,3 +133,23 @@ func TestOpencode_AnnotateChunk_WhitespaceOnlyTextNoop(t *testing.T) {
 		t.Errorf("SetFirstUserMessage = %q for whitespace-only text, want \"\"", cv.setFirstUserMessage)
 	}
 }
+
+func TestOpencode_AnnotateChunk_TruncatesLongMessage(t *testing.T) {
+	// Build a user message that exceeds the backend's 8192-char limit.
+	longText := strings.Repeat("x ", 5000) // 10000 chars
+	lines := []string{
+		`{"info":{"id":"msg_1","role":"user"},"parts":[{"type":"text","text":"` + longText + `"}]}`,
+	}
+	cv := &stubChunkView{fileType: "transcript", firstLine: 1, lines: lines}
+	result := (provider.Opencode{}).AnnotateChunk(cv, false, nil)
+	if !result.IncludedFirstUserMessage {
+		t.Fatal("IncludedFirstUserMessage = false, want true")
+	}
+	// Truncated to maxMetadataFieldSize/2 = 4096 bytes (plus "..." suffix).
+	if len(cv.setFirstUserMessage) > 4100 {
+		t.Errorf("SetFirstUserMessage length = %d, want <= 4100 (truncated)", len(cv.setFirstUserMessage))
+	}
+	if !strings.HasSuffix(cv.setFirstUserMessage, "...") {
+		t.Errorf("SetFirstUserMessage does not end with \"...\" after truncation")
+	}
+}

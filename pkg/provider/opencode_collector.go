@@ -177,6 +177,7 @@ func (c *OpenCodeCollector) Run(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
+			c.tryReconcile(context.Background())
 			return ctx.Err()
 		case <-ticker.C:
 			c.tryReconcile(ctx)

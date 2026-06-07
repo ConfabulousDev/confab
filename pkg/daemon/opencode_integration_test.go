@@ -124,3 +124,75 @@ func TestDaemonOpenCodeNoEmptySession(t *testing.T) {
 		t.Errorf("expected no init (no complete message), got %d", len(inits))
 	}
 }
+
+// TestDaemonOpenCodeFinalReconcileCatchesLateMessages asserts that messages
+// written to the SQLite DB after the collector's last poll but before shutdown
+// are materialized and uploaded (CF-545).
+func TestDaemonOpenCodeFinalReconcileCatchesLateMessages(t *testing.T) {
+	const externalID = "ses_late"
+	mock := newMockBackend(t)
+	backend := httptest.NewServer(mock)
+	defer backend.Close()
+
+	// Build a fixture DB with only msg_1 initially.
+	db := opencodetest.NewDB(t)
+	db.AddSession(externalID, "")
+	db.AddMessage(externalID, "msg_1", opencodetest.UserTextMessage("hi"))
+	db.AddPart("msg_1", "prt_1", opencodetest.TextPart("hi"))
+
+	t.Setenv(provider.OpenCodeDBEnv, db.Path())
+
+	tmpDir, _ := setupTestEnv(t, backend.URL)
+
+	// Start the daemon with a short sync interval so the collector polls quickly.
+	dm := New(Config{
+		Provider:     provider.NameOpencode,
+		ExternalID:   externalID,
+		CWD:          t.TempDir(),
+		SyncInterval: 50 * time.Millisecond,
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() { errCh <- dm.Run(ctx) }()
+
+	// Wait for the first collector poll to materialize msg_1.
+	time.Sleep(200 * time.Millisecond)
+
+	// Now add msg_2 to the DB — simulating a message arriving after the last poll.
+	asst := opencodetest.AssistantMessageFinished("stop")
+	asst["modelID"] = "claude-x"
+	asst["providerID"] = "anthropic"
+	db.AddMessage(externalID, "msg_2", asst)
+	db.AddPart("msg_2", "prt_2", opencodetest.TextPart("yo"))
+
+	// Cancel — triggers shutdown with final reconcile.
+	cancel()
+	select {
+	case <-errCh:
+	case <-time.After(3 * time.Second):
+		t.Fatal("daemon did not exit")
+	}
+
+	// Materialized file should contain both messages.
+	matPath := filepath.Join(tmpDir, ".confab", "opencode", externalID, "messages.jsonl")
+	data, err := os.ReadFile(matPath)
+	if err != nil {
+		t.Fatalf("materialized file missing: %v", err)
+	}
+	if got := strings.Count(string(data), "\n"); got != 2 {
+		t.Fatalf("materialized %d lines, want 2 (final reconcile should have caught msg_2):\n%s", got, data)
+	}
+
+	// Both lines were uploaded.
+	chunks := mock.getChunkRequests()
+	if len(chunks) == 0 {
+		t.Fatal("expected a chunk upload")
+	}
+	total := 0
+	for _, c := range chunks {
+		total += len(c.Lines)
+	}
+	if total != 2 {
+		t.Errorf("uploaded %d lines total, want 2", total)
+	}
+}

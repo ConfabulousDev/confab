@@ -468,8 +468,8 @@ func (d *Daemon) shutdown(reason string) error {
 
 	// Stop the OpenCode collector (if any) and wait for it to exit before the
 	// final sync, so no append races the final read (which would drop the last
-	// materialized message). The collector honors ctx on its in-flight HTTP
-	// call, so this returns promptly; the timeout is a safety net.
+	// materialized message). The collector does a final SQLite reconcile on
+	// shutdown, so this returns promptly; the timeout is a safety net.
 	if d.collectorCancel != nil {
 		d.collectorCancel()
 		select {
