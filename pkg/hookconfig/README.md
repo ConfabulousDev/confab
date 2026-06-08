@@ -43,7 +43,7 @@ Before CF-396 (Phase 2), hook install logic lived in `pkg/config` (Claude side) 
 | `UninstallCodexHooks(configPath string) (string, error)` | Strip the managed block; restore `features.hooks` to its prior state. |
 | `IsCodexHooksInstalled(configPath string) (bool, error)` | True only when all three Confab hook events (SessionStart, PreToolUse, PostToolUse) carry a confab command. Stale single-event installs (pre-CF-492) read as "not installed" so `confab setup` re-emits the managed block and transparently upgrades. |
 
-The Codex managed block is delimited by `# >>> confab codex hooks (managed) >>>` / `<<< confab codex hooks (managed) <<<` markers and installs three hook events:
+The Codex managed block is delimited by `# >>> confab codex hooks >>>` / `# <<< confab codex hooks <<<` markers and installs three hook events:
 
 - `[[hooks.SessionStart]]` — daemon spawn (`startup|resume|clear` matcher)
 - `[[hooks.PreToolUse]]` — `Confab-Link:` commit trailer + `📝 [Confab link]` PR body injection (`Bash` matcher)

@@ -39,6 +39,10 @@ const (
 	// This handles the case where a session is deleted from the backend.
 	maxConsecutiveNotFound = 3
 
+	// collectorShutdownTimeout is the single ceiling for waiting on the root
+	// OpenCode collector plus every child collector to finish during shutdown
+	// (CF-538). If a collector is wedged, we log and proceed to final sync.
+	collectorShutdownTimeout = 2 * time.Second
 )
 
 // parentCheckInterval is how often the parent-PID monitor goroutine
@@ -520,7 +524,7 @@ func (d *Daemon) shutdown(reason string) error {
 		d.childCollectorCancel()
 	}
 	if d.collectorCancel != nil || len(childDones) > 0 {
-		waitForCollectors(d.collectorDone, childDones, 2*time.Second)
+		waitForCollectors(d.collectorDone, childDones, collectorShutdownTimeout)
 	}
 
 	// Read inbox events (e.g., SessionEnd payload from sync stop)

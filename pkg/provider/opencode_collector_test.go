@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 )
@@ -15,6 +16,12 @@ import (
 // and tracks the last sinceMessageID it was called with so tests can assert
 // the collector's HWM threading.
 type fakeOCSource struct {
+	// mu guards envs/err/calls so a test can mutate them while the collector's
+	// Run goroutine concurrently calls ReadSession (see
+	// TestCollectorFinalReconcileOnShutdown). Sequential tests may set the
+	// fields directly at construction; mutations after Run starts must go
+	// through appendEnv.
+	mu   sync.Mutex
 	envs []ocRawEnvelope
 	err  error
 
@@ -22,8 +29,18 @@ type fakeOCSource struct {
 }
 
 func (f *fakeOCSource) ReadSession(_ context.Context, _ string, sinceMessageID string) ([]ocRawEnvelope, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.calls = append(f.calls, sinceMessageID)
 	return f.envs, f.err
+}
+
+// appendEnv appends an envelope under the lock, for tests that mutate the
+// source while the collector's Run goroutine is live.
+func (f *fakeOCSource) appendEnv(e ocRawEnvelope) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.envs = append(f.envs, e)
 }
 
 func readLines(t *testing.T, path string) []string {
@@ -250,7 +267,7 @@ func TestCollectorFinalReconcileOnShutdown(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// Simulate a message arriving after the last poll but before shutdown.
-	source.envs = append(source.envs, env(`{"id":"msg_2","role":"assistant","finish":"stop"}`))
+	source.appendEnv(env(`{"id":"msg_2","role":"assistant","finish":"stop"}`))
 
 	// Cancel context — this triggers the final reconcile.
 	cancel()
