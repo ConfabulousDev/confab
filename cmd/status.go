@@ -23,8 +23,7 @@ var statusCmd = &cobra.Command{
 
 		printBackendSection()
 
-		orphans := printProviderSections()
-		printOrphanFooter(orphans)
+		printProviderSections()
 
 		return nil
 	},
@@ -61,44 +60,41 @@ func printBackendSection() {
 }
 
 // printProviderSections renders one block per registered provider in
-// fixed registry order and returns the canonical names of providers
-// whose hooks are installed but whose CLI is missing from PATH.
-func printProviderSections() []string {
-	var orphans []string
-	for _, name := range []string{provider.NameClaudeCode, provider.NameCodex} {
+// fixed registry order.
+func printProviderSections() {
+	for _, name := range provider.OrderedNames() {
 		p, err := provider.Get(name)
 		if err != nil {
 			continue
 		}
-		if printProviderBlock(p) {
-			orphans = append(orphans, name)
-		}
+		printProviderBlock(p)
 	}
-	return orphans
 }
 
-// printProviderBlock renders a single provider's status block. Returns
-// true if the provider is orphaned (hooks installed but CLI missing).
-func printProviderBlock(p provider.Provider) bool {
+// printProviderBlock renders a single provider's status block. A provider
+// is considered present when its CLI is on PATH OR its state/config dir
+// exists (desktop-app or CLI-uninstalled install) — the same litmus
+// `confab setup` uses (CF-572). Installed hooks live inside that state
+// dir, so there is no "orphaned hooks" state to surface.
+func printProviderBlock(p provider.Provider) {
 	fmt.Printf("Provider: %s\n", p.Name())
 
 	_, lookErr := provider.LookPath(p.CLIBinaryName())
 	cliPresent := lookErr == nil
-	if cliPresent {
+	switch {
+	case cliPresent:
 		fmt.Println("  CLI: ✓ on PATH")
-	} else {
+	case provider.StateDirPresent(p):
+		fmt.Println("  CLI: ✗ not on PATH (state dir present)")
+	default:
 		fmt.Println("  CLI: ✗ not on PATH")
 	}
 
 	hooksInstalled, err := p.IsHooksInstalled()
-	orphaned := false
 	switch {
 	case err != nil:
 		logger.Error("Failed to check hook status for %s: %v", p.Name(), err)
 		fmt.Printf("  Hooks: ? (error: %v)\n", err)
-	case hooksInstalled && !cliPresent:
-		fmt.Println("  Hooks: ✓ Installed (orphaned — CLI not found)")
-		orphaned = true
 	case hooksInstalled:
 		fmt.Println("  Hooks: ✓ Installed")
 	default:
@@ -108,7 +104,6 @@ func printProviderBlock(p provider.Provider) bool {
 	printSkillsRow(p)
 
 	fmt.Println()
-	return orphaned
 }
 
 // printSkillsRow renders the per-provider Skills line for shipped skills.
@@ -125,14 +120,6 @@ func checkmark(b bool) string {
 		return "✓"
 	}
 	return "✗"
-}
-
-func printOrphanFooter(orphans []string) {
-	for _, name := range orphans {
-		fmt.Printf("⚠️  %s hooks are installed but the CLI is not on PATH.\n", name)
-		fmt.Printf("   Run `confab hooks remove --provider %s` if you no longer use %s.\n", name, name)
-		fmt.Println()
-	}
 }
 
 func init() {

@@ -19,11 +19,13 @@ var setupCmd = &cobra.Command{
 
 This command:
 1. Authenticates with the backend (if not already logged in)
-2. Detects installed provider CLIs (claude, codex) and installs hooks for each
+2. Detects installed providers (claude, codex, opencode) and installs hooks for each
 3. Installs provider-specific skills
 
 If --provider is set, only that provider is configured. If unset, hooks
-are installed for every provider whose CLI is on PATH.
+are installed for every provider that is used locally — detected by its
+CLI being on PATH or its state/config dir being present (so desktop-app
+installs are covered too).
 
 If you're already authenticated with a valid API key, the login step is
 skipped. Use --api-key to provide an API key directly (bypasses device
@@ -81,7 +83,7 @@ func runSetupAutoDetect(backendURL string, needsLogin bool) error {
 	if len(detected) == 0 {
 		fmt.Println("Detected providers: (none)")
 		fmt.Println()
-		fmt.Println("⚠️  No supported CLIs (claude, codex) found on PATH.")
+		fmt.Println("⚠️  No supported providers (claude, codex, opencode) found on PATH or via their config dirs.")
 		fmt.Println("   Auth saved, but no hooks were installed.")
 		return nil
 	}
@@ -222,7 +224,7 @@ func runSetupAuth(cmd *cobra.Command) (backendURL string, needsLogin bool, err e
 func init() {
 	rootCmd.AddCommand(setupCmd)
 
-	setupCmd.Flags().StringVar(&setupProviderName, "provider", "", "Provider to set up (claude-code or codex); auto-detects if unset")
+	setupCmd.Flags().StringVar(&setupProviderName, "provider", "", "Provider to set up (claude-code, codex, or opencode); auto-detects if unset")
 	setupCmd.Flags().String("backend-url", "", "Backend API URL (required)")
 	setupCmd.MarkFlagRequired("backend-url")
 	setupCmd.Flags().String("api-key", "", "API key (bypasses device auth flow)")
