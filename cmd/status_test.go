@@ -122,13 +122,23 @@ func TestStatus_ClaudeOnlyCLI(t *testing.T) {
 	if !strings.Contains(output, "CLI: ✗ not on PATH") {
 		t.Fatalf("expected `CLI: ✗ not on PATH` for codex\noutput:\n%s", output)
 	}
-	if strings.Count(output, "Skills: /retro") != 2 {
-		t.Fatalf("expected skills row for both providers\noutput:\n%s", output)
+	if !strings.Contains(output, "Provider: opencode") {
+		t.Fatalf("opencode block must appear in status\noutput:\n%s", output)
+	}
+	// One skills row per registered provider: claude-code, codex, opencode.
+	if strings.Count(output, "Skills: /retro") != 3 {
+		t.Fatalf("expected skills row for all three providers\noutput:\n%s", output)
 	}
 }
 
-func TestStatus_OrphanCodexHooks(t *testing.T) {
-	// Stub: claude present, codex absent.
+// TestStatus_CodexHooksNotOrphanedWithStateDir is the CF-572 replacement
+// for the old orphan test. Under the state-dir litmus, a provider whose
+// hooks are installed (which implies its state dir exists) is NEVER
+// orphaned even when the CLI is off PATH — it's a legitimate desktop /
+// CLI-uninstalled install. The CLI line notes the state dir, the Hooks
+// line reads plain "Installed", and no orphan footer is emitted.
+func TestStatus_CodexHooksNotOrphanedWithStateDir(t *testing.T) {
+	// Stub: claude CLI present, codex CLI absent.
 	stubProviderDetect(t, "claude")
 
 	backend := &setupTestBackend{validateValid: true}
@@ -191,14 +201,20 @@ command = "/usr/local/bin/confab hook post-tool-use --provider codex"
 
 	wantSnippets := []string{
 		"Provider: codex",
-		"CLI: ✗ not on PATH",
-		"Hooks: ✓ Installed (orphaned",
-		"confab hooks remove --provider codex",
+		"CLI: ✗ not on PATH (state dir present)",
+		"Hooks: ✓ Installed",
 	}
 	for _, want := range wantSnippets {
 		if !strings.Contains(output, want) {
-			t.Fatalf("status orphan output missing %q\noutput:\n%s", want, output)
+			t.Fatalf("status output missing %q\noutput:\n%s", want, output)
 		}
+	}
+	// Must NOT be flagged orphaned, and no removal footer.
+	if strings.Contains(output, "orphaned") {
+		t.Fatalf("codex with state dir present must NOT be orphaned\noutput:\n%s", output)
+	}
+	if strings.Contains(output, "confab hooks remove --provider codex") {
+		t.Fatalf("no orphan-removal footer expected\noutput:\n%s", output)
 	}
 }
 

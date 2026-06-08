@@ -945,6 +945,25 @@ func stubProviderDetect(t *testing.T, present ...string) {
 	t.Cleanup(func() { provider.LookPath = orig })
 }
 
+// stubProviderStateDir swaps provider.StateDirPresent so providers whose
+// canonical name is in present report a present state/config dir; all
+// others report absent. Mirrors stubProviderDetect for the CF-572
+// state-dir detection signal, keeping tests independent of dirs the test
+// harness happens to create on disk.
+func stubProviderStateDir(t *testing.T, present ...string) {
+	t.Helper()
+	set := make(map[string]struct{}, len(present))
+	for _, n := range present {
+		set[n] = struct{}{}
+	}
+	orig := provider.StateDirPresent
+	provider.StateDirPresent = func(p provider.Provider) bool {
+		_, ok := set[p.Name()]
+		return ok
+	}
+	t.Cleanup(func() { provider.StateDirPresent = orig })
+}
+
 // resetSetupProviderName clears the package-level setupProviderName
 // between tests so a previous test's value can't leak into auto-detect.
 func resetSetupProviderName(t *testing.T) {
@@ -1014,6 +1033,56 @@ func TestRunSetup_AutoDetect_Both(t *testing.T) {
 				t.Fatalf("expected %s skill after auto-detect setup: %v", path, err)
 			}
 		}
+	}
+}
+
+// TestRunSetup_AutoDetect_DesktopOnly is the core CF-572 behavior: a
+// provider with NO CLI on PATH but a present state/config dir (the
+// desktop-app / CLI-uninstalled case) is still detected and configured.
+func TestRunSetup_AutoDetect_DesktopOnly(t *testing.T) {
+	backend := &setupTestBackend{validateValid: true}
+	server := httptest.NewServer(backend)
+	defer server.Close()
+
+	tmpDir, _ := setupSetupTestEnv(t, server.URL)
+	codexDir := filepath.Join(tmpDir, ".codex")
+	t.Setenv(provider.CodexStateDirEnv, codexDir)
+
+	resetSetupProviderName(t)
+	stubProviderDetect(t)                       // no CLI on PATH at all
+	stubProviderStateDir(t, provider.NameCodex) // only Codex's dir present
+
+	cmd := &cobra.Command{}
+	cmd.Flags().String("backend-url", server.URL, "")
+	cmd.Flags().String("api-key", "cfb_desktoponly-key-123456789", "")
+
+	output := captureStdout(t, func() {
+		if err := runSetup(cmd, nil); err != nil {
+			t.Fatalf("runSetup failed: %v", err)
+		}
+	})
+
+	wantSnippets := []string{
+		"Detected providers: codex",
+		"▶ codex",
+		"codex: installed",
+	}
+	for _, want := range wantSnippets {
+		if !strings.Contains(output, want) {
+			t.Fatalf("desktop-only setup output missing %q\noutput:\n%s", want, output)
+		}
+	}
+	if strings.Contains(output, "▶ claude-code") {
+		t.Fatalf("claude-code (no CLI, no state dir) must not be configured; output:\n%s", output)
+	}
+
+	// Codex hooks landed in ~/.codex/config.toml even with no CLI on PATH.
+	data, err := os.ReadFile(filepath.Join(codexDir, "config.toml"))
+	if err != nil {
+		t.Fatalf("expected Codex config.toml from desktop-only detection: %v", err)
+	}
+	if !strings.Contains(string(data), "hook session-start --provider codex") {
+		t.Fatal("expected Codex session-start hook in config.toml")
 	}
 }
 
@@ -1120,7 +1189,8 @@ func TestRunSetup_AutoDetect_None(t *testing.T) {
 	t.Setenv(provider.CodexStateDirEnv, codexDir)
 
 	resetSetupProviderName(t)
-	stubProviderDetect(t) // neither
+	stubProviderDetect(t)   // no CLI on PATH
+	stubProviderStateDir(t) // no state/config dir present
 
 	cmd := &cobra.Command{}
 	cmd.Flags().String("backend-url", server.URL, "")
@@ -1135,8 +1205,8 @@ func TestRunSetup_AutoDetect_None(t *testing.T) {
 	if !strings.Contains(output, "Detected providers: (none)") {
 		t.Fatalf("expected `Detected providers: (none)`, got:\n%s", output)
 	}
-	if !strings.Contains(output, "No supported CLIs") {
-		t.Fatalf("expected terse no-CLI warning, got:\n%s", output)
+	if !strings.Contains(output, "No supported providers") {
+		t.Fatalf("expected terse no-provider warning, got:\n%s", output)
 	}
 	if !strings.Contains(output, "Auth saved, but no hooks were installed") {
 		t.Fatalf("expected auth-only warning copy, got:\n%s", output)
