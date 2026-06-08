@@ -9,9 +9,9 @@ import (
 	"regexp"
 	"sort"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/ConfabulousDev/confab/pkg/logger"
+	"github.com/ConfabulousDev/confab/pkg/types"
 )
 
 // claudeUUIDLength is the length of a Claude session UUID (with hyphens).
@@ -19,12 +19,6 @@ import (
 // silently skipped — this is how session JSONLs are distinguished from
 // agent sidechain files and stray non-transcript content.
 const claudeUUIDLength = 36
-
-// maxMetadataFieldSize is the backend-imposed limit for metadata fields
-// like first_user_message. Messages are truncated to half this value
-// (4KB) so the truncated string + JSON quoting + ellipsis still fits
-// when the chunk envelope serializes.
-const maxMetadataFieldSize = 8 * 1024
 
 var htmlTagRegex = regexp.MustCompile(`<[^>]*>`)
 
@@ -212,7 +206,7 @@ func extractClaudeMetadata(lines []string) SessionMetadata {
 
 		if result.FirstUserMessage == "" && msgType == "user" {
 			if text := extractTextFromMessage(entry); text != "" {
-				result.FirstUserMessage = truncateString(sanitizeText(text), maxMetadataFieldSize/2)
+				result.FirstUserMessage = TruncateUTF8(sanitizeText(text), types.MaxMetadataFieldLength/2)
 			}
 		}
 
@@ -267,23 +261,6 @@ func extractTextFromMessage(entry map[string]interface{}) string {
 	}
 
 	return ""
-}
-
-// truncateString truncates a string to maxBytes, respecting UTF-8 rune
-// boundaries. If truncated, appends "..." to indicate continuation.
-func truncateString(s string, maxBytes int) string {
-	if len(s) <= maxBytes {
-		return s
-	}
-	maxBytes -= 3
-	if maxBytes <= 0 {
-		return "..."
-	}
-	truncated := s[:maxBytes]
-	for len(truncated) > 0 && !utf8.ValidString(truncated) {
-		truncated = truncated[:len(truncated)-1]
-	}
-	return truncated + "..."
 }
 
 // sanitizeText removes HTML tags, decodes HTML entities, and normalizes whitespace.

@@ -8,7 +8,6 @@ import (
 	"regexp"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/ConfabulousDev/confab/pkg/types"
 )
@@ -311,7 +310,7 @@ func (p Codex) ReadSessionInfo(path string) (CodexSessionInfo, error) {
 }
 
 // ExtractFirstUserMessageFromLines returns the first non-empty user message
-// found in the given rollout lines, truncated to MaxFirstUserMessageLength
+// found in the given rollout lines, truncated to MaxMetadataFieldLength/2
 // bytes on a UTF-8 boundary. Returns "" when no user message is present.
 func (Codex) ExtractFirstUserMessageFromLines(lines []string) string {
 	for _, raw := range lines {
@@ -333,7 +332,7 @@ func (Codex) ExtractFirstUserMessageFromLines(lines []string) string {
 		if message == "" {
 			continue
 		}
-		return truncateUTF8Bytes(message, types.MaxFirstUserMessageLength)
+		return TruncateUTF8(message, types.MaxMetadataFieldLength/2)
 	}
 	return ""
 }
@@ -364,22 +363,4 @@ func (p Codex) DefaultCWD(transcriptPath string) string {
 		return info.CWD
 	}
 	return filepath.Dir(transcriptPath)
-}
-
-// truncateUTF8Bytes returns s truncated so its byte length is at most maxBytes,
-// without splitting a multi-byte rune. Returns an empty string when maxBytes is
-// non-positive.
-func truncateUTF8Bytes(s string, maxBytes int) string {
-	if maxBytes <= 0 {
-		return ""
-	}
-	if len(s) <= maxBytes {
-		return s
-	}
-	for i, r := range s {
-		if i+utf8.RuneLen(r) > maxBytes {
-			return s[:i]
-		}
-	}
-	return s[:maxBytes]
 }

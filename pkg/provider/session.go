@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/ConfabulousDev/confab/pkg/types"
 )
@@ -31,6 +32,38 @@ func readHeadLines(path string) ([]string, error) {
 		lines = append(lines, scanner.Text())
 	}
 	return lines, scanner.Err()
+}
+
+// TruncateUTF8 returns s truncated so its byte length is at most maxBytes,
+// without splitting a multi-byte rune. If truncation occurs and maxBytes >= 3,
+// appends "..." (3 ASCII bytes) to indicate continuation. Returns s unchanged
+// if len(s) <= maxBytes. Returns "" when maxBytes <= 0.
+func TruncateUTF8(s string, maxBytes int) string {
+	if maxBytes <= 0 || len(s) == 0 {
+		return ""
+	}
+	if len(s) <= maxBytes {
+		return s
+	}
+	// If maxBytes is too small to hold any content plus "...", just
+	// truncate to maxBytes without a suffix.
+	if maxBytes < 3 {
+		cut := maxBytes
+		for cut > 0 && !utf8.RuneStart(s[cut]) {
+			cut--
+		}
+		return s[:cut]
+	}
+	// Reserve space for the "..." suffix.
+	cut := maxBytes - 3
+	if cut <= 0 {
+		return "..."
+	}
+	// Back up to a valid UTF-8 boundary.
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + "..."
 }
 
 // SessionInfo is the cross-provider shape returned by Provider.ScanSessions
