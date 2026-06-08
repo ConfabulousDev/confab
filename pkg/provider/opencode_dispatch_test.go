@@ -145,7 +145,7 @@ func TestOpencode_AnnotateChunk_TruncatesLongMessage(t *testing.T) {
 	if !result.IncludedFirstUserMessage {
 		t.Fatal("IncludedFirstUserMessage = false, want true")
 	}
-	// Truncated to maxMetadataFieldSize/2 = 4096 bytes (plus "..." suffix).
+	// Truncated to types.MaxMetadataFieldLength/2 = 4096 bytes (plus "..." suffix).
 	if len(cv.setFirstUserMessage) > 4100 {
 		t.Errorf("SetFirstUserMessage length = %d, want <= 4100 (truncated)", len(cv.setFirstUserMessage))
 	}

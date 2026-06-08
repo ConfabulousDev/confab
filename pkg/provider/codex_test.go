@@ -125,28 +125,34 @@ func TestCodexExtractFirstUserMessageFromLinesSkipsEmptyAndNonUser(t *testing.T)
 }
 
 func TestCodexExtractFirstUserMessageFromLinesTruncates(t *testing.T) {
-	message := strings.Repeat("a", types.MaxFirstUserMessageLength+100)
+	message := strings.Repeat("a", types.MaxMetadataFieldLength/2+100)
 	lines := []string{`{"type":"event_msg","payload":{"type":"user_message","message":"` + message + `"}}`}
 
 	got := Codex{}.ExtractFirstUserMessageFromLines(lines)
-	if len(got) != types.MaxFirstUserMessageLength {
-		t.Fatalf("len(got) = %d, want %d", len(got), types.MaxFirstUserMessageLength)
+	if len(got) != types.MaxMetadataFieldLength/2 {
+		t.Fatalf("len(got) = %d, want %d", len(got), types.MaxMetadataFieldLength/2)
+	}
+	if !strings.HasSuffix(got, "...") {
+		t.Fatalf("truncated message should end with \"...\", got suffix %q", got[len(got)-5:])
 	}
 }
 
 func TestCodexExtractFirstUserMessageFromLinesTruncatesAtUTF8Boundary(t *testing.T) {
-	message := strings.Repeat("a", types.MaxFirstUserMessageLength-1) + "é"
+	message := strings.Repeat("a", types.MaxMetadataFieldLength/2-1) + "é"
 	lines := []string{`{"type":"event_msg","payload":{"type":"user_message","message":"` + message + `"}}`}
 
 	got := Codex{}.ExtractFirstUserMessageFromLines(lines)
-	if len(got) > types.MaxFirstUserMessageLength {
-		t.Fatalf("len(got) = %d, want <= %d", len(got), types.MaxFirstUserMessageLength)
+	if len(got) > types.MaxMetadataFieldLength/2 {
+		t.Fatalf("len(got) = %d, want <= %d", len(got), types.MaxMetadataFieldLength/2)
 	}
 	if !utf8.ValidString(got) {
 		t.Fatalf("got invalid UTF-8 after truncation")
 	}
 	if strings.HasSuffix(got, "é") {
 		t.Fatalf("expected partial multibyte rune to be omitted")
+	}
+	if !strings.HasSuffix(got, "...") {
+		t.Fatalf("truncated message should end with \"...\", got suffix %q", got[len(got)-5:])
 	}
 }
 

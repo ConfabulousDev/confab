@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/ConfabulousDev/confab/pkg/types"
 )
 
 // mockDirEntry implements os.DirEntry for testing parseClaudeSessionFromPath.
@@ -507,32 +509,6 @@ func TestSanitizeText(t *testing.T) {
 	}
 }
 
-func TestTruncateString(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    string
-		maxBytes int
-		expected string
-	}{
-		{"no truncation needed", "hello", 10, "hello"},
-		{"exact length", "hello", 5, "hello"},
-		{"truncate ASCII", "hello world", 8, "hello..."},
-		{"truncate at UTF-8 boundary", "hello 世界 world", 12, "hello 世..."},
-		{"truncate mid-UTF8 removes partial char", "hello 世界", 10, "hello ..."},
-		{"very small limit", "hello", 3, "..."},
-		{"empty string", "", 10, ""},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := truncateString(tt.input, tt.maxBytes)
-			if result != tt.expected {
-				t.Errorf("truncateString(%q, %d) = %q, want %q", tt.input, tt.maxBytes, result, tt.expected)
-			}
-		})
-	}
-}
-
 func TestExtractClaudeSessionMetadataFromFile_LongContent(t *testing.T) {
 	longMessage := strings.Repeat("a", 5000) // 5KB message, above 4KB limit
 	content := `{"type":"user","message":{"content":"` + longMessage + `"}}`
@@ -544,7 +520,7 @@ func TestExtractClaudeSessionMetadataFromFile_LongContent(t *testing.T) {
 	}
 
 	result := extractClaudeSessionMetadataFromFile(tmpFile)
-	expectedLen := maxMetadataFieldSize / 2 // 4KB
+	expectedLen := types.MaxMetadataFieldLength / 2 // 4KB
 	if len(result.FirstUserMessage) != expectedLen {
 		t.Errorf("Expected FirstUserMessage length %d, got %d", expectedLen, len(result.FirstUserMessage))
 	}

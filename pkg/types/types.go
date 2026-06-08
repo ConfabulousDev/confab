@@ -14,9 +14,12 @@ import (
 // thinking blocks and tool results can exceed 1MB
 const MaxJSONLLineSize = 10 * 1024 * 1024 // 10MB
 
-// MaxFirstUserMessageLength is the maximum size for provider session title
-// metadata sent to the backend.
-const MaxFirstUserMessageLength = 8 * 1024 // 8KB
+// MaxMetadataFieldLength is the maximum byte length for provider session
+// metadata fields (first_user_message, summary) sent to the backend.
+// Callers should use MaxMetadataFieldLength/2 (4KB) for first_user_message
+// to leave headroom for JSON serialization overhead below the backend's
+// 8192-character limit.
+const MaxMetadataFieldLength = 8 * 1024 // 8KB
 
 // NewJSONLScanner creates a bufio.Scanner configured for large JSONL files
 // with a 10MB buffer to handle long transcript lines
