@@ -512,7 +512,7 @@ func (e *Engine) workflowFileTypeAllowed(fileType string) bool {
 		return false // transient probe failure — skip this cycle, retry next
 	}
 	switch fileType {
-	case "agent":
+	case provider.FileTypeAgent:
 		return caps.WorkflowFiles
 	case provider.FileTypeWorkflowJournal:
 		return caps.WorkflowJournal

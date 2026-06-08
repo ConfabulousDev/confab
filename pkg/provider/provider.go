@@ -38,11 +38,20 @@ type DescendantRegistrar interface {
 	RegisterCodexRollout(path, fileName string, isRoot bool, meta CodexRolloutMetadata)
 }
 
+// FileType* are the sync file_type values the backend recognizes for a
+// tracked file. FileTypeTranscript is a session's primary transcript/rollout;
+// FileTypeAgent is any subagent sidechain (Claude agent-*.jsonl, Codex
+// descendant rollouts, OpenCode child sessions, workflow subagent transcripts).
+//
 // FileTypeWorkflowJournal is the sync file_type for a Claude workflow run's
 // journal.jsonl (CF-533). The backend (CF-532) accepts and stores it but
 // never Claude-parses it; it is excluded from token/transcript analytics.
-// Workflow subagent transcripts use the ordinary "agent" file_type.
-const FileTypeWorkflowJournal = "workflow_journal"
+// Workflow subagent transcripts use the ordinary FileTypeAgent file_type.
+const (
+	FileTypeTranscript      = "transcript"
+	FileTypeAgent           = "agent"
+	FileTypeWorkflowJournal = "workflow_journal"
+)
 
 // WorkflowRegistrar is the surface DiscoverWorkflowFiles uses to register
 // Claude workflow subagent transcripts + run journals as path-encoded

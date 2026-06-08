@@ -86,7 +86,7 @@ func (t *FileTracker) InitFromBackendState(backendFiles map[string]FileState) {
 	t.files[transcriptName] = t.buildTrackedFromState(TrackedFile{
 		Path:           t.transcriptPath,
 		Name:           transcriptName,
-		Type:           "transcript",
+		Type:           provider.FileTypeTranscript,
 		LastSyncedLine: transcriptState.LastSyncedLine,
 		ByteOffset:     0, // Will be set on first read
 	})
@@ -111,7 +111,7 @@ func (t *FileTracker) InitFromBackendState(backendFiles map[string]FileState) {
 		t.files[fileName] = t.buildTrackedFromState(TrackedFile{
 			Path:           path,
 			Name:           fileName,
-			Type:           "agent",
+			Type:           provider.FileTypeAgent,
 			LastSyncedLine: state.LastSyncedLine,
 			ByteOffset:     0, // Will be set on first read
 		})
@@ -224,7 +224,7 @@ const DefaultMaxChunkBytes = 14 * 1024 * 1024 // 14MB
 // transcript message (inline `gitBranch` + `cwd`). Returns nil for any
 // other shape (including agent files, where Type != "transcript").
 func gitInfoFromClaudeMessage(file *TrackedFile, msg map[string]interface{}) *git.GitInfo {
-	if file.Type != "transcript" {
+	if file.Type != provider.FileTypeTranscript {
 		return nil
 	}
 	branch, _ := msg["gitBranch"].(string)
@@ -322,7 +322,7 @@ func (t *FileTracker) ReadChunk(file *TrackedFile, r *redactor.Redactor, maxByte
 	}
 
 	// Extract metadata from transcript and agent files (for transitive agent discovery)
-	extractMetadata := file.Type == "transcript" || file.Type == "agent"
+	extractMetadata := file.Type == provider.FileTypeTranscript || file.Type == provider.FileTypeAgent
 	var agentIDs []string
 	var gitInfo *git.GitInfo
 	seenAgents := make(map[string]bool)
@@ -521,7 +521,7 @@ func (t *FileTracker) trackAgentFile(fileName string) *TrackedFile {
 	tracked := &TrackedFile{
 		Path: agentPath,
 		Name: fileName,
-		Type: "agent",
+		Type: provider.FileTypeAgent,
 	}
 	t.files[fileName] = tracked
 	return tracked
@@ -550,9 +550,9 @@ func (t *FileTracker) AddCodexRollout(path, fileName string, isRoot bool, meta C
 	if existing, ok := t.files[fileName]; ok {
 		return existing
 	}
-	fileType := "agent"
+	fileType := provider.FileTypeAgent
 	if isRoot {
-		fileType = "transcript"
+		fileType = provider.FileTypeTranscript
 	}
 	tracked := &TrackedFile{
 		Path:         path,
