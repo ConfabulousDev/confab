@@ -49,6 +49,13 @@ type Engine struct {
 	caps              Capabilities // cached capabilities (zero value on 404)
 	loggedProbeError  bool         // a transient probe failure was already logged
 	capsProbedThisRun bool         // a probe was already attempted in this SyncAll cycle
+
+	// descendantReg, when non-nil, overrides the default DescendantRegistrar
+	// (e.tracker) that SyncAll passes to provider.DiscoverDescendants. The
+	// daemon sets this for OpenCode so the registrar wrapper can drive
+	// per-child collector spawn through the same provider seam Codex uses.
+	// See SetDescendantRegistrar.
+	descendantReg provider.DescendantRegistrar
 }
 
 // setProviderForTest substitutes the engine's resolved Provider with a stub.
@@ -276,9 +283,15 @@ func (e *Engine) SyncAll() (int, error) {
 	// are discovered transitively from transcript content inside
 	// tracker.DiscoverNewFiles). Codex queries the local SQLite state DB
 	// for every descendant of the root thread and registers them as agent
-	// files. The BFS loop below uploads them as sidechain files under the
-	// root's backend session.
-	if err := e.provider.DiscoverDescendants(e.tracker, e.externalID); err != nil {
+	// files. OpenCode walks its SQLite session.parent_id tree and
+	// registers each child as a path-encoded sidechain via the daemon-
+	// supplied registrar (CF-538). The BFS loop below uploads everything
+	// as sidechain files under the root's backend session.
+	reg := provider.DescendantRegistrar(e.tracker)
+	if e.descendantReg != nil {
+		reg = e.descendantReg
+	}
+	if err := e.provider.DiscoverDescendants(reg, e.externalID); err != nil {
 		logger.Warn("provider DiscoverDescendants failed: %v", err)
 	}
 
@@ -451,6 +464,41 @@ func (e *Engine) resolveCaps() (Capabilities, bool) {
 // stops scanning the filesystem for workflow files for the engine's lifetime.
 func (e *Engine) workflowUploadsRuledOut() bool {
 	return e.capsResolved && !e.caps.WorkflowFiles && !e.caps.WorkflowJournal
+}
+
+// Tracker returns the engine's internal FileTracker. Exposed so the daemon
+// can wrap it in a provider-specific DescendantRegistrar (OpenCode) and
+// then hand the wrapper back via SetDescendantRegistrar. Direct callers
+// outside that wiring should not mutate the returned tracker.
+func (e *Engine) Tracker() *FileTracker { return e.tracker }
+
+// SetDescendantRegistrar overrides the default DescendantRegistrar (the
+// engine's own *FileTracker) that Engine.SyncAll passes to
+// provider.DiscoverDescendants. Used by the daemon to inject a registrar
+// that wraps the FileTracker with provider-specific behavior (OpenCode
+// child collector spawn). Must be called before SyncAll.
+//
+// The honest-but-mutable setter is the cleanest break of the cyclic
+// dependency between the engine and an OpenCode registrar: the registrar
+// needs the engine (for the capability gate); the engine needs the
+// registrar (for SyncAll). Construction order is engine → registrar →
+// setter; either constructor injection or hidden closures would just
+// reshuffle the same mutation.
+func (e *Engine) SetDescendantRegistrar(reg provider.DescendantRegistrar) {
+	e.descendantReg = reg
+}
+
+// OpencodeChildFilesAllowed reports whether OpenCode subagent sidechain
+// files may be uploaded to this backend, per its cached capabilities
+// (CF-538/CF-539). Lazy-probes once per SyncAll cycle; cached definitive
+// answers persist for the engine's lifetime. Exported because the
+// daemon's opencodeRegistrar gates RegisterOpencodeChild on it.
+func (e *Engine) OpencodeChildFilesAllowed() bool {
+	caps, ok := e.resolveCaps()
+	if !ok {
+		return false
+	}
+	return caps.OpencodeSubagentFiles
 }
 
 // workflowFileTypeAllowed reports whether a workflow file of the given

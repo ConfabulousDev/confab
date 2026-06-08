@@ -73,7 +73,7 @@ func (ClaudeCode) DiscoverWorkflowFiles(reg WorkflowRegistrar, allow func(fileTy
 			// Path-encoded backend name (forward slashes — load-bearing S3 key
 			// segments the backend parses); absolute path for local reads.
 			name := path.Join("subagents", workflowsSubdir, runID, base)
-			if reg.RegisterWorkflowFile(filepath.Join(runPath, base), name, fileType) {
+			if reg.RegisterSidechainFile(filepath.Join(runPath, base), name, fileType) {
 				count++
 			}
 		}

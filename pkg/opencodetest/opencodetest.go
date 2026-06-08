@@ -111,7 +111,12 @@ func NewDB(t *testing.T) *Builder {
 	// same path while the WAL is still hot can intermittently miss the
 	// schema, depending on -shm state. The reader code path under test
 	// uses ?mode=ro and works identically against either journal mode.
-	db, err := sql.Open("sqlite", "file:"+path)
+	//
+	// busy_timeout(5000) lets the test writer cope with concurrent readers
+	// the way production does (CF-538: child collectors poll the same DB
+	// while integration tests append late rows). Without it, -race timing
+	// surfaces SQLITE_BUSY on the writer side.
+	db, err := sql.Open("sqlite", "file:"+path+"?_pragma=busy_timeout(5000)")
 	if err != nil {
 		t.Fatalf("opencodetest: open: %v", err)
 	}

@@ -1,14 +1,18 @@
 package provider
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
+	"github.com/ConfabulousDev/confab/pkg/confabpath"
 	"github.com/ConfabulousDev/confab/pkg/config"
 	"github.com/ConfabulousDev/confab/pkg/logger"
 	"github.com/ConfabulousDev/confab/pkg/types"
@@ -123,7 +127,89 @@ func (Opencode) WriteHookResponse(w io.Writer, _ bool, _ string) error {
 
 func (Opencode) InitTranscript(TranscriptRegistrar, string, string) error { return nil }
 
-func (Opencode) DiscoverDescendants(DescendantRegistrar, string) error { return nil }
+// opencodeListDescendantsTimeout bounds the per-cycle SQLite query that
+// enumerates an OpenCode root's descendant sessions. Generous enough to
+// survive heavy write contention (5s busy_timeout on the read connection
+// plus a small margin); short enough that a wedged DB doesn't park the
+// sync loop for the full 30s tick.
+const opencodeListDescendantsTimeout = 10 * time.Second
+
+// DiscoverDescendants enumerates every OpenCode subagent session under
+// externalID via the local SQLite DB and registers each as a path-encoded
+// sidechain file under the root's backend session (CF-538). The reg must
+// implement OpencodeDescendantRegistrar (the daemon-supplied wrapper that
+// drives child-collector goroutine spawn). When the assertion misses
+// (forgotten daemon setter, or unit tests using a plain *FileTracker),
+// logs a Warn once and returns nil — the production path requires the
+// wrapper; the log surfaces a misconfiguration that would otherwise be
+// silent.
+//
+// Per-tick semantics:
+//   1. Resolve the DB path (CONFAB_OPENCODE_DB env, then $XDG_DATA_HOME,
+//      then ~/.local/share). Provider is stateless: a fresh reader per
+//      call costs one stat + open.
+//   2. Recursive CTE walks session.parent_id descendants (capped at 1000
+//      rows as a cycle defense).
+//   3. For each descendant: derive the nested local materialized path
+//      ~/.confab/opencode/<root>/children/<child>/messages.jsonl, then
+//      call reg.RegisterOpencodeChild. The registrar handles capability
+//      gating, file registration, and collector spawn — all idempotent.
+//
+// DB unavailable → log Warn, return nil (consistent with Codex's behavior
+// when its state DB is missing). The daemon's sync cycle continues
+// uninterrupted past a transient DB-absence.
+func (Opencode) DiscoverDescendants(reg DescendantRegistrar, externalID string) error {
+	oreg, ok := reg.(OpencodeDescendantRegistrar)
+	if !ok {
+		logger.Warn("OpenCode descendant discovery requires the daemon-supplied registrar; subagent capture disabled for session %s", externalID)
+		return nil
+	}
+
+	dbPath, err := OpenCodeDBPath()
+	if err != nil {
+		logger.Warn("OpenCode DB path resolve failed: %v", err)
+		return nil
+	}
+	reader := NewOpenCodeDBReader(dbPath)
+
+	ctx, cancel := context.WithTimeout(context.Background(), opencodeListDescendantsTimeout)
+	defer cancel()
+	descendants, err := reader.ListDescendants(ctx, externalID)
+	if err != nil {
+		logger.Warn("OpenCode ListDescendants failed for %s: %v", externalID, err)
+		return nil
+	}
+
+	for _, childID := range descendants {
+		localPath, err := opencodeChildLocalPath(externalID, childID)
+		if err != nil {
+			logger.Warn("OpenCode child path derive failed for %s: %v", childID, err)
+			continue
+		}
+		oreg.RegisterOpencodeChild(childID, localPath)
+	}
+	return nil
+}
+
+// opencodeChildLocalPath returns the per-child materialized JSONL path under
+// ~/.confab/opencode/<root>/children/<child>/messages.jsonl. Nested under
+// the root so a) cleanup tracks the root and b) two roots that
+// (pathologically) reference the same child id never collide on disk.
+//
+// Backend file_name uses only the child id ("opencode/<child>/messages.jsonl");
+// local path is decoupled, as TrackedFile.Path and TrackedFile.Name are
+// independent.
+func opencodeChildLocalPath(rootSessionID, childSessionID string) (string, error) {
+	return confabpath.Subpath("opencode", rootSessionID, "children", childSessionID, "messages.jsonl")
+}
+
+// OpencodeChildBackendName returns the path-encoded backend file_name a
+// daemon registrar should use when registering an OpenCode child file with
+// the tracker. Forward slashes are load-bearing (the backend parses the
+// path segments to resolve the child session id).
+func OpencodeChildBackendName(childSessionID string) string {
+	return path.Join("opencode", childSessionID, "messages.jsonl")
+}
 
 func (Opencode) DiscoverWorkflowFiles(WorkflowRegistrar, func(string) bool) (int, error) {
 	return 0, nil

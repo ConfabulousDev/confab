@@ -1433,13 +1433,13 @@ func TestFileTracker_SubagentsDir(t *testing.T) {
 
 // Spec: registering a brand-new workflow file returns true and tracks it with
 // the path-encoded name, on-disk path, and given file type.
-func TestFileTracker_RegisterWorkflowFile_New(t *testing.T) {
+func TestFileTracker_RegisterSidechainFile_New(t *testing.T) {
 	tr := NewFileTracker("/irrelevant.jsonl")
 	name := "subagents/workflows/wf_run1/journal.jsonl"
 	path := "/abs/subagents/workflows/wf_run1/journal.jsonl"
 
-	if isNew := tr.RegisterWorkflowFile(path, name, "workflow_journal"); !isNew {
-		t.Error("RegisterWorkflowFile returned false for a new file, want true")
+	if isNew := tr.RegisterSidechainFile(path, name, "workflow_journal"); !isNew {
+		t.Error("RegisterSidechainFile returned false for a new file, want true")
 	}
 	if !tr.IsTracked(name) {
 		t.Fatalf("file %q not tracked after register", name)
@@ -1453,18 +1453,18 @@ func TestFileTracker_RegisterWorkflowFile_New(t *testing.T) {
 
 // Spec: re-registering an already-tracked name returns false and overwrites
 // Path+Type IN PLACE while preserving sync position (LastSyncedLine/ByteOffset).
-func TestFileTracker_RegisterWorkflowFile_OverwritesPreservingPosition(t *testing.T) {
+func TestFileTracker_RegisterSidechainFile_OverwritesPreservingPosition(t *testing.T) {
 	tr := NewFileTracker("/irrelevant.jsonl")
 	name := "subagents/workflows/wf_run1/journal.jsonl"
 
 	// First register (e.g. from a prior cycle), then advance sync position.
-	tr.RegisterWorkflowFile("/wrong/path/journal.jsonl", name, "agent")
+	tr.RegisterSidechainFile("/wrong/path/journal.jsonl", name, "agent")
 	tr.files[name].LastSyncedLine = 7
 	tr.files[name].ByteOffset = 123
 
 	correctPath := "/abs/subagents/workflows/wf_run1/journal.jsonl"
-	if isNew := tr.RegisterWorkflowFile(correctPath, name, "workflow_journal"); isNew {
-		t.Error("RegisterWorkflowFile returned true for an existing file, want false")
+	if isNew := tr.RegisterSidechainFile(correctPath, name, "workflow_journal"); isNew {
+		t.Error("RegisterSidechainFile returned true for an existing file, want false")
 	}
 	f := tr.files[name]
 	if f.Path != correctPath {

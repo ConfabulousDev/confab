@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -399,6 +400,111 @@ func TestOpenCodeDBPathFallsBackToHome(t *testing.T) {
 	}
 }
 
+
+// CF-538 ListDescendants tests --------------------------------------------
+
+// TestListDescendantsRecursive asserts ListDescendants walks the full
+// session.parent_id tree at any depth, returns descendants in ULID lex
+// order, and excludes the root itself.
+func TestListDescendantsRecursive(t *testing.T) {
+	const root = "ses_00000000000000000000root"
+	const childA = "ses_00000000000000000000a000"
+	const childB = "ses_00000000000000000000b000"
+	const grandchildA1 = "ses_00000000000000000000a100"
+	b := opencodetest.NewDB(t)
+	b.AddSession(root, "").
+		AddSession(childA, root).
+		AddSession(childB, root).
+		AddSession(grandchildA1, childA)
+
+	r := NewOpenCodeDBReader(b.Path())
+	ids, err := r.ListDescendants(context.Background(), root)
+	if err != nil {
+		t.Fatalf("ListDescendants: %v", err)
+	}
+	want := []string{childA, grandchildA1, childB}
+	if len(ids) != len(want) {
+		t.Fatalf("got %d descendants, want %d: %v", len(ids), len(want), ids)
+	}
+	for i, w := range want {
+		if ids[i] != w {
+			t.Errorf("ids[%d] = %q, want %q (full: %v)", i, ids[i], w, ids)
+		}
+	}
+}
+
+// TestListDescendantsEmpty asserts a root with no children returns an empty
+// slice and nil error (not a sentinel error).
+func TestListDescendantsEmpty(t *testing.T) {
+	const root = "ses_lonely_root"
+	b := opencodetest.NewDB(t)
+	b.AddSession(root, "")
+
+	r := NewOpenCodeDBReader(b.Path())
+	ids, err := r.ListDescendants(context.Background(), root)
+	if err != nil {
+		t.Fatalf("ListDescendants: %v", err)
+	}
+	if len(ids) != 0 {
+		t.Errorf("got %d descendants for childless root, want 0", len(ids))
+	}
+}
+
+// TestListDescendantsDBMissing asserts a missing DB file returns
+// (nil, nil) — graceful degradation so the daemon's tick loop can
+// continue past a transient DB-absence without error noise.
+func TestListDescendantsDBMissing(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "does", "not", "exist", "opencode.db")
+	r := NewOpenCodeDBReader(missing)
+	ids, err := r.ListDescendants(context.Background(), "ses_x")
+	if err == nil {
+		t.Fatal("ListDescendants should error on missing DB (callers log Warn; we don't want silent 'no descendants')")
+	}
+	if len(ids) != 0 {
+		t.Errorf("got %d ids, want 0", len(ids))
+	}
+}
+
+// TestListDescendantsCapAt1000 asserts the recursive CTE is bounded to
+// defend against pathological cycles or huge subagent trees.
+func TestListDescendantsCapAt1000(t *testing.T) {
+	const root = "ses_huge_root"
+	b := opencodetest.NewDB(t)
+	b.AddSession(root, "")
+	for i := 0; i < 1500; i++ {
+		b.AddSession(fmt.Sprintf("ses_%04d", i), root)
+	}
+
+	r := NewOpenCodeDBReader(b.Path())
+	ids, err := r.ListDescendants(context.Background(), root)
+	if err != nil {
+		t.Fatalf("ListDescendants: %v", err)
+	}
+	if len(ids) != 1000 {
+		t.Errorf("got %d descendants, want 1000 (LIMIT cap)", len(ids))
+	}
+}
+
+// TestListDescendantsRootSelfExcluded asserts the root's own id never
+// appears in the result, even if (pathologically) the DB has parent_id
+// pointing at the root from another session AND somehow recurses back.
+func TestListDescendantsRootSelfExcluded(t *testing.T) {
+	const root = "ses_self_check_root"
+	const child = "ses_self_check_child"
+	b := opencodetest.NewDB(t)
+	b.AddSession(root, "").AddSession(child, root)
+
+	r := NewOpenCodeDBReader(b.Path())
+	ids, err := r.ListDescendants(context.Background(), root)
+	if err != nil {
+		t.Fatalf("ListDescendants: %v", err)
+	}
+	for _, id := range ids {
+		if id == root {
+			t.Errorf("descendants list contains the root id %q", root)
+		}
+	}
+}
 
 // CF-549 ReadSessionInfo tests --------------------------------------------
 

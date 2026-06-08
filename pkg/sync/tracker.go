@@ -147,8 +147,9 @@ func (t *FileTracker) SubagentsDir() string {
 	return t.subagentsDir
 }
 
-// RegisterWorkflowFile is the provider.WorkflowRegistrar entry point for
-// Claude workflow subagent transcripts + run journals (CF-533). name is the
+// RegisterSidechainFile is the entry point for registering path-encoded
+// sidechain files. CF-533 uses it for Claude workflow subagent transcripts +
+// run journals; CF-538 uses it for OpenCode subagent messages. name is the
 // forward-slash path-encoded backend file_name; path is its absolute
 // location on disk; fileType is "agent" or provider.FileTypeWorkflowJournal.
 //
@@ -156,7 +157,7 @@ func (t *FileTracker) SubagentsDir() string {
 // (e.g. a stale entry rebuilt from backend state on daemon restart), it
 // overwrites Path+Type in place and returns false, preserving the sync
 // position (LastSyncedLine/ByteOffset) so the file resumes incrementally.
-func (t *FileTracker) RegisterWorkflowFile(path, name, fileType string) bool {
+func (t *FileTracker) RegisterSidechainFile(path, name, fileType string) bool {
 	if existing, ok := t.files[name]; ok {
 		existing.Path = path
 		existing.Type = fileType

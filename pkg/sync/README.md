@@ -8,9 +8,9 @@ The engine is fully **file-based** and provider-agnostic about its source: it re
 
 | File | Role |
 |------|------|
-| `engine.go` | `Engine` — orchestrates init, sync loop, agent discovery (BFS); dispatches provider behavior via `InitTranscript`/`DiscoverDescendants`/`DiscoverWorkflowFiles`/`AnnotateChunk`. Owns workflow-file capability gating (`resolveCaps`, `workflowFileTypeAllowed`). Includes the `chunkView` adapter that satisfies `provider.ChunkView` |
-| `client.go` | `Client` — HTTP API methods for init, chunk upload, events, summary updates, GitHub linking, and the `Capabilities()` probe (`GET /api/v1/capabilities`). Defines the `Capabilities` struct; aliases `provider.CodexRolloutMetadata` as `sync.CodexRolloutMetadata` |
-| `tracker.go` | `FileTracker` — tracks file state, reads chunks with byte-offset seeking, discovers agent files (Claude transitive discovery). Implements `provider.TranscriptRegistrar` (via `*TrackedFile.SetCodexRollout`), `provider.DescendantRegistrar` (via `*FileTracker.RegisterCodexRollout`), and `provider.WorkflowRegistrar` (via `SubagentsDir` + `RegisterWorkflowFile`) so providers can register Codex rollouts and Claude workflow files |
+| `engine.go` | `Engine` — orchestrates init, sync loop, agent discovery (BFS); dispatches provider behavior via `InitTranscript`/`DiscoverDescendants`/`DiscoverWorkflowFiles`/`AnnotateChunk`. Owns capability gating (`resolveCaps`, `workflowFileTypeAllowed`, `OpencodeChildFilesAllowed`). Exposes `Tracker()` and `SetDescendantRegistrar()` (CF-538) so the daemon can wrap the tracker for OpenCode child-collector spawn. Includes the `chunkView` adapter that satisfies `provider.ChunkView` |
+| `client.go` | `Client` — HTTP API methods for init, chunk upload, events, summary updates, GitHub linking, and the `Capabilities()` probe (`GET /api/v1/capabilities`). Defines the `Capabilities` struct (`workflow_files`, `workflow_journal`, `opencode_subagent_files`); aliases `provider.CodexRolloutMetadata` as `sync.CodexRolloutMetadata` |
+| `tracker.go` | `FileTracker` — tracks file state, reads chunks with byte-offset seeking, discovers agent files (Claude transitive discovery). Implements `provider.TranscriptRegistrar` (via `*TrackedFile.SetCodexRollout`), `provider.DescendantRegistrar` (via `*FileTracker.RegisterCodexRollout`), and `provider.WorkflowRegistrar` (via `SubagentsDir` + `RegisterSidechainFile`). `RegisterSidechainFile` (renamed from CF-533's `RegisterWorkflowFile` to generalize across CF-533 workflow files + CF-538 OpenCode children) registers a path-encoded backend `file_name` with a local disk `Path`; idempotent overwrite preserves sync position |
 | `summary_link.go` | Links child session summaries to parent sessions via `leafUuid` |
 
 ## Three Components
@@ -25,7 +25,7 @@ Claude's `Workflow` tool spawns subagents whose transcripts live at
 `journal.jsonl`. These carry no `agentId` in the main transcript, so the
 Claude provider discovers them by **scanning that directory** (not via
 `ExtractAgentIDsFromMessage`) in `provider.DiscoverWorkflowFiles`, and registers
-them through `FileTracker.RegisterWorkflowFile` with **path-encoded** backend
+them through `FileTracker.RegisterSidechainFile` with **path-encoded** backend
 `file_name`s (forward slashes, written verbatim — the backend resolves
 `<runId>` from the path and `<id>` via `path.Base`):
 
@@ -119,6 +119,8 @@ SyncAll() loop:
 **Gating behavior on backend support:** Add a field to the `Capabilities` struct (`client.go`), have the backend advertise it via `GET /api/v1/capabilities`, and gate in the engine. Default any absent field to `false` (older backends omit the endpoint → `404`); cache only definitive answers and re-probe on transient failures.
 
 **Adding a new provider:** Implement `provider.Provider` (including the sync-loop methods `InitTranscript`, `DiscoverDescendants`, `DiscoverWorkflowFiles`, `AnnotateChunk`) and register it in `pkg/provider/provider.go`'s registry. Zero changes required in `pkg/sync/engine.go` — the engine dispatches everything through the interface.
+
+**Driving per-discovery side effects from the daemon (OpenCode pattern, CF-538):** When a provider's `DiscoverDescendants` needs to spawn goroutines or check capabilities (things the engine and `FileTracker` know nothing about), the daemon wraps the engine's `FileTracker` in a provider-specific registrar (implementing an extension of `provider.DescendantRegistrar`) and injects it via `Engine.SetDescendantRegistrar`. The provider type-asserts to the extension inside `DiscoverDescendants`; a missed assertion logs Warn and degrades gracefully. The engine remains provider-agnostic — the extension lives entirely in the daemon and provider packages.
 
 ## Invariants
 

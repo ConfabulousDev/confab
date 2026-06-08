@@ -129,6 +129,10 @@ type Capabilities struct {
 	// WorkflowJournal reports that the backend accepts the workflow_journal
 	// file_type (subagents/workflows/<runId>/journal.jsonl).
 	WorkflowJournal bool `json:"workflow_journal"`
+	// OpencodeSubagentFiles reports that the backend resolves path-encoded
+	// OpenCode subagent file_names (opencode/<child-id>/messages.jsonl) and
+	// stitches them into the root session's analytics (CF-538/CF-539).
+	OpencodeSubagentFiles bool `json:"opencode_subagent_files"`
 }
 
 // Capabilities probes GET /api/v1/capabilities (public, no auth). Any failure

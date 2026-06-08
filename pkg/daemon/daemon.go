@@ -95,6 +95,26 @@ type Daemon struct {
 	// select drains it and triggers shutdown with reason "parent process
 	// exited". Unused when parentPID == 0 (no parent monitoring requested).
 	parentDeathCh chan struct{}
+
+	// CF-538 OpenCode subagent sidechain capture --------------------------
+
+	// dbReader is the OpenCode SQLite reader shared by the root collector
+	// AND every child collector. Resolved once at daemon Run start. Nil on
+	// Claude/Codex daemons.
+	dbReader *provider.OpenCodeDBReader
+
+	// childCollectorBase is the parent context for every per-descendant
+	// child-collector goroutine. Derived from the daemon's main Run ctx so
+	// a parent context cancellation tears down everything together.
+	// childCollectorCancel cancels this context (and therefore every child)
+	// at shutdown.
+	childCollectorBase   context.Context
+	childCollectorCancel context.CancelFunc
+
+	// childCollectors maps childSessionID → goroutine handle. Guarded by
+	// childCollectorsMu. Nil until startChildCollector first runs.
+	childCollectors   map[string]*opencodeChildCollector
+	childCollectorsMu sync.Mutex
 }
 
 // Config holds daemon configuration
@@ -209,11 +229,18 @@ func (d *Daemon) Run(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("failed to resolve OpenCode db path: %w", err)
 		}
+		d.dbReader = provider.NewOpenCodeDBReader(dbPath)
+
+		// Parent context for child collectors. Cancelled via
+		// d.childCollectorCancel in shutdown(); also tears down on Run's ctx
+		// cancellation through the derived chain.
+		d.childCollectorBase, d.childCollectorCancel = context.WithCancel(ctx)
+
 		collectorCtx, cancel := context.WithCancel(ctx)
 		d.collectorCancel = cancel
 		d.collectorDone = make(chan struct{})
 		collector := provider.NewOpenCodeCollector(
-			provider.NewOpenCodeDBReader(dbPath), d.externalID, path, d.syncInterval)
+			d.dbReader, d.externalID, path, d.syncInterval)
 		go func() {
 			defer close(d.collectorDone)
 			if err := collector.Run(collectorCtx); err != nil && !errors.Is(err, context.Canceled) {
@@ -422,6 +449,15 @@ func (d *Daemon) tryInit() error {
 			return fmt.Errorf("failed to create sync engine: %w", err)
 		}
 		d.engine = engine
+
+		// CF-538: wrap the engine's tracker so OpenCode's DiscoverDescendants
+		// drives per-child collector spawn (and capability gating) through
+		// the same provider seam Codex uses. Set once per engine — a reset
+		// (auth failure) creates a fresh engine, which gets a fresh wrapper.
+		if d.providerName == provider.NameOpencode {
+			reg := newOpencodeRegistrar(engine.Tracker(), engine, d)
+			engine.SetDescendantRegistrar(reg)
+		}
 	}
 
 	// Initialize the session with backend
@@ -466,17 +502,25 @@ func (d *Daemon) shutdown(reason string) error {
 
 	logger.Info("Daemon shutting down: reason=%s", reason)
 
-	// Stop the OpenCode collector (if any) and wait for it to exit before the
-	// final sync, so no append races the final read (which would drop the last
-	// materialized message). The collector does a final SQLite reconcile on
-	// shutdown, so this returns promptly; the timeout is a safety net.
+	// Stop the OpenCode collectors (root + every CF-538 descendant) and wait
+	// for them to exit before the final sync, so no append races the final
+	// read (which would drop the last materialized message). Each collector
+	// does a final SQLite reconcile on cancel, so this returns promptly; the
+	// single 2s ceiling covers them all.
+	//
+	// Children inherit their context from childCollectorBase, so a single
+	// cancel of the base propagates to every child. The root collector is
+	// cancelled separately because it was spawned before the children pool.
 	if d.collectorCancel != nil {
 		d.collectorCancel()
-		select {
-		case <-d.collectorDone:
-		case <-time.After(2 * time.Second):
-			logger.Warn("OpenCode collector did not stop within timeout; proceeding with final sync")
-		}
+	}
+	var childDones []chan struct{}
+	if d.childCollectorCancel != nil {
+		childDones = d.childCollectorDones()
+		d.childCollectorCancel()
+	}
+	if d.collectorCancel != nil || len(childDones) > 0 {
+		waitForCollectors(d.collectorDone, childDones, 2*time.Second)
 	}
 
 	// Read inbox events (e.g., SessionEnd payload from sync stop)

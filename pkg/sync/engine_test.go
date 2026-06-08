@@ -16,6 +16,7 @@ import (
 
 	"github.com/ConfabulousDev/confab/pkg/codextest"
 	"github.com/ConfabulousDev/confab/pkg/config"
+	"github.com/ConfabulousDev/confab/pkg/opencodetest"
 	pkghttp "github.com/ConfabulousDev/confab/pkg/http"
 	"github.com/ConfabulousDev/confab/pkg/provider"
 	"github.com/ConfabulousDev/confab/pkg/redactor"
@@ -2183,4 +2184,159 @@ func TestEngine_SyncAll_WorkflowFiles_TransientProbe_RetriesNextCycle(t *testing
 	if got := atomic.LoadInt32(&mock.capsRequestCount); got != 2 {
 		t.Errorf("total probes = %d, want 2 (one transient + one definitive)", got)
 	}
+}
+
+// ============================================================================
+// CF-538: OpenCode subagent sidechain registrar wiring + capability gate
+// ============================================================================
+
+// fakeDescendantRegistrar records DescendantRegistrar calls plus the
+// CF-538-specific RegisterOpencodeChild call. Used by TestEngine_SetDescendantRegistrar
+// to assert the engine's SyncAll passes the injected registrar (not the
+// engine's own *FileTracker) to provider.DiscoverDescendants.
+type fakeDescendantRegistrar struct {
+	*FileTracker // embed so DescendantRegistrar methods compose
+
+	registeredChildren []string
+}
+
+func (f *fakeDescendantRegistrar) RegisterOpencodeChild(childID, localPath string) {
+	f.registeredChildren = append(f.registeredChildren, childID)
+}
+
+// TestEngine_SetDescendantRegistrar_OverridesDefault asserts that when the
+// daemon sets a custom registrar, SyncAll passes that registrar (not the
+// engine's own *FileTracker) to provider.DiscoverDescendants.
+//
+// We exercise this through the OpenCode provider: a fixture DB with one
+// root + one descendant; if the registrar is invoked, the fake records
+// the RegisterOpencodeChild call.
+func TestEngine_SetDescendantRegistrar_OverridesDefault(t *testing.T) {
+	t.Helper()
+	mock := newMockBackend(t)
+	mock.caps = &Capabilities{OpencodeSubagentFiles: true}
+	server := httptest.NewServer(mock)
+	defer server.Close()
+
+	tmpDir, transcriptPath := setupTestEnv(t, server.URL)
+	// Materialized file with one line so Init has something to register.
+	_ = os.WriteFile(transcriptPath, []byte(`{"info":{"id":"msg_1","sessionID":"ses_root","role":"user"},"parts":[]}`+"\n"), 0644)
+
+	// Set up an OpenCode fixture DB with a child of "ses_root".
+	dbPath := opencodeFixtureWithChild(t, "ses_root", "ses_child")
+	t.Setenv("CONFAB_OPENCODE_DB", dbPath)
+
+	engine := newEngineWithBackend(t, mustNewClient(t, server.URL, tmpDir), nil, EngineConfig{
+		Provider:       provider.NameOpencode,
+		ExternalID:     "ses_root",
+		TranscriptPath: transcriptPath,
+		CWD:            tmpDir,
+	})
+
+	fake := &fakeDescendantRegistrar{FileTracker: engine.tracker}
+	engine.SetDescendantRegistrar(fake)
+
+	if err := engine.Init(); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	if _, err := engine.SyncAll(); err != nil {
+		t.Fatalf("SyncAll: %v", err)
+	}
+	if len(fake.registeredChildren) != 1 || fake.registeredChildren[0] != "ses_child" {
+		t.Errorf("RegisterOpencodeChild calls = %v, want [ses_child]", fake.registeredChildren)
+	}
+}
+
+// TestEngine_OpencodeChildFilesAllowed_CachesDefinitiveAnswers asserts the
+// capability accessor uses the existing resolveCaps cache: definitive
+// answers (200, 404) are cached for the engine lifetime; transient
+// failures are not cached.
+func TestEngine_OpencodeChildFilesAllowed_CachesDefinitiveAnswers(t *testing.T) {
+	mock := newMockBackend(t)
+	mock.caps = &Capabilities{OpencodeSubagentFiles: true}
+	server := httptest.NewServer(mock)
+	defer server.Close()
+
+	tmpDir, transcriptPath := setupTestEnv(t, server.URL)
+	engine := newEngineWithBackend(t, mustNewClient(t, server.URL, tmpDir), nil, EngineConfig{
+		Provider:       provider.NameOpencode,
+		ExternalID:     "ses_root",
+		TranscriptPath: transcriptPath,
+		CWD:            tmpDir,
+	})
+
+	if !engine.OpencodeChildFilesAllowed() {
+		t.Error("OpencodeChildFilesAllowed = false after caps:true, want true")
+	}
+	// resetCapsProbeForCycle is a per-cycle no-op when capsResolved is true.
+	// Re-call: should NOT re-probe.
+	before := atomic.LoadInt32(&mock.capsRequestCount)
+	for i := 0; i < 5; i++ {
+		_ = engine.OpencodeChildFilesAllowed()
+	}
+	after := atomic.LoadInt32(&mock.capsRequestCount)
+	if before != after {
+		t.Errorf("probed %d more times after definitive cache, want 0", after-before)
+	}
+}
+
+// TestEngine_OpencodeChildFilesAllowed_GatesOffWhenCapabilityFalse asserts
+// the accessor returns false when the backend advertises support is off,
+// regardless of how many times it's called.
+func TestEngine_OpencodeChildFilesAllowed_GatesOffWhenCapabilityFalse(t *testing.T) {
+	mock := newMockBackend(t)
+	mock.caps = &Capabilities{OpencodeSubagentFiles: false}
+	server := httptest.NewServer(mock)
+	defer server.Close()
+
+	tmpDir, transcriptPath := setupTestEnv(t, server.URL)
+	engine := newEngineWithBackend(t, mustNewClient(t, server.URL, tmpDir), nil, EngineConfig{
+		Provider:       provider.NameOpencode,
+		ExternalID:     "ses_root",
+		TranscriptPath: transcriptPath,
+		CWD:            tmpDir,
+	})
+
+	if engine.OpencodeChildFilesAllowed() {
+		t.Error("OpencodeChildFilesAllowed = true after caps:false, want false")
+	}
+}
+
+// TestEngine_OpencodeChildFilesAllowed_404Cached asserts that a 404 (old
+// backend, no capabilities endpoint) is treated as a definitive negative
+// answer and cached — no repeat probing.
+func TestEngine_OpencodeChildFilesAllowed_404Cached(t *testing.T) {
+	mock := newMockBackend(t) // caps==nil → 404
+	server := httptest.NewServer(mock)
+	defer server.Close()
+
+	tmpDir, transcriptPath := setupTestEnv(t, server.URL)
+	engine := newEngineWithBackend(t, mustNewClient(t, server.URL, tmpDir), nil, EngineConfig{
+		Provider:       provider.NameOpencode,
+		ExternalID:     "ses_root",
+		TranscriptPath: transcriptPath,
+		CWD:            tmpDir,
+	})
+
+	if engine.OpencodeChildFilesAllowed() {
+		t.Error("OpencodeChildFilesAllowed = true on 404 backend, want false")
+	}
+	probes := atomic.LoadInt32(&mock.capsRequestCount)
+	for i := 0; i < 3; i++ {
+		_ = engine.OpencodeChildFilesAllowed()
+	}
+	if got := atomic.LoadInt32(&mock.capsRequestCount); got != probes {
+		t.Errorf("probed %d times after 404 was cached, want %d (no re-probe)", got, probes)
+	}
+}
+
+// opencodeFixtureWithChild creates an OpenCode SQLite fixture with one root
+// session and one direct child. Used by the registrar-injection test to
+// verify SyncAll routes through the injected registrar with at least one
+// descendant in flight.
+func opencodeFixtureWithChild(t *testing.T, rootID, childID string) string {
+	t.Helper()
+	b := opencodetest.NewDB(t)
+	b.AddSession(rootID, "").AddSession(childID, rootID)
+	return b.Path()
 }

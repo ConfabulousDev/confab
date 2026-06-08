@@ -182,6 +182,57 @@ func injectIdentity(data []byte, fields map[string]string) (json.RawMessage, err
 	return json.Marshal(obj)
 }
 
+// listDescendantsLimit caps the recursive descent. Realistic OpenCode
+// subagent trees observed in production are ~50 wide and 1 deep; 1000
+// is well above that ceiling while still defending against pathological
+// parent_id cycles.
+const listDescendantsLimit = 1000
+
+// ListDescendants returns every descendant session ID under rootSessionID
+// (at any depth), discovered via recursive walk of session.parent_id. The
+// root itself is excluded; results are returned in ULID lex order (which
+// equals chronological order for OpenCode session ids) so callers see a
+// deterministic enumeration. Capped at listDescendantsLimit rows.
+//
+// Returns an error only when the DB file is unreadable — callers (the
+// provider's DiscoverDescendants) translate that to a Warn log + nil so
+// the daemon's sync cycle continues uninterrupted past a transient
+// DB-absence.
+func (r *OpenCodeDBReader) ListDescendants(ctx context.Context, rootSessionID string) ([]string, error) {
+	db, err := r.openRO()
+	if err != nil {
+		return nil, err
+	}
+	defer db.Close()
+
+	const query = `
+		WITH RECURSIVE descendants(id) AS (
+		    SELECT id FROM session WHERE parent_id = ?
+		  UNION ALL
+		    SELECT s.id FROM session s
+		    JOIN descendants d ON s.parent_id = d.id
+		)
+		SELECT id FROM descendants ORDER BY id LIMIT ?`
+	rows, err := db.QueryContext(ctx, query, rootSessionID, listDescendantsLimit)
+	if err != nil {
+		return nil, fmt.Errorf("query opencode descendants of %s: %w", rootSessionID, err)
+	}
+	defer rows.Close()
+
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan opencode descendant row: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate opencode descendant rows: %w", err)
+	}
+	return ids, nil
+}
+
 // ReadSessionInfo fetches a session row's directory and parent_id from the
 // OpenCode SQLite DB. Returns empty strings (not an error) when the row is
 // absent so the caller can proceed with best-effort defaults. Errors are

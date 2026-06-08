@@ -48,12 +48,33 @@ const FileTypeWorkflowJournal = "workflow_journal"
 // Claude workflow subagent transcripts + run journals as path-encoded
 // sidechain files. *sync.FileTracker satisfies it. SubagentsDir exposes the
 // session's <session>/subagents directory (workflow runs live beneath
-// subagents/workflows/<runId>/); RegisterWorkflowFile tracks a file by its
+// subagents/workflows/<runId>/); RegisterSidechainFile tracks a file by its
 // backend file_name (forward-slash path-encoded) and reports whether it was
 // newly added (vs. an in-place path/type correction of an existing entry).
 type WorkflowRegistrar interface {
 	SubagentsDir() string
-	RegisterWorkflowFile(path, name, fileType string) bool
+	RegisterSidechainFile(path, name, fileType string) bool
+}
+
+// OpencodeDescendantRegistrar is the surface Opencode.DiscoverDescendants
+// uses to register subagent sessions discovered in OpenCode's local SQLite
+// (CF-538). The daemon supplies an implementation that wraps *FileTracker,
+// performing capability-gated child registration AND idempotent collector
+// goroutine spawn in one call.
+//
+// *FileTracker does NOT satisfy this interface directly (no collector
+// goroutine concept); the daemon's opencodeRegistrar wrapper does.
+type OpencodeDescendantRegistrar interface {
+	DescendantRegistrar
+
+	// RegisterOpencodeChild registers the child file (path-encoded backend
+	// file_name = "opencode/<childID>/messages.jsonl", file_type = "agent")
+	// AND ensures a collector goroutine is running for it. Idempotent: a
+	// repeat call for an already-tracked + already-collecting child is a
+	// no-op. Capability-gated internally on opencode_subagent_files; when
+	// the capability is off, both register and spawn no-op silently (the
+	// engine logs the capability state once via resolveCaps).
+	RegisterOpencodeChild(childSessionID, localPath string)
 }
 
 // ChunkView is the structural view of a chunk + its source file that

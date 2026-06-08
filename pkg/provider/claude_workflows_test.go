@@ -9,7 +9,7 @@ import (
 	"github.com/ConfabulousDev/confab/pkg/provider"
 )
 
-// fakeWorkflowRegistrar records RegisterWorkflowFile calls and exposes a
+// fakeWorkflowRegistrar records RegisterSidechainFile calls and exposes a
 // configurable subagents dir, satisfying provider.WorkflowRegistrar.
 type fakeWorkflowRegistrar struct {
 	subagentsDir string
@@ -25,7 +25,7 @@ type registeredWorkflowFile struct {
 
 func (f *fakeWorkflowRegistrar) SubagentsDir() string { return f.subagentsDir }
 
-func (f *fakeWorkflowRegistrar) RegisterWorkflowFile(path, name, fileType string) bool {
+func (f *fakeWorkflowRegistrar) RegisterSidechainFile(path, name, fileType string) bool {
 	f.registered = append(f.registered, registeredWorkflowFile{path, name, fileType})
 	return !f.existing[name]
 }
@@ -180,7 +180,7 @@ func TestClaudeDiscoverWorkflowFiles_PerTypeGate(t *testing.T) {
 	}
 }
 
-// Spec: idempotent — an already-tracked file (RegisterWorkflowFile returns
+// Spec: idempotent — an already-tracked file (RegisterSidechainFile returns
 // false) is not double-counted, but is still re-registered (path/type fix).
 func TestClaudeDiscoverWorkflowFiles_Idempotent(t *testing.T) {
 	subagents := filepath.Join(t.TempDir(), "subagents")
@@ -201,7 +201,7 @@ func TestClaudeDiscoverWorkflowFiles_Idempotent(t *testing.T) {
 		t.Errorf("count = %d, want 0 (all already tracked)", n)
 	}
 	if len(reg.registered) != 2 {
-		t.Errorf("RegisterWorkflowFile called %d times, want 2 (correction still happens)", len(reg.registered))
+		t.Errorf("RegisterSidechainFile called %d times, want 2 (correction still happens)", len(reg.registered))
 	}
 }
 
