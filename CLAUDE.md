@@ -173,3 +173,18 @@ Before adding or changing a struct that decodes Claude Code / Codex payloads (ho
   ```
 - **Clean migrations**: When moving or refactoring code, complete the migration fully. Do not leave duplicate code with deprecation comments "for backwards compatibility." Update all callers (including tests) to use the new location immediately. Stale duplicates cause maintenance burden and inevitably diverge.
 - **Keep documentation up to date**: When changing code, update the corresponding package README (`cmd/README.md`, `pkg/<package>/README.md`). Key things to keep current: file lists, exported API descriptions, invariants, dependency lists, and extension checklists. If a change spans multiple packages, also check `pkg/README.md` (dependency map) and `CLAUDE.md` (architecture overview). Documentation that contradicts the code is worse than no documentation.
+
+<!-- BEGIN KATA (managed by `kata init --with-agents`) -->
+## kata issue tracker
+
+This project uses [kata](https://github.com/kenn-io/kata) as its shared issue
+ledger. Run `kata quickstart` at the start of each session for the full agent
+contract. The short version:
+
+- Search before creating: `kata search "<keywords>" --agent`.
+- Prefer updating existing issues over duplicates (`kata comment`, `kata label add`, `kata edit`).
+- Default to `--agent` for ordinary reads and mutations; use `--json` only when a script needs structured data.
+- Close only verified work: `kata close <ref> --done --message "<scope + verification>" --commit <sha>`.
+- If work is incomplete, label `needs-review` and comment what remains rather than closing.
+- Never `kata delete` or `kata purge` without explicit user authorization.
+<!-- END KATA -->

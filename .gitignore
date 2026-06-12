@@ -22,3 +22,4 @@ test/e2e/confab-linux
 
 # Node
 node_modules/
+.kata.local.toml
