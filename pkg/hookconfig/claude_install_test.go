@@ -771,7 +771,7 @@ func TestIsSyncHooksInstalled(t *testing.T) {
 	}
 
 	// Install sync hooks
-	if err := InstallSyncHooks(); err != nil {
+	if err := InstallSyncHooks(testSettingsPath(t)); err != nil {
 		t.Fatalf("InstallSyncHooks failed: %v", err)
 	}
 
@@ -807,7 +807,7 @@ func TestInstallHooks_WritesExactBinaryPath(t *testing.T) {
 
 	type installCase struct {
 		name      string
-		install   func() error
+		install   func(string) error
 		eventName string
 		want      []string // possible exact commands (matcher variants share an event)
 	}
@@ -846,7 +846,7 @@ func TestInstallHooks_WritesExactBinaryPath(t *testing.T) {
 
 	// Install all hooks once (the helpers are idempotent).
 	for _, c := range cases {
-		if err := c.install(); err != nil {
+		if err := c.install(testSettingsPath(t)); err != nil {
 			t.Fatalf("%s install: %v", c.name, err)
 		}
 	}
@@ -919,8 +919,8 @@ func TestInstallHooks_WritesExactBinaryPath(t *testing.T) {
 func TestIsHookInstalledCheckers(t *testing.T) {
 	cases := []struct {
 		name      string
-		isCheck   func() (bool, error)
-		uninstall func() error
+		isCheck   func(string) (bool, error)
+		uninstall func(string) error
 		settings  string
 	}{
 		{
@@ -961,7 +961,7 @@ func TestIsHookInstalledCheckers(t *testing.T) {
 			t.Setenv(config.ClaudeStateDirEnv, tmpDir)
 
 			// Initially no settings file → not installed.
-			if ok, err := tc.isCheck(); err != nil {
+			if ok, err := tc.isCheck(testSettingsPath(t)); err != nil {
 				t.Fatalf("isCheck initial: %v", err)
 			} else if ok {
 				t.Errorf("expected %s hooks to not be installed initially", tc.name)
@@ -970,16 +970,16 @@ func TestIsHookInstalledCheckers(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(tmpDir, "settings.json"), []byte(tc.settings), 0600); err != nil {
 				t.Fatalf("write settings: %v", err)
 			}
-			if ok, err := tc.isCheck(); err != nil {
+			if ok, err := tc.isCheck(testSettingsPath(t)); err != nil {
 				t.Fatalf("isCheck after install: %v", err)
 			} else if !ok {
 				t.Errorf("%s isCheck = false after manual install; want true", tc.name)
 			}
 
-			if err := tc.uninstall(); err != nil {
+			if err := tc.uninstall(testSettingsPath(t)); err != nil {
 				t.Fatalf("uninstall failed: %v", err)
 			}
-			if ok, err := tc.isCheck(); err != nil {
+			if ok, err := tc.isCheck(testSettingsPath(t)); err != nil {
 				t.Fatalf("isCheck after uninstall: %v", err)
 			} else if ok {
 				t.Errorf("%s isCheck = true after uninstall; want false", tc.name)
@@ -999,7 +999,7 @@ func TestUninstallSyncHooks(t *testing.T) {
 	os.MkdirAll(tmpDir, 0755)
 
 	// Install sync hooks first
-	if err := InstallSyncHooks(); err != nil {
+	if err := InstallSyncHooks(testSettingsPath(t)); err != nil {
 		t.Fatalf("InstallSyncHooks failed: %v", err)
 	}
 
@@ -1010,7 +1010,7 @@ func TestUninstallSyncHooks(t *testing.T) {
 	}
 
 	// Uninstall
-	if err := UninstallSyncHooks(); err != nil {
+	if err := UninstallSyncHooks(testSettingsPath(t)); err != nil {
 		t.Fatalf("UninstallSyncHooks failed: %v", err)
 	}
 
@@ -1050,7 +1050,7 @@ func TestInstallSyncHooks_PreservesOtherHooks(t *testing.T) {
 	}
 
 	// Install sync hooks
-	if err := InstallSyncHooks(); err != nil {
+	if err := InstallSyncHooks(testSettingsPath(t)); err != nil {
 		t.Fatalf("InstallSyncHooks failed: %v", err)
 	}
 
@@ -1093,7 +1093,7 @@ func TestInstallSyncHooks_UpdatesExistingConfab(t *testing.T) {
 	}
 
 	// Install sync hooks (should update the existing confab hook)
-	if err := InstallSyncHooks(); err != nil {
+	if err := InstallSyncHooks(testSettingsPath(t)); err != nil {
 		t.Fatalf("InstallSyncHooks failed: %v", err)
 	}
 
@@ -1152,7 +1152,7 @@ func TestAtomicUpdateSettings_PreservesUnknownHookFields(t *testing.T) {
 	}
 
 	// Install sync hooks
-	if err := InstallSyncHooks(); err != nil {
+	if err := InstallSyncHooks(testSettingsPath(t)); err != nil {
 		t.Fatalf("InstallSyncHooks failed: %v", err)
 	}
 
@@ -1212,10 +1212,10 @@ func TestUninstallHooks_CleansUpEmptySections(t *testing.T) {
 	settingsPath := filepath.Join(tmpDir, "settings.json")
 
 	// Install hooks
-	if err := InstallSyncHooks(); err != nil {
+	if err := InstallSyncHooks(testSettingsPath(t)); err != nil {
 		t.Fatalf("InstallSyncHooks failed: %v", err)
 	}
-	if err := InstallPreToolUseHooks(); err != nil {
+	if err := InstallPreToolUseHooks(testSettingsPath(t)); err != nil {
 		t.Fatalf("InstallPreToolUseHooks failed: %v", err)
 	}
 
@@ -1230,10 +1230,10 @@ func TestUninstallHooks_CleansUpEmptySections(t *testing.T) {
 	}
 
 	// Uninstall all hooks
-	if err := UninstallSyncHooks(); err != nil {
+	if err := UninstallSyncHooks(testSettingsPath(t)); err != nil {
 		t.Fatalf("UninstallSyncHooks failed: %v", err)
 	}
-	if err := UninstallPreToolUseHooks(); err != nil {
+	if err := UninstallPreToolUseHooks(testSettingsPath(t)); err != nil {
 		t.Fatalf("UninstallPreToolUseHooks failed: %v", err)
 	}
 
@@ -1288,10 +1288,10 @@ func TestUninstallHooks_FromCleanSettings(t *testing.T) {
 	}
 
 	// Uninstall hooks (even though none exist)
-	if err := UninstallSyncHooks(); err != nil {
+	if err := UninstallSyncHooks(testSettingsPath(t)); err != nil {
 		t.Fatalf("UninstallSyncHooks failed: %v", err)
 	}
-	if err := UninstallPreToolUseHooks(); err != nil {
+	if err := UninstallPreToolUseHooks(testSettingsPath(t)); err != nil {
 		t.Fatalf("UninstallPreToolUseHooks failed: %v", err)
 	}
 
@@ -1347,7 +1347,7 @@ func TestUninstallHooks_PreservesOtherHooksInSameEvent(t *testing.T) {
 	}
 
 	// Uninstall confab hooks
-	if err := UninstallPreToolUseHooks(); err != nil {
+	if err := UninstallPreToolUseHooks(testSettingsPath(t)); err != nil {
 		t.Fatalf("UninstallPreToolUseHooks failed: %v", err)
 	}
 

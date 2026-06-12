@@ -147,7 +147,7 @@ func TestContainsSessionURL(t *testing.T) {
 		t.Fatalf("Failed to save test config: %v", err)
 	}
 
-	sessionURL, err := formatSessionURL(sessionID)
+	sessionURL, err := formatSessionURL(sessionID, testBackendURL)
 	if err != nil {
 		t.Fatalf("formatSessionURL() error = %v", err)
 	}
@@ -186,7 +186,7 @@ func TestContainsSessionURL(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := containsSessionURL(tt.command, sessionID)
+			got := containsSessionURL(tt.command, sessionID, testBackendURL)
 			if got != tt.want {
 				t.Errorf("containsSessionURL(%q, %q) = %v, want %v", tt.command, sessionID, got, tt.want)
 			}
@@ -215,7 +215,7 @@ func TestFormatSessionURL(t *testing.T) {
 		t.Fatalf("Failed to save test config: %v", err)
 	}
 
-	got, err := formatSessionURL("test-session-123")
+	got, err := formatSessionURL("test-session-123", "https://my-backend.example.com")
 	if err != nil {
 		t.Fatalf("formatSessionURL() error = %v", err)
 	}
@@ -332,7 +332,7 @@ func TestHandlePreToolUse_GitCommitWithTrailer(t *testing.T) {
 	cleanup := setupTestState(t, claudeSessionID, confabSessionID)
 	defer cleanup()
 
-	sessionURL, err := formatSessionURL(confabSessionID)
+	sessionURL, err := formatSessionURL(confabSessionID, testBackendURL)
 	if err != nil {
 		t.Fatalf("formatSessionURL() error = %v", err)
 	}
@@ -593,7 +593,7 @@ func TestHandlePreToolUse_PRCreateWithLink(t *testing.T) {
 	cleanup := setupTestState(t, claudeSessionID, confabSessionID)
 	defer cleanup()
 
-	sessionURL, err := formatSessionURL(confabSessionID)
+	sessionURL, err := formatSessionURL(confabSessionID, testBackendURL)
 	if err != nil {
 		t.Fatalf("formatSessionURL() error = %v", err)
 	}
@@ -715,7 +715,7 @@ func TestHandlePreToolUse_MCPGitHubPRWithLink(t *testing.T) {
 	cleanup := setupTestState(t, claudeSessionID, confabSessionID)
 	defer cleanup()
 
-	sessionURL, err := formatSessionURL(confabSessionID)
+	sessionURL, err := formatSessionURL(confabSessionID, testBackendURL)
 	if err != nil {
 		t.Fatalf("formatSessionURL() error = %v", err)
 	}
@@ -957,7 +957,7 @@ func TestConfabLinkedMarker_MintedMarkerRoundTrips(t *testing.T) {
 	for range 100 {
 		marker := newConfabLinkedMarker()
 		cmd := `gh pr create --body-file b.md  ` + marker
-		if !commandContainsConfabLink(cmd, "any-session") {
+		if !commandContainsConfabLink(cmd, "any-session", testBackendURL) {
 			t.Fatalf("minted marker %q not recognized by commandContainsConfabLink", marker)
 		}
 	}
@@ -971,7 +971,7 @@ func TestConfabLinkedMarker_NonMarkersNotMatched(t *testing.T) {
 		`gh pr create --body "# confab-linked-A3F9"`,                 // uppercase hex not accepted
 		`gh pr create --body "# confab-linked-deadbeef in the docs"`, // longer hex run must not match on its first 4
 	} {
-		if commandContainsConfabLink(cmd, "any-session") {
+		if commandContainsConfabLink(cmd, "any-session", testBackendURL) {
 			t.Errorf("expected no certification match for %q", cmd)
 		}
 	}

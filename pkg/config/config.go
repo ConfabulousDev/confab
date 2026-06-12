@@ -112,13 +112,19 @@ func GetSettingsPath() (string, error) {
 	return filepath.Join(stateDir, "settings.json"), nil
 }
 
-// ReadSettings reads the Claude settings file, preserving all fields
+// ReadSettings reads the default Claude settings file, preserving all fields.
 func ReadSettings() (*ClaudeSettings, error) {
 	settingsPath, err := GetSettingsPath()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get settings path: %w", err)
 	}
+	return ReadSettingsAt(settingsPath)
+}
 
+// ReadSettingsAt reads the Claude settings file at settingsPath, preserving all
+// fields. This is the explicit-path core used to install/inspect hooks in a
+// non-default config dir (kata hpec); ReadSettings is the default-path wrapper.
+func ReadSettingsAt(settingsPath string) (*ClaudeSettings, error) {
 	// If file doesn't exist, return empty settings
 	if _, err := os.Stat(settingsPath); os.IsNotExist(err) {
 		return &ClaudeSettings{
@@ -147,12 +153,7 @@ func ReadSettings() (*ClaudeSettings, error) {
 // writeSettingsInternal writes settings with optional mtime-based optimistic locking
 // If expectedMtime is zero, mtime checking is skipped
 // If expectedMtime is non-zero, it checks mtime and returns error on mismatch
-func writeSettingsInternal(settings *ClaudeSettings, expectedMtime time.Time) error {
-	settingsPath, err := GetSettingsPath()
-	if err != nil {
-		return fmt.Errorf("failed to get settings path: %w", err)
-	}
-
+func writeSettingsInternal(settingsPath string, settings *ClaudeSettings, expectedMtime time.Time) error {
 	// Ensure directory exists
 	settingsDir := filepath.Dir(settingsPath)
 	if err := os.MkdirAll(settingsDir, 0700); err != nil {
@@ -228,16 +229,21 @@ func writeSettingsInternal(settings *ClaudeSettings, expectedMtime time.Time) er
 // config changes), the retry logic provides sufficient reliability. If truly
 // atomic updates are required, file locking (flock) would be needed.
 func AtomicUpdateSettings(updateFn func(*ClaudeSettings) error) error {
+	settingsPath, err := GetSettingsPath()
+	if err != nil {
+		return fmt.Errorf("failed to get settings path: %w", err)
+	}
+	return AtomicUpdateSettingsAt(settingsPath, updateFn)
+}
+
+// AtomicUpdateSettingsAt is AtomicUpdateSettings against an explicit
+// settingsPath — used to install/uninstall hooks in a non-default config dir
+// (kata hpec). AtomicUpdateSettings is the default-path wrapper.
+func AtomicUpdateSettingsAt(settingsPath string, updateFn func(*ClaudeSettings) error) error {
 	const maxRetries = 10
 	const baseRetryDelay = 5 * time.Millisecond
 
 	for attempt := 0; attempt < maxRetries; attempt++ {
-		// Read current settings and capture mtime
-		settingsPath, err := GetSettingsPath()
-		if err != nil {
-			return fmt.Errorf("failed to get settings path: %w", err)
-		}
-
 		var mtime time.Time
 		if info, err := os.Stat(settingsPath); err == nil {
 			mtime = info.ModTime()
@@ -246,7 +252,7 @@ func AtomicUpdateSettings(updateFn func(*ClaudeSettings) error) error {
 		}
 		// If file doesn't exist, mtime stays zero (no conflict possible)
 
-		settings, err := ReadSettings()
+		settings, err := ReadSettingsAt(settingsPath)
 		if err != nil {
 			return fmt.Errorf("failed to read settings: %w", err)
 		}
@@ -257,7 +263,7 @@ func AtomicUpdateSettings(updateFn func(*ClaudeSettings) error) error {
 		}
 
 		// Try to write with mtime check
-		err = writeSettingsInternal(settings, mtime)
+		err = writeSettingsInternal(settingsPath, settings, mtime)
 		if err == nil {
 			return nil // Success!
 		}

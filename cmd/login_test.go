@@ -301,7 +301,7 @@ func TestRunLogin_WithAPIKeyFlag(t *testing.T) {
 
 	// Track if device login was called
 	var loginCalled bool
-	doDeviceLoginFunc = func(backendURL, keyName string) error {
+	doDeviceLoginFunc = func(backendURL, keyName string, _ config.Binding) error {
 		loginCalled = true
 		return nil
 	}
@@ -354,7 +354,7 @@ func TestRunLogin_WithAPIKeyFlag_InvalidKey(t *testing.T) {
 	_, configPath := setupSetupTestEnv(t, server.URL)
 
 	var loginCalled bool
-	doDeviceLoginFunc = func(backendURL, keyName string) error {
+	doDeviceLoginFunc = func(backendURL, keyName string, _ config.Binding) error {
 		loginCalled = true
 		return nil
 	}
@@ -419,7 +419,7 @@ func TestRunLogin_WithoutAPIKeyFlag(t *testing.T) {
 
 	var loginCalled bool
 	var loginBackendURL string
-	doDeviceLoginFunc = func(backendURL, keyName string) error {
+	doDeviceLoginFunc = func(backendURL, keyName string, _ config.Binding) error {
 		loginCalled = true
 		loginBackendURL = backendURL
 		newCfg := &config.UploadConfig{
@@ -561,7 +561,7 @@ func TestLoginDeviceFlow_PreservesRedactionConfig(t *testing.T) {
 	os.WriteFile(configPath, cfgData, 0600)
 
 	// Mock device login to simulate the FIXED behavior (preserves config)
-	doDeviceLoginFunc = func(backendURL, keyName string) error {
+	doDeviceLoginFunc = func(backendURL, keyName string, _ config.Binding) error {
 		// Load existing config (this is what the fix does)
 		cfg, err := config.GetUploadConfig()
 		if err != nil {

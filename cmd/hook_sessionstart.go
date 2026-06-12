@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/ConfabulousDev/confab/pkg/config"
 	"github.com/ConfabulousDev/confab/pkg/daemon"
 	"github.com/ConfabulousDev/confab/pkg/logger"
 	"github.com/ConfabulousDev/confab/pkg/provider"
@@ -150,7 +151,47 @@ func buildStandardLaunchArgs(p provider.Provider, r io.Reader) (*daemonLaunchInp
 			}
 		}
 	}
+
+	// Resolve the per-(provider, dir) backend binding (kata hpec). Claude
+	// derives its config dir from the transcript path; other providers are
+	// not wired yet, so they leave ConfigDir empty (default binding).
+	launch.ConfigDir = configDirForHook(p.Name(), launch.TranscriptPath)
 	return launch, nil
+}
+
+// configDirForHook returns the canonical config dir a Claude hook's session
+// belongs to, or "" for the default binding. It short-circuits to "" when no
+// bindings exist (pure single-dir users skip derivation entirely) and when
+// derivation fails (caller falls back to the default binding). Non-Claude
+// providers always get "" — their --config-dir support is a fast-follow.
+func configDirForHook(providerName, transcriptPath string) string {
+	if providerName != provider.NameClaudeCode || transcriptPath == "" {
+		return ""
+	}
+	has, err := config.HasBindings(provider.NameClaudeCode)
+	if err != nil || !has {
+		return ""
+	}
+	dir, err := provider.ClaudeCode{}.ConfigDirFromTranscript(transcriptPath)
+	if err != nil {
+		logger.Warn("config-dir derivation failed for %q: %v; using default binding", transcriptPath, err)
+		return ""
+	}
+	return dir
+}
+
+// uploadConfigForHook returns the effective upload config for a tool-use hook,
+// honoring the per-(provider, dir) backend binding derived from the transcript
+// path (kata hpec). Falls back to the default config for non-Claude providers,
+// when no bindings exist, or when derivation fails. A derived custom dir with
+// no stored binding returns ErrNoBinding (leak-free) so the caller skips
+// linking rather than pointing at the wrong backend.
+func uploadConfigForHook(p provider.Provider, transcriptPath string) (*config.UploadConfig, error) {
+	// A "" config dir (default or short-circuited) collapses to the default
+	// binding via BindingFor, so GetUploadConfigFor returns the top-level
+	// config — no special case needed.
+	dir := configDirForHook(p.Name(), transcriptPath)
+	return config.GetUploadConfigFor(provider.BindingFor(p, dir))
 }
 
 // buildOpencodeLaunchArgs reads the JSON payload piped from the TS plugin.
@@ -252,6 +293,7 @@ func runDaemon(hookInputJSON string) error {
 		ExternalID:         launch.ExternalID,
 		TranscriptPath:     launch.TranscriptPath,
 		CWD:                launch.CWD,
+		ConfigDir:          launch.ConfigDir,
 		ParentPID:          launch.ParentPID,
 		SyncInterval:       syncInterval,
 		SyncIntervalJitter: syncJitter,

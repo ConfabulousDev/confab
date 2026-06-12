@@ -95,13 +95,16 @@ func runLogin(cmd *cobra.Command, args []string) error {
 	fmt.Println("=== Confab Login ===")
 	fmt.Println()
 
+	// `confab login` always targets the default binding (top-level config).
+	// Per-config-dir credentials are written only by `confab setup --config-dir`.
+	defaultBinding := config.Binding{IsDefault: true}
 	if apiKey != "" {
-		if err := loginWithAPIKey(backendURL, apiKey); err != nil {
+		if err := loginWithAPIKey(backendURL, apiKey, defaultBinding); err != nil {
 			return err
 		}
 	} else {
 		// Standard device auth flow
-		if err := doDeviceLogin(backendURL, keyName); err != nil {
+		if err := doDeviceLogin(backendURL, keyName, defaultBinding); err != nil {
 			return err
 		}
 	}
@@ -116,26 +119,18 @@ func runLogin(cmd *cobra.Command, args []string) error {
 
 // loginWithAPIKey validates and saves the provided API key.
 // This is the core logic shared between `login --api-key` and `setup --api-key`.
-func loginWithAPIKey(backendURL, apiKey string) error {
+func loginWithAPIKey(backendURL, apiKey string, b config.Binding) error {
 	logger.Info("API key provided via flag, skipping device auth")
 
-	// Load existing config to preserve other settings (like redaction)
-	cfg, err := config.GetUploadConfig()
-	if err != nil {
-		// If we can't read existing config, start fresh
-		cfg = &config.UploadConfig{}
-	}
-
-	// Update only the auth-related fields
-	cfg.BackendURL = backendURL
-	cfg.APIKey = apiKey
-
 	fmt.Println("Validating API key...")
-	if err := verifyAPIKey(cfg); err != nil {
+	if err := verifyAPIKey(&config.UploadConfig{BackendURL: backendURL, APIKey: apiKey}); err != nil {
 		return fmt.Errorf("invalid API key: %w", err)
 	}
 
-	if err := config.SaveUploadConfig(cfg); err != nil {
+	// SetBindingCredentials writes to the binding's slot (top-level for the
+	// default binding, Bindings[provider][dir] otherwise) and preserves other
+	// settings like redaction.
+	if err := config.SetBindingCredentials(b, backendURL, apiKey); err != nil {
 		return fmt.Errorf("failed to save config: %w", err)
 	}
 
@@ -172,12 +167,13 @@ func defaultKeyName() string {
 }
 
 // doDeviceLogin performs the device code login flow and saves credentials
-func doDeviceLogin(backendURL, keyName string) error {
-	return doDeviceLoginFunc(backendURL, keyName)
+// to the given binding (top-level for the default binding).
+func doDeviceLogin(backendURL, keyName string, b config.Binding) error {
+	return doDeviceLoginFunc(backendURL, keyName, b)
 }
 
 // doDeviceLoginImpl is the actual implementation of doDeviceLogin
-func doDeviceLoginImpl(backendURL, keyName string) error {
+func doDeviceLoginImpl(backendURL, keyName string, b config.Binding) error {
 	logger.Debug("Login parameters: backend=%s, keyName=%s", backendURL, keyName)
 
 	fmt.Printf("Backend: %s\n", backendURL)
@@ -211,18 +207,7 @@ func doDeviceLoginImpl(backendURL, keyName string) error {
 		return err
 	}
 
-	// Load existing config to preserve other settings (like redaction)
-	cfg, err := config.GetUploadConfig()
-	if err != nil {
-		// If we can't read existing config, start fresh
-		cfg = &config.UploadConfig{}
-	}
-
-	// Update only the auth-related fields
-	cfg.BackendURL = backendURL
-	cfg.APIKey = apiKey
-
-	if err := config.SaveUploadConfig(cfg); err != nil {
+	if err := config.SetBindingCredentials(b, backendURL, apiKey); err != nil {
 		logger.Error("Failed to save config: %v", err)
 		return fmt.Errorf("failed to save config: %w", err)
 	}

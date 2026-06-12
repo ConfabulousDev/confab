@@ -144,13 +144,19 @@ func handlePreToolUse(r io.Reader, w io.Writer) error {
 		return nil
 	}
 
-	sessionURL, err := formatSessionURL(confabSessionID)
+	cfg, err := uploadConfigForHook(p, hookInput.TranscriptPath)
 	if err != nil {
 		logger.Warn("Confab link skipped: %v", err)
 		return nil
 	}
 
-	if commandContainsConfabLink(command, confabSessionID) {
+	sessionURL, err := formatSessionURL(confabSessionID, cfg.BackendURL)
+	if err != nil {
+		logger.Warn("Confab link skipped: %v", err)
+		return nil
+	}
+
+	if commandContainsConfabLink(command, confabSessionID, cfg.BackendURL) {
 		logger.Info("Confab link already present in command")
 		outputPreToolUseDecision(w, "allow", "Confab link present")
 		return nil
@@ -177,7 +183,13 @@ func handleMCPPRCreate(p provider.Provider, hookInput *toolUseHookInput, w io.Wr
 		return nil
 	}
 
-	sessionURL, err := formatSessionURL(confabSessionID)
+	cfg, err := uploadConfigForHook(p, hookInput.TranscriptPath)
+	if err != nil {
+		logger.Warn("Confab link skipped: %v", err)
+		return nil
+	}
+
+	sessionURL, err := formatSessionURL(confabSessionID, cfg.BackendURL)
 	if err != nil {
 		logger.Warn("Confab link skipped: %v", err)
 		return nil
@@ -249,8 +261,8 @@ func firstMatch(re *regexp.Regexp, s string) int {
 
 // containsSessionURL checks if the command already includes the session URL.
 // This handles various quoting styles by checking for the URL anywhere in the command.
-func containsSessionURL(command, sessionID string) bool {
-	sessionURL, err := formatSessionURL(sessionID)
+func containsSessionURL(command, sessionID, backendURL string) bool {
+	sessionURL, err := formatSessionURL(sessionID, backendURL)
 	if err != nil {
 		return false
 	}
@@ -261,21 +273,17 @@ func containsSessionURL(command, sessionID string) bool {
 // Confab session link, either as the literal session URL or via a
 // confabLinkedMarkerPattern certification (used when the link lives in a
 // body/commit file the hook can't see).
-func commandContainsConfabLink(command, sessionID string) bool {
-	return confabLinkedMarkerPattern.MatchString(command) || containsSessionURL(command, sessionID)
+func commandContainsConfabLink(command, sessionID, backendURL string) bool {
+	return confabLinkedMarkerPattern.MatchString(command) || containsSessionURL(command, sessionID, backendURL)
 }
 
 // formatSessionURL returns the session URL derived from the configured backend URL.
 // Returns error if backend URL is not configured.
-func formatSessionURL(sessionID string) (string, error) {
-	cfg, err := config.GetUploadConfig()
-	if err != nil {
-		return "", fmt.Errorf("failed to get config: %w", err)
-	}
-	if cfg.BackendURL == "" {
+func formatSessionURL(sessionID, backendURL string) (string, error) {
+	if backendURL == "" {
 		return "", fmt.Errorf("backend URL not configured")
 	}
-	return strings.TrimSuffix(cfg.BackendURL, "/") + "/sessions/" + sessionID, nil
+	return strings.TrimSuffix(backendURL, "/") + "/sessions/" + sessionID, nil
 }
 
 // formatTrailerLine returns the formatted trailer line

@@ -18,6 +18,10 @@ type toolUseHookInput struct {
 	ToolInput    map[string]any
 	ToolResponse map[string]any
 	CWD          string
+	// TranscriptPath drives per-(provider, dir) backend resolution (kata
+	// hpec). Populated for Claude (used to derive the config dir); left empty
+	// for Codex, which is not wired for --config-dir yet (default binding).
+	TranscriptPath string
 }
 
 // readToolUseHookInput parses the per-provider JSON shape into a
@@ -31,11 +35,12 @@ func readToolUseHookInput(p provider.Provider, r io.Reader) (*toolUseHookInput, 
 			return nil, err
 		}
 		return &toolUseHookInput{
-			SessionID:    in.SessionID,
-			ToolName:     in.ToolName,
-			ToolInput:    in.ToolInput,
-			ToolResponse: in.ToolResponse,
-			CWD:          in.CWD,
+			SessionID:      in.SessionID,
+			ToolName:       in.ToolName,
+			ToolInput:      in.ToolInput,
+			ToolResponse:   in.ToolResponse,
+			CWD:            in.CWD,
+			TranscriptPath: in.TranscriptPath,
 		}, nil
 	case provider.NameCodex:
 		in, err := provider.Codex{}.ReadHookInput(r)

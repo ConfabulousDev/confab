@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/ConfabulousDev/confab/pkg/config"
@@ -10,7 +11,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var setupProviderName string
+var (
+	setupProviderName string
+	setupConfigDir    string
+)
 
 var setupCmd = &cobra.Command{
 	Use:   "setup",
@@ -34,9 +38,18 @@ auth flow).`,
 }
 
 func runSetup(cmd *cobra.Command, args []string) error {
-	logger.Info("Starting setup (provider=%q)", setupProviderName)
+	logger.Info("Starting setup (provider=%q config-dir=%q)", setupProviderName, setupConfigDir)
 
-	backendURL, needsLogin, err := runSetupAuth(cmd)
+	if setupConfigDir != "" && setupProviderName == "" {
+		return fmt.Errorf("--config-dir requires --provider (a config dir is provider-specific)")
+	}
+
+	binding, err := resolveSetupBinding()
+	if err != nil {
+		return err
+	}
+
+	backendURL, needsLogin, err := runSetupAuth(cmd, binding)
 	if err != nil {
 		return err
 	}
@@ -47,6 +60,37 @@ func runSetup(cmd *cobra.Command, args []string) error {
 	return runSetupAutoDetect(backendURL, needsLogin)
 }
 
+// resolveSetupBinding builds the credential-write target for this setup run:
+// the default (top-level) binding unless --config-dir names a non-default dir.
+// It validates that the provider supports a custom config dir (claude-code
+// only for now) via GetWithDir, but resolves the binding against the DEFAULT
+// provider so BindingFor sees the true default dir.
+func resolveSetupBinding() (config.Binding, error) {
+	if setupConfigDir == "" {
+		return config.Binding{IsDefault: true}, nil
+	}
+	name, err := provider.NormalizeName(setupProviderName)
+	if err != nil {
+		return config.Binding{}, err
+	}
+	if _, err := provider.GetWithDir(name, setupConfigDir); err != nil {
+		return config.Binding{}, err
+	}
+	// Create the config dir before canonicalizing the binding key so symlink
+	// resolution is consistent with runtime (when the dir always exists). Hook
+	// installation would create it anyway; doing it here guarantees
+	// CanonicalDir(setupConfigDir) == CanonicalDir(runtime-derived dir) even
+	// when an ancestor is a symlink (kata hpec).
+	if err := os.MkdirAll(setupConfigDir, 0o755); err != nil {
+		return config.Binding{}, fmt.Errorf("failed to create config dir %q: %w", setupConfigDir, err)
+	}
+	defaultP, err := provider.Get(name)
+	if err != nil {
+		return config.Binding{}, err
+	}
+	return provider.BindingFor(defaultP, setupConfigDir), nil
+}
+
 // runSetupSingle installs hooks/skills for exactly the provider named
 // in --provider.
 func runSetupSingle(backendURL string, needsLogin bool) error {
@@ -54,7 +98,9 @@ func runSetupSingle(backendURL string, needsLogin bool) error {
 	if err != nil {
 		return err
 	}
-	p, err := provider.Get(providerName)
+	// GetWithDir installs into the custom --config-dir (claude-code only for
+	// now); with no --config-dir it is equivalent to Get(providerName).
+	p, err := provider.GetWithDir(providerName, setupConfigDir)
 	if err != nil {
 		return err
 	}
@@ -159,7 +205,7 @@ func installForProvider(p provider.Provider) error {
 	return nil
 }
 
-func runSetupAuth(cmd *cobra.Command) (backendURL string, needsLogin bool, err error) {
+func runSetupAuth(cmd *cobra.Command, binding config.Binding) (backendURL string, needsLogin bool, err error) {
 	backendURL, err = cmd.Flags().GetString("backend-url")
 	if err != nil {
 		return "", false, fmt.Errorf("failed to get backend-url flag: %w", err)
@@ -174,13 +220,16 @@ func runSetupAuth(cmd *cobra.Command) (backendURL string, needsLogin bool, err e
 
 	needsLogin = true
 	if apiKey != "" {
-		if err := loginWithAPIKey(backendURL, apiKey); err != nil {
+		if err := loginWithAPIKey(backendURL, apiKey, binding); err != nil {
 			return "", false, err
 		}
 		fmt.Println()
 		needsLogin = false
 	} else {
-		cfg, err := config.GetUploadConfig()
+		// Check the binding's existing credentials (per-config-dir for a
+		// custom binding; top-level for the default). A missing binding
+		// (ErrNoBinding) means no creds yet, so we fall through to login.
+		cfg, err := config.GetUploadConfigFor(binding)
 		if err == nil && cfg.APIKey != "" {
 			if cfg.BackendURL == backendURL {
 				fmt.Println("Checking existing authentication...")
@@ -204,7 +253,7 @@ func runSetupAuth(cmd *cobra.Command) (backendURL string, needsLogin bool, err e
 		if needsLogin {
 			fmt.Println("Step 1/2: Authentication")
 			fmt.Println()
-			if err := doDeviceLogin(backendURL, defaultKeyName()); err != nil {
+			if err := doDeviceLogin(backendURL, defaultKeyName(), binding); err != nil {
 				return "", false, err
 			}
 			fmt.Println()
@@ -225,6 +274,7 @@ func init() {
 	rootCmd.AddCommand(setupCmd)
 
 	setupCmd.Flags().StringVar(&setupProviderName, "provider", "", "Provider to set up (claude-code, codex, or opencode); auto-detects if unset")
+	setupCmd.Flags().StringVar(&setupConfigDir, "config-dir", "", "Provider config dir to install into and bind to this backend (requires --provider; claude-code only). Defaults to the provider's default dir.")
 	setupCmd.Flags().String("backend-url", "", "Backend API URL (required)")
 	setupCmd.MarkFlagRequired("backend-url")
 	setupCmd.Flags().String("api-key", "", "API key (bypasses device auth flow)")

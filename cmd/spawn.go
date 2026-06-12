@@ -35,6 +35,11 @@ type daemonLaunchInput struct {
 	// SessionParentID() accessor to suppress daemons for non-root sessions.
 	// Distinct from ParentPID (an OS process id).
 	SessionParentID string `json:"session_parent_id,omitempty"`
+	// ConfigDir is the canonical provider config dir this session belongs to,
+	// used to resolve the per-(provider, dir) backend binding (kata hpec).
+	// Empty means the default binding (top-level config) — set empty by the
+	// no-bindings short-circuit and by providers/sessions with no custom dir.
+	ConfigDir string `json:"config_dir,omitempty"`
 }
 
 // launchAsHookInput satisfies provider.HookInput for the sole purpose

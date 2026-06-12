@@ -3,6 +3,8 @@ package provider
 import (
 	"fmt"
 	"io"
+
+	"github.com/ConfabulousDev/confab/pkg/config"
 )
 
 const (
@@ -250,6 +252,38 @@ func Get(name string) (Provider, error) {
 			name, NameClaudeCode, NameCodex, NameOpencode)
 	}
 	return p, nil
+}
+
+// BindingFor resolves the backend binding for p's (provider, configDir). It is
+// the single place that pairs a provider with config-dir binding resolution
+// (kata hpec): it fills in the provider's DEFAULT config dir so an empty (or
+// canonically-default) configDir collapses to the default binding (top-level
+// config). Pass a default provider (from Get), NOT a GetWithDir override —
+// the override's StateDir() is the custom dir itself and would always look
+// "default".
+func BindingFor(p Provider, configDir string) config.Binding {
+	def, _ := p.StateDir()
+	return config.ResolveBinding(p.Name(), configDir, def)
+}
+
+// GetWithDir returns a provider configured to install into / resolve against a
+// non-default config dir (kata hpec). Only claude-code is wired this ticket;
+// codex/opencode return an error until their fast-follow adds the override.
+// dir == "" is equivalent to Get(name).
+func GetWithDir(name, dir string) (Provider, error) {
+	if dir == "" {
+		return Get(name)
+	}
+	canonicalName, err := NormalizeName(name)
+	if err != nil {
+		return nil, err
+	}
+	switch canonicalName {
+	case NameClaudeCode:
+		return ClaudeCode{configDirOverride: dir}, nil
+	default:
+		return nil, fmt.Errorf("custom --config-dir is not yet supported for provider %q", canonicalName)
+	}
 }
 
 // NormalizeName returns the canonical provider name. Backed by the

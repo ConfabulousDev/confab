@@ -14,16 +14,43 @@ import (
 	"github.com/ConfabulousDev/confab/pkg/config"
 	"github.com/ConfabulousDev/confab/pkg/hookconfig"
 	"github.com/ConfabulousDev/confab/pkg/logger"
+	"github.com/ConfabulousDev/confab/pkg/pathcanon"
 	"github.com/ConfabulousDev/confab/pkg/types"
 )
 
 // ClaudeStateDirEnv is the environment variable to override the default Claude state directory.
 const ClaudeStateDirEnv = "CONFAB_CLAUDE_DIR"
 
-// ClaudeCode contains Claude Code-specific local behavior.
-type ClaudeCode struct{}
+// ClaudeCode contains Claude Code-specific local behavior. configDirOverride,
+// when non-empty, takes precedence over CONFAB_CLAUDE_DIR and the default in
+// StateDir() — it is how `confab setup --provider claude-code --config-dir
+// <dir>` retargets installation into a non-default config dir (kata hpec). The
+// zero value (ClaudeCode{}) keeps today's behavior.
+type ClaudeCode struct {
+	configDirOverride string
+}
 
 var _ Provider = ClaudeCode{}
+
+// ConfigDirFromTranscript derives the Claude config dir from a transcript
+// path. Claude writes transcripts to <configDir>/projects/<enc-cwd>/<id>.jsonl,
+// so the config dir is the directory three levels above the file — but only
+// when the path actually has that shape (absolute, and the segment two levels
+// up is literally "projects", which anchors on the LAST "projects" so a config
+// dir whose own path contains "projects" still resolves correctly). The result
+// is canonicalized so it matches a stored binding key. Returns an error when
+// the path does not have the expected layout, so callers can fall back to the
+// default binding.
+func (ClaudeCode) ConfigDirFromTranscript(transcriptPath string) (string, error) {
+	if !filepath.IsAbs(transcriptPath) {
+		return "", fmt.Errorf("transcript path %q is not absolute", transcriptPath)
+	}
+	projectsDir := filepath.Dir(filepath.Dir(transcriptPath)) // <configDir>/projects
+	if filepath.Base(projectsDir) != "projects" {
+		return "", fmt.Errorf("transcript path %q is not under a Claude projects/ directory", transcriptPath)
+	}
+	return pathcanon.CanonicalDir(filepath.Dir(projectsDir)), nil
+}
 
 // Name returns the canonical Claude Code provider name.
 func (ClaudeCode) Name() string { return NameClaudeCode }
@@ -58,35 +85,43 @@ func (ClaudeCode) ShouldSpawnForInput(HookInput) bool { return true }
 // InstallHooks installs all four Confab hook bundles (sync, PreToolUse,
 // PostToolUse, UserPromptSubmit). Returns the settings.json path.
 func (p ClaudeCode) InstallHooks() (string, error) {
-	installers := []func() error{
+	settingsPath, err := p.SettingsPath()
+	if err != nil {
+		return "", err
+	}
+	installers := []func(string) error{
 		hookconfig.InstallSyncHooks,
 		hookconfig.InstallPreToolUseHooks,
 		hookconfig.InstallPostToolUseHooks,
 		hookconfig.InstallUserPromptSubmitHook,
 	}
 	for _, install := range installers {
-		if err := install(); err != nil {
+		if err := install(settingsPath); err != nil {
 			return "", err
 		}
 	}
-	return p.SettingsPath()
+	return settingsPath, nil
 }
 
 // UninstallHooks removes all four Confab hook bundles. Returns the
 // settings.json path even if no hooks were present.
 func (p ClaudeCode) UninstallHooks() (string, error) {
-	uninstallers := []func() error{
+	settingsPath, err := p.SettingsPath()
+	if err != nil {
+		return "", err
+	}
+	uninstallers := []func(string) error{
 		hookconfig.UninstallSyncHooks,
 		hookconfig.UninstallPreToolUseHooks,
 		hookconfig.UninstallPostToolUseHooks,
 		hookconfig.UninstallUserPromptSubmitHook,
 	}
 	for _, uninstall := range uninstallers {
-		if err := uninstall(); err != nil {
+		if err := uninstall(settingsPath); err != nil {
 			return "", err
 		}
 	}
-	return p.SettingsPath()
+	return settingsPath, nil
 }
 
 // InstallSkills installs the Claude Code skills shipped with confab (/retro)
@@ -179,15 +214,19 @@ func (p ClaudeCode) DefaultCWD(transcriptPath string) string {
 // IsHooksInstalled reports whether all four Confab hook bundles for
 // Claude Code are installed. Mirrors InstallHooks: true only when every
 // bundle is present.
-func (ClaudeCode) IsHooksInstalled() (bool, error) {
-	checks := []func() (bool, error){
+func (p ClaudeCode) IsHooksInstalled() (bool, error) {
+	settingsPath, err := p.SettingsPath()
+	if err != nil {
+		return false, err
+	}
+	checks := []func(string) (bool, error){
 		hookconfig.IsSyncHooksInstalled,
 		hookconfig.IsPreToolUseHooksInstalled,
 		hookconfig.IsPostToolUseHooksInstalled,
 		hookconfig.IsUserPromptSubmitHookInstalled,
 	}
 	for _, check := range checks {
-		ok, err := check()
+		ok, err := check(settingsPath)
 		if err != nil {
 			return false, err
 		}
@@ -198,9 +237,13 @@ func (ClaudeCode) IsHooksInstalled() (bool, error) {
 	return true, nil
 }
 
-// StateDir returns the Claude state directory.
-// Defaults to ~/.claude but can be overridden with CONFAB_CLAUDE_DIR.
-func (ClaudeCode) StateDir() (string, error) {
+// StateDir returns the Claude config/install directory. Precedence:
+// configDirOverride (set via GetWithDir for `setup --config-dir`) > the
+// CONFAB_CLAUDE_DIR env var > the default ~/.claude.
+func (p ClaudeCode) StateDir() (string, error) {
+	if p.configDirOverride != "" {
+		return p.configDirOverride, nil
+	}
 	if envDir := os.Getenv(ClaudeStateDirEnv); envDir != "" {
 		return envDir, nil
 	}

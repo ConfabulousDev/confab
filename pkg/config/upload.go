@@ -12,13 +12,21 @@ import (
 	"github.com/ConfabulousDev/confab/pkg/logger"
 )
 
-// UploadConfig holds backend upload configuration
+// UploadConfig holds backend upload configuration.
+//
+// The top-level BackendURL/APIKey are the DEFAULT binding (the provider's
+// default config dir). Per-(provider, config dir) bindings live under
+// Bindings (kata hpec); only backend_url/api_key vary per binding — Redaction,
+// LogLevel and AutoUpdate stay global. Bindings is omitempty so a pure
+// single-dir install's config.json is byte-identical to before this feature.
 type UploadConfig struct {
 	BackendURL string           `json:"backend_url"`
 	APIKey     string           `json:"api_key"`
 	LogLevel   string           `json:"log_level,omitempty"`   // debug, info, warn, error (default: info)
 	AutoUpdate *bool            `json:"auto_update,omitempty"` // nil = enabled (default), false = disabled
 	Redaction  *RedactionConfig `json:"redaction,omitempty"`
+	// Bindings maps provider -> canonical config dir -> credentials.
+	Bindings map[string]map[string]BindingCreds `json:"bindings,omitempty"`
 }
 
 // IsAutoUpdateEnabled returns whether auto-update is enabled.
@@ -49,7 +57,13 @@ type RedactionPattern struct {
 	FieldPattern string `json:"field_pattern,omitempty"`
 }
 
-// GetUploadConfig reads upload configuration from ~/.confab/config.json
+// GetUploadConfig reads upload configuration from ~/.confab/config.json.
+//
+// This returns the DEFAULT/global config (top-level backend_url + api_key). For
+// anything scoped to a specific session or provider config dir, use
+// GetUploadConfigFor(provider.BindingFor(p, configDir)) instead — calling this
+// directly for a custom-config-dir session silently yields the wrong backend
+// (kata hpec).
 func GetUploadConfig() (*UploadConfig, error) {
 	configPath, err := getConfigPath()
 	if err != nil {

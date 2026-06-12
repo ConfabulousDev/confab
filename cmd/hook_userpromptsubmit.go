@@ -55,6 +55,7 @@ func handleUserPromptSubmit(r io.Reader, w io.Writer) error {
 		ExternalID:     hookInput.SessionID,
 		TranscriptPath: hookInput.TranscriptPath,
 		CWD:            hookInput.CWD,
+		ConfigDir:      configDirForHook(claude.Name(), hookInput.TranscriptPath),
 	}
 
 	spawned, err := maybeSpawnDaemon(claude, launch)
