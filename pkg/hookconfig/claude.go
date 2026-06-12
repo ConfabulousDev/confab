@@ -179,7 +179,7 @@ func hasHookWithCommand(settings *config.ClaudeSettings, eventName, cmdSubstring
 
 // InstallSyncHooks installs SessionStart + SessionEnd hooks for the
 // incremental sync daemon.
-func InstallSyncHooks() error {
+func InstallSyncHooks(settingsPath string) error {
 	binaryPath, err := config.GetBinaryPath()
 	if err != nil {
 		return fmt.Errorf("failed to get binary path: %w", err)
@@ -192,7 +192,7 @@ func InstallSyncHooks() error {
 		"type":    "command",
 		"command": fmt.Sprintf("%s hook session-end", binaryPath),
 	}
-	return config.AtomicUpdateSettings(func(settings *config.ClaudeSettings) error {
+	return config.AtomicUpdateSettingsAt(settingsPath, func(settings *config.ClaudeSettings) error {
 		if err := installHook(settings, sessionStartHook, "SessionStart", "*", true); err != nil {
 			return err
 		}
@@ -202,8 +202,8 @@ func InstallSyncHooks() error {
 
 // UninstallSyncHooks removes the sync daemon hooks. Handles both old
 // ("sync start/stop") and new ("hook session-start/end") patterns.
-func UninstallSyncHooks() error {
-	return config.AtomicUpdateSettings(func(settings *config.ClaudeSettings) error {
+func UninstallSyncHooks(settingsPath string) error {
+	return config.AtomicUpdateSettingsAt(settingsPath, func(settings *config.ClaudeSettings) error {
 		isSyncHook := func(hook map[string]any) bool {
 			cmd, _ := hook["command"].(string)
 			return hook["type"] == "command" &&
@@ -222,8 +222,8 @@ func UninstallSyncHooks() error {
 
 // IsSyncHooksInstalled checks whether sync daemon hooks are installed.
 // Recognizes both old ("sync start/stop") and new ("hook session-start/end").
-func IsSyncHooksInstalled() (bool, error) {
-	settings, err := config.ReadSettings()
+func IsSyncHooksInstalled(settingsPath string) (bool, error) {
+	settings, err := config.ReadSettingsAt(settingsPath)
 	if err != nil {
 		return false, fmt.Errorf("failed to read settings: %w", err)
 	}
@@ -236,7 +236,7 @@ func IsSyncHooksInstalled() (bool, error) {
 
 // InstallPreToolUseHooks installs the PreToolUse hook for git commit
 // validation. Installs with a "Bash" matcher to intercept git commits.
-func InstallPreToolUseHooks() error {
+func InstallPreToolUseHooks(settingsPath string) error {
 	binaryPath, err := config.GetBinaryPath()
 	if err != nil {
 		return fmt.Errorf("failed to get binary path: %w", err)
@@ -245,7 +245,7 @@ func InstallPreToolUseHooks() error {
 		"type":    "command",
 		"command": fmt.Sprintf("%s hook pre-tool-use", binaryPath),
 	}
-	return config.AtomicUpdateSettings(func(settings *config.ClaudeSettings) error {
+	return config.AtomicUpdateSettingsAt(settingsPath, func(settings *config.ClaudeSettings) error {
 		for _, matcher := range toolUseMatchers {
 			if err := installHook(settings, preToolUseHook, "PreToolUse", matcher, true); err != nil {
 				return err
@@ -256,15 +256,15 @@ func InstallPreToolUseHooks() error {
 }
 
 // UninstallPreToolUseHooks removes the PreToolUse hook.
-func UninstallPreToolUseHooks() error {
-	return config.AtomicUpdateSettings(func(settings *config.ClaudeSettings) error {
+func UninstallPreToolUseHooks(settingsPath string) error {
+	return config.AtomicUpdateSettingsAt(settingsPath, func(settings *config.ClaudeSettings) error {
 		return removeHooksFromEvent(settings, "PreToolUse", isConfabHookEntry)
 	})
 }
 
 // IsPreToolUseHooksInstalled checks if the PreToolUse hook is installed.
-func IsPreToolUseHooksInstalled() (bool, error) {
-	settings, err := config.ReadSettings()
+func IsPreToolUseHooksInstalled(settingsPath string) (bool, error) {
+	settings, err := config.ReadSettingsAt(settingsPath)
 	if err != nil {
 		return false, fmt.Errorf("failed to read settings: %w", err)
 	}
@@ -273,7 +273,7 @@ func IsPreToolUseHooksInstalled() (bool, error) {
 
 // InstallPostToolUseHooks installs the PostToolUse hook for GitHub
 // link tracking.
-func InstallPostToolUseHooks() error {
+func InstallPostToolUseHooks(settingsPath string) error {
 	binaryPath, err := config.GetBinaryPath()
 	if err != nil {
 		return fmt.Errorf("failed to get binary path: %w", err)
@@ -282,7 +282,7 @@ func InstallPostToolUseHooks() error {
 		"type":    "command",
 		"command": fmt.Sprintf("%s hook post-tool-use", binaryPath),
 	}
-	return config.AtomicUpdateSettings(func(settings *config.ClaudeSettings) error {
+	return config.AtomicUpdateSettingsAt(settingsPath, func(settings *config.ClaudeSettings) error {
 		for _, matcher := range toolUseMatchers {
 			if err := installHook(settings, postToolUseHook, "PostToolUse", matcher, true); err != nil {
 				return err
@@ -293,15 +293,15 @@ func InstallPostToolUseHooks() error {
 }
 
 // UninstallPostToolUseHooks removes the PostToolUse hook.
-func UninstallPostToolUseHooks() error {
-	return config.AtomicUpdateSettings(func(settings *config.ClaudeSettings) error {
+func UninstallPostToolUseHooks(settingsPath string) error {
+	return config.AtomicUpdateSettingsAt(settingsPath, func(settings *config.ClaudeSettings) error {
 		return removeHooksFromEvent(settings, "PostToolUse", isConfabHookEntry)
 	})
 }
 
 // IsPostToolUseHooksInstalled checks if the PostToolUse hook is installed.
-func IsPostToolUseHooksInstalled() (bool, error) {
-	settings, err := config.ReadSettings()
+func IsPostToolUseHooksInstalled(settingsPath string) (bool, error) {
+	settings, err := config.ReadSettingsAt(settingsPath)
 	if err != nil {
 		return false, fmt.Errorf("failed to read settings: %w", err)
 	}
@@ -310,7 +310,7 @@ func IsPostToolUseHooksInstalled() (bool, error) {
 
 // InstallUserPromptSubmitHook installs the UserPromptSubmit hook.
 // Unlike other hooks, UserPromptSubmit doesn't use matchers.
-func InstallUserPromptSubmitHook() error {
+func InstallUserPromptSubmitHook(settingsPath string) error {
 	binaryPath, err := config.GetBinaryPath()
 	if err != nil {
 		return fmt.Errorf("failed to get binary path: %w", err)
@@ -319,22 +319,22 @@ func InstallUserPromptSubmitHook() error {
 		"type":    "command",
 		"command": fmt.Sprintf("%s hook user-prompt-submit", binaryPath),
 	}
-	return config.AtomicUpdateSettings(func(settings *config.ClaudeSettings) error {
+	return config.AtomicUpdateSettingsAt(settingsPath, func(settings *config.ClaudeSettings) error {
 		return installHook(settings, hook, "UserPromptSubmit", "", false)
 	})
 }
 
 // UninstallUserPromptSubmitHook removes the UserPromptSubmit hook.
-func UninstallUserPromptSubmitHook() error {
-	return config.AtomicUpdateSettings(func(settings *config.ClaudeSettings) error {
+func UninstallUserPromptSubmitHook(settingsPath string) error {
+	return config.AtomicUpdateSettingsAt(settingsPath, func(settings *config.ClaudeSettings) error {
 		return removeHooksFromEvent(settings, "UserPromptSubmit", isConfabHookEntry)
 	})
 }
 
 // IsUserPromptSubmitHookInstalled checks if the UserPromptSubmit hook
 // is installed.
-func IsUserPromptSubmitHookInstalled() (bool, error) {
-	settings, err := config.ReadSettings()
+func IsUserPromptSubmitHookInstalled(settingsPath string) (bool, error) {
+	settings, err := config.ReadSettingsAt(settingsPath)
 	if err != nil {
 		return false, fmt.Errorf("failed to read settings: %w", err)
 	}

@@ -12,11 +12,20 @@ import (
 // from depending on either package's constant export.
 const claudeStateDirEnv = "CONFAB_CLAUDE_DIR"
 
+// testSettingsPath returns the settings.json path the hookconfig functions
+// should write to, derived from the test's CONFAB_CLAUDE_DIR (the same path
+// the production default resolves to). Mirrors config.GetSettingsPath without
+// importing config.
+func testSettingsPath(t *testing.T) string {
+	t.Helper()
+	return filepath.Join(os.Getenv(claudeStateDirEnv), "settings.json")
+}
+
 func TestInstallSyncHooksWritesSettings(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv(claudeStateDirEnv, tmpDir)
 
-	if err := InstallSyncHooks(); err != nil {
+	if err := InstallSyncHooks(testSettingsPath(t)); err != nil {
 		t.Fatalf("InstallSyncHooks() error = %v", err)
 	}
 	data, err := os.ReadFile(filepath.Join(tmpDir, "settings.json"))
@@ -34,7 +43,7 @@ func TestInstallPreToolUseHooksWritesSettings(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv(claudeStateDirEnv, tmpDir)
 
-	if err := InstallPreToolUseHooks(); err != nil {
+	if err := InstallPreToolUseHooks(testSettingsPath(t)); err != nil {
 		t.Fatalf("InstallPreToolUseHooks() error = %v", err)
 	}
 	data, err := os.ReadFile(filepath.Join(tmpDir, "settings.json"))
@@ -50,7 +59,7 @@ func TestInstallPostToolUseHooksWritesSettings(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv(claudeStateDirEnv, tmpDir)
 
-	if err := InstallPostToolUseHooks(); err != nil {
+	if err := InstallPostToolUseHooks(testSettingsPath(t)); err != nil {
 		t.Fatalf("InstallPostToolUseHooks() error = %v", err)
 	}
 	data, err := os.ReadFile(filepath.Join(tmpDir, "settings.json"))
@@ -66,7 +75,7 @@ func TestInstallUserPromptSubmitHookWritesSettings(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv(claudeStateDirEnv, tmpDir)
 
-	if err := InstallUserPromptSubmitHook(); err != nil {
+	if err := InstallUserPromptSubmitHook(testSettingsPath(t)); err != nil {
 		t.Fatalf("InstallUserPromptSubmitHook() error = %v", err)
 	}
 	data, err := os.ReadFile(filepath.Join(tmpDir, "settings.json"))
@@ -82,10 +91,10 @@ func TestUninstallSyncHooksRemovesEntries(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv(claudeStateDirEnv, tmpDir)
 
-	if err := InstallSyncHooks(); err != nil {
+	if err := InstallSyncHooks(testSettingsPath(t)); err != nil {
 		t.Fatalf("InstallSyncHooks() error = %v", err)
 	}
-	if err := UninstallSyncHooks(); err != nil {
+	if err := UninstallSyncHooks(testSettingsPath(t)); err != nil {
 		t.Fatalf("UninstallSyncHooks() error = %v", err)
 	}
 	data, err := os.ReadFile(filepath.Join(tmpDir, "settings.json"))
@@ -114,7 +123,7 @@ func TestIsSyncHooksInstalledRoundTrip(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(tmpDir, "settings.json"), []byte(confabSettings), 0600); err != nil {
 		t.Fatalf("write settings: %v", err)
 	}
-	ok, err := IsSyncHooksInstalled()
+	ok, err := IsSyncHooksInstalled(testSettingsPath(t))
 	if err != nil {
 		t.Fatalf("IsSyncHooksInstalled() error = %v", err)
 	}

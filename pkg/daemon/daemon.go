@@ -76,6 +76,7 @@ type Daemon struct {
 	externalID     string
 	transcriptPath string
 	cwd            string
+	configDir      string // canonical provider config dir; "" = default binding (kata hpec)
 	parentPID      int
 	syncInterval   time.Duration
 	syncJitter     time.Duration
@@ -127,7 +128,8 @@ type Config struct {
 	ExternalID         string
 	TranscriptPath     string
 	CWD                string
-	ParentPID          int // Claude Code process ID to monitor (0 to disable)
+	ConfigDir          string // canonical provider config dir; "" = default binding (kata hpec)
+	ParentPID          int    // Claude Code process ID to monitor (0 to disable)
 	SyncInterval       time.Duration
 	SyncIntervalJitter time.Duration // 0 to disable jitter (for testing)
 }
@@ -155,6 +157,7 @@ func New(cfg Config) *Daemon {
 		externalID:     cfg.ExternalID,
 		transcriptPath: cfg.TranscriptPath,
 		cwd:            cfg.CWD,
+		configDir:      cfg.ConfigDir,
 		parentPID:      cfg.ParentPID,
 		syncInterval:   interval,
 		syncJitter:     jitter,
@@ -431,6 +434,17 @@ func openCodeMaterializedPath(externalID string) (string, error) {
 	return confabpath.Subpath("opencode", externalID, "messages.jsonl")
 }
 
+// binding resolves the backend binding for this daemon's (provider, config
+// dir) via the single provider.BindingFor chokepoint, so an empty d.configDir
+// collapses to the default binding (top-level config).
+func (d *Daemon) binding() config.Binding {
+	p, err := provider.Get(d.providerName)
+	if err != nil {
+		return config.Binding{Provider: d.providerName, Dir: d.configDir}
+	}
+	return provider.BindingFor(p, d.configDir)
+}
+
 // tryInit attempts to initialize the sync engine and session with the backend.
 // Auth is checked here lazily, not at daemon startup.
 func (d *Daemon) tryInit() error {
@@ -444,7 +458,11 @@ func (d *Daemon) tryInit() error {
 		}
 
 		// Get authenticated config lazily, only when we need to talk to backend.
-		cfg, cfgErr := config.EnsureAuthenticated()
+		// Resolve the per-(provider, dir) binding so a custom config dir syncs
+		// to its own backend (kata hpec). A missing binding (ErrNoBinding) is
+		// surfaced as not-authenticated: the daemon retries and never falls
+		// back to the default backend (leak-free policy).
+		cfg, cfgErr := config.EnsureAuthenticatedFor(d.binding())
 		if cfgErr != nil {
 			return fmt.Errorf("not authenticated: %w", cfgErr)
 		}

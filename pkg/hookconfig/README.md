@@ -16,7 +16,7 @@ Before CF-396 (Phase 2), hook install logic lived in `pkg/config` (Claude side) 
 
 | File | Role |
 |------|------|
-| `claude.go` | Claude Code hook install/uninstall: sync (`SessionStart`/`SessionEnd`), `PreToolUse`, `PostToolUse`, `UserPromptSubmit`. Edits `~/.claude/settings.json` via `config.AtomicUpdateSettings`. |
+| `claude.go` | Claude Code hook install/uninstall: sync (`SessionStart`/`SessionEnd`), `PreToolUse`, `PostToolUse`, `UserPromptSubmit`. Each `Install*`/`Uninstall*`/`Is*Installed` function takes an explicit `settingsPath` (the provider passes `p.SettingsPath()`) and edits it via `config.AtomicUpdateSettingsAt` / `config.ReadSettingsAt` — so hooks install into a non-default config dir (kata hpec) without env mutation. |
 | `codex.go` | Codex hook install/uninstall: writes a confab-managed `[features]` block plus `SessionStart`, `PreToolUse`, and `PostToolUse` hooks in `~/.codex/config.toml`. Preserves user config; atomic write with backup. |
 
 ## Public API

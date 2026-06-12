@@ -216,7 +216,7 @@ func TestRunSetup_AlreadyAuthenticated(t *testing.T) {
 
 	// Track if login was called
 	var loginCalled bool
-	doDeviceLoginFunc = func(backendURL, keyName string) error {
+	doDeviceLoginFunc = func(backendURL, keyName string, _ config.Binding) error {
 		loginCalled = true
 		return nil
 	}
@@ -270,7 +270,7 @@ func TestRunSetup_InvalidExistingKey(t *testing.T) {
 
 	// Track if login was called
 	var loginCalled bool
-	doDeviceLoginFunc = func(backendURL, keyName string) error {
+	doDeviceLoginFunc = func(backendURL, keyName string, _ config.Binding) error {
 		loginCalled = true
 		// Simulate successful login by saving new config
 		newCfg := &config.UploadConfig{
@@ -319,7 +319,7 @@ func TestRunSetup_BackendURLChanged(t *testing.T) {
 	os.WriteFile(configPath, cfgData, 0600)
 
 	var loginCalled bool
-	doDeviceLoginFunc = func(backendURL, keyName string) error {
+	doDeviceLoginFunc = func(backendURL, keyName string, _ config.Binding) error {
 		loginCalled = true
 		newCfg := &config.UploadConfig{
 			BackendURL: backendURL,
@@ -361,7 +361,7 @@ func TestRunSetup_NeedsLogin(t *testing.T) {
 
 	var loginCalled bool
 	var loginBackendURL string
-	doDeviceLoginFunc = func(backendURL, keyName string) error {
+	doDeviceLoginFunc = func(backendURL, keyName string, _ config.Binding) error {
 		loginCalled = true
 		loginBackendURL = backendURL
 		newCfg := &config.UploadConfig{
@@ -524,7 +524,7 @@ func TestRunSetup_HookInstallationFails(t *testing.T) {
 	// (CI hosts don't have the real `claude` binary).
 	stubProviderDetect(t, "claude")
 
-	doDeviceLoginFunc = func(backendURL, keyName string) error {
+	doDeviceLoginFunc = func(backendURL, keyName string, _ config.Binding) error {
 		t.Error("login should not be called")
 		return nil
 	}
@@ -552,7 +552,7 @@ func TestRunSetup_WithAPIKeyFlag(t *testing.T) {
 
 	// Track if login was called
 	var loginCalled bool
-	doDeviceLoginFunc = func(backendURL, keyName string) error {
+	doDeviceLoginFunc = func(backendURL, keyName string, _ config.Binding) error {
 		loginCalled = true
 		return nil
 	}
@@ -607,7 +607,7 @@ func TestRunSetup_WithAPIKeyFlag_InvalidKey(t *testing.T) {
 	setupSetupTestEnv(t, server.URL)
 
 	var loginCalled bool
-	doDeviceLoginFunc = func(backendURL, keyName string) error {
+	doDeviceLoginFunc = func(backendURL, keyName string, _ config.Binding) error {
 		loginCalled = true
 		return nil
 	}
@@ -642,7 +642,7 @@ func TestRunSetup_WithAPIKeyFlag_SavesBackendURL(t *testing.T) {
 
 	_, configPath := setupSetupTestEnv(t, server.URL)
 
-	doDeviceLoginFunc = func(backendURL, keyName string) error {
+	doDeviceLoginFunc = func(backendURL, keyName string, _ config.Binding) error {
 		t.Error("login should not be called")
 		return nil
 	}
@@ -729,7 +729,7 @@ func TestSetupWithAPIKey_PreservesCustomRedactionPatterns(t *testing.T) {
 	cfgData, _ := json.Marshal(existingCfg)
 	os.WriteFile(configPath, cfgData, 0600)
 
-	doDeviceLoginFunc = func(backendURL, keyName string) error {
+	doDeviceLoginFunc = func(backendURL, keyName string, _ config.Binding) error {
 		t.Error("device login should not be called when api-key is provided")
 		return nil
 	}
@@ -812,7 +812,7 @@ func TestSetupDeviceFlow_PreservesCustomRedactionPatterns(t *testing.T) {
 	os.WriteFile(configPath, cfgData, 0600)
 
 	// Mock device login that preserves config
-	doDeviceLoginFunc = func(backendURL, keyName string) error {
+	doDeviceLoginFunc = func(backendURL, keyName string, _ config.Binding) error {
 		cfg, err := config.GetUploadConfig()
 		if err != nil {
 			cfg = &config.UploadConfig{}
@@ -881,7 +881,7 @@ func TestSetupFreshInstall_AddsDefaultRedaction(t *testing.T) {
 	// Don't create any config - simulates fresh install
 	os.Remove(configPath)
 
-	doDeviceLoginFunc = func(backendURL, keyName string) error {
+	doDeviceLoginFunc = func(backendURL, keyName string, _ config.Binding) error {
 		t.Error("device login should not be called when api-key is provided")
 		return nil
 	}

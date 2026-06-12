@@ -8,8 +8,9 @@ Hook install/uninstall logic lives in `pkg/hookconfig`. This package owns the ge
 
 | File | Role |
 |------|------|
-| `config.go` | `ClaudeSettings` struct + `AtomicUpdateSettings` (read/modify/write `~/.claude/settings.json` with mtime-based optimistic locking). Generic accessor helpers: `GetHooksMap`, `GetEventHooks`, `SetEventHooks`. Tool-name constants used by `pkg/hookconfig`. |
-| `upload.go` | Confab config: read/write `~/.confab/config.json`, validation, default redaction patterns, `ParseLogLevel` |
+| `config.go` | `ClaudeSettings` struct + `AtomicUpdateSettings`/`AtomicUpdateSettingsAt` and `ReadSettings`/`ReadSettingsAt` (read/modify/write a settings.json with mtime-based optimistic locking). The zero-arg forms target the default (env-resolved) path; the `*At(settingsPath, …)` forms take an explicit path so hooks can install into a non-default config dir (kata hpec — `ClaudeCode.InstallHooks` passes `p.SettingsPath()`). Generic accessor helpers: `GetHooksMap`, `GetEventHooks`, `SetEventHooks`. Tool-name constants used by `pkg/hookconfig`. |
+| `upload.go` | Confab config: read/write `~/.confab/config.json`, validation, default redaction patterns, `ParseLogLevel`. `UploadConfig.Bindings` (`provider → canonical config dir → {backend_url, api_key}`, omitempty) holds per-config-dir backends; only creds vary per binding, redaction/log-level/auto-update stay global. `GetUploadConfig` is documented default/global only. |
+| `binding.go` | Per-(provider, config dir) backend bindings (kata hpec): `Binding`, `BindingCreds`, `ResolveBinding(provider, dir, defaultDir)` (canonicalizes via `pkg/pathcanon`; collapses to the default binding when dir == defaultDir), `GetUploadConfigFor` (merges global fields + binding creds; returns `ErrNoBinding` for an unbound custom dir — callers must NOT fall back to default), `SetBindingCredentials`, `EnsureAuthenticatedFor`, `HasBindings`. |
 | `paths.go` | Claude state-dir resolution (`~/.claude`) with `CONFAB_CLAUDE_DIR` override. `~/.confab` paths use `pkg/confabpath`. |
 | `bundled_skills.go` | Shared bundled-skill registry plus install/uninstall/check and `ReconcileBundledSkills` (install current + prune retired) helpers for provider-local `skills/<name>/SKILL.md` layouts |
 | `skill_retro.go` | `/retro` templates for Claude Code and Codex plus legacy Claude helper wrappers |

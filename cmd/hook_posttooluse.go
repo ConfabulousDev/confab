@@ -90,7 +90,7 @@ func handlePostToolUse(r io.Reader, _ io.Writer) error {
 			logger.Debug("Git command did not succeed, skipping link")
 			return nil
 		}
-		return linkCommitToSession(p, hookInput.SessionID, hookInput.CWD)
+		return linkCommitToSession(p, hookInput.SessionID, hookInput.CWD, hookInput.TranscriptPath)
 	}
 
 	return nil
@@ -105,13 +105,13 @@ func linkPRFromResponse(p provider.Provider, hookInput *toolUseHookInput) error 
 		logger.Debug("No PR URL found in tool response")
 		return nil
 	}
-	return linkGitHubURL(p, hookInput.SessionID, prURL)
+	return linkGitHubURL(p, hookInput.SessionID, prURL, hookInput.TranscriptPath)
 }
 
 // linkGitHubURL links a GitHub URL (PR or commit) to the current Confab
 // session. Walks up to the root session for providers with a thread tree
 // (Codex) so subagent-initiated commits/PRs link to the user-facing root.
-func linkGitHubURL(p provider.Provider, sessionID, githubURL string) error {
+func linkGitHubURL(p provider.Provider, sessionID, githubURL, transcriptPath string) error {
 	logger.Info("Linking GitHub URL to session: %s", githubURL)
 
 	confabSessionID, err := getConfabSessionID(p, sessionID)
@@ -120,8 +120,9 @@ func linkGitHubURL(p provider.Provider, sessionID, githubURL string) error {
 		return nil // Can't link without session ID, but don't error
 	}
 
-	// Get upload config for API client
-	cfg, err := config.GetUploadConfig()
+	// Get upload config (binding-aware) for the API client, so a custom
+	// config dir's commits/PRs link via its own backend (kata hpec).
+	cfg, err := uploadConfigForHook(p, transcriptPath)
 	if err != nil {
 		logger.Warn("GitHub link failed: %v", err)
 		return nil // Best-effort linking
@@ -155,7 +156,7 @@ func linkGitHubURL(p provider.Provider, sessionID, githubURL string) error {
 // linkCommitToSession links a git commit to the current Confab session.
 // It gets the HEAD commit SHA and repo URL via git commands, then constructs
 // the GitHub commit URL.
-func linkCommitToSession(p provider.Provider, sessionID, cwd string) error {
+func linkCommitToSession(p provider.Provider, sessionID, cwd, transcriptPath string) error {
 	if cwd == "" {
 		logger.Warn("GitHub commit link failed: no CWD provided")
 		return nil
@@ -182,7 +183,7 @@ func linkCommitToSession(p provider.Provider, sessionID, cwd string) error {
 	}
 
 	commitURL := githubURL + "/commit/" + commitSHA
-	return linkGitHubURL(p, sessionID, commitURL)
+	return linkGitHubURL(p, sessionID, commitURL, transcriptPath)
 }
 
 // isSuccessfulBashResponse checks if a Bash tool response indicates success.
