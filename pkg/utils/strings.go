@@ -4,11 +4,12 @@ import "time"
 
 // TruncateSecret safely truncates a secret string for display.
 // Returns a string like "abc123...wxyz" showing prefix and suffix.
-// If the string is too short, returns a masked version.
+// If the string is too short, or prefixLen/suffixLen are negative,
+// returns a masked version rather than panicking on an out-of-range slice.
 func TruncateSecret(s string, prefixLen, suffixLen int) string {
 	minLen := prefixLen + suffixLen
-	if len(s) < minLen {
-		// String too short - mask it entirely
+	if prefixLen < 0 || suffixLen < 0 || len(s) < minLen {
+		// Too short or invalid lengths - mask it entirely.
 		if len(s) == 0 {
 			return "(empty)"
 		}

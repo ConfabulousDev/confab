@@ -38,4 +38,4 @@ Tests redirect `HOME` via `t.Setenv` so they never touch the real home directory
 
 **Uses:** standard library only.
 
-**Used by:** `pkg/config` (`getConfigPath`), `pkg/daemon` (state and inbox path builders), `pkg/logger` (default log dir), `cmd/update.go` (auto-update check timestamp).
+**Used by:** `pkg/config` (`getConfigPath`), `pkg/daemon` (state and inbox path builders, OpenCode materialized transcript path), `pkg/logger` (default log dir), `pkg/provider` (OpenCode materialized message/child paths), `cmd/update.go` (auto-update check timestamp).
