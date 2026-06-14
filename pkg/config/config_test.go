@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -87,6 +88,36 @@ func TestEnsureAuthenticated(t *testing.T) {
 				t.Fatal("EnsureAuthenticated() cfg = nil, want non-nil")
 			}
 		})
+	}
+}
+
+// TestSaveUploadConfigDirPermissions pins the documented invariant
+// (pkg/config/README.md: 0700 for ~/.confab) that SaveUploadConfig creates
+// the config directory with owner-only permissions, since it holds
+// config.json with the API key. Skipped on Windows where Unix mode bits
+// don't apply.
+func TestSaveUploadConfigDirPermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix permission bits not applicable on Windows")
+	}
+	tmpDir := t.TempDir()
+	// Point at a not-yet-existing subdirectory so SaveUploadConfig must
+	// create it (MkdirAll only sets the mode on dirs it creates).
+	confabDir := filepath.Join(tmpDir, "dotconfab")
+	configPath := filepath.Join(confabDir, "config.json")
+	t.Setenv("CONFAB_CONFIG_PATH", configPath)
+
+	cfg := &UploadConfig{BackendURL: "https://api.example.com", APIKey: "cfb_test-key-1234567890"}
+	if err := SaveUploadConfig(cfg); err != nil {
+		t.Fatalf("SaveUploadConfig failed: %v", err)
+	}
+
+	info, err := os.Stat(confabDir)
+	if err != nil {
+		t.Fatalf("stat config dir: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o700 {
+		t.Errorf("config dir perms = %o, want %o", got, 0o700)
 	}
 }
 

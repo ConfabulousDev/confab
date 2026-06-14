@@ -75,14 +75,44 @@ func TestTruncateSecret(t *testing.T) {
 // TestTruncateSecretNoPanic ensures no panic on edge cases
 func TestTruncateSecretNoPanic(t *testing.T) {
 	// These should never panic
-	inputs := []string{"", "a", "ab", "abc", "abcd", "abcde"}
+	inputs := []string{"", "a", "ab", "abc", "abcd", "abcde", "abcdefghijklmnop"}
 	for _, input := range inputs {
-		// Should not panic regardless of prefix/suffix lengths
+		// Should not panic regardless of prefix/suffix lengths,
+		// including negative lengths (which would otherwise produce
+		// out-of-range slice indices).
 		_ = TruncateSecret(input, 0, 0)
 		_ = TruncateSecret(input, 1, 1)
 		_ = TruncateSecret(input, 8, 4)
 		_ = TruncateSecret(input, 12, 4)
 		_ = TruncateSecret(input, 100, 100)
+		_ = TruncateSecret(input, -1, 4)
+		_ = TruncateSecret(input, 4, -1)
+		_ = TruncateSecret(input, -5, -5)
+	}
+}
+
+// TestTruncateSecretNegativeLengths pins the masked fallback for invalid
+// (negative) lengths so callers never trigger a slice-bounds panic.
+func TestTruncateSecretNegativeLengths(t *testing.T) {
+	cases := []struct {
+		name      string
+		input     string
+		prefixLen int
+		suffixLen int
+		want      string
+	}{
+		{name: "negative suffix on long string", input: "abcdefghijklmnop", prefixLen: 4, suffixLen: -1, want: "***"},
+		{name: "negative prefix on long string", input: "abcdefghijklmnop", prefixLen: -1, suffixLen: 4, want: "***"},
+		{name: "both negative", input: "abcdefghijklmnop", prefixLen: -5, suffixLen: -5, want: "***"},
+		{name: "negative on empty", input: "", prefixLen: -1, suffixLen: -1, want: "(empty)"},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := TruncateSecret(tt.input, tt.prefixLen, tt.suffixLen); got != tt.want {
+				t.Errorf("TruncateSecret(%q, %d, %d) = %q, want %q",
+					tt.input, tt.prefixLen, tt.suffixLen, got, tt.want)
+			}
+		})
 	}
 }
 

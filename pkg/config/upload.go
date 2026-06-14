@@ -104,9 +104,10 @@ func SaveUploadConfig(config *UploadConfig) error {
 		return err
 	}
 
-	// Ensure directory exists
+	// Ensure directory exists. 0700: the directory holds config.json with
+	// the API key, so it must be owner-only (see pkg/config/README.md).
 	confabDir := filepath.Dir(configPath)
-	if err := os.MkdirAll(confabDir, 0755); err != nil {
+	if err := os.MkdirAll(confabDir, 0700); err != nil {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
 

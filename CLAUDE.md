@@ -68,7 +68,7 @@ One machine can point different provider config dirs at different backends. `con
 
 ### Claude workflow subagent files (CF-533)
 
-Claude's `Workflow` tool spawns subagents whose transcripts live nested at `<session>/subagents/workflows/<runId>/agent-<id>.jsonl`, plus a per-run `journal.jsonl`. These carry no `agentId` in the main transcript, so they are **not** found by `ExtractAgentIDsFromMessage`. Instead `provider.ClaudeCode.DiscoverWorkflowFiles` (in `pkg/provider/claude_workflows.go`) scans the `subagents/workflows/` directory each `SyncAll` cycle and registers them via `pkg/sync.FileTracker.RegisterWorkflowFile` under **path-encoded** backend `file_name`s, written verbatim (the backend resolves `<runId>` from the path and `<id>` via `path.Base`):
+Claude's `Workflow` tool spawns subagents whose transcripts live nested at `<session>/subagents/workflows/<runId>/agent-<id>.jsonl`, plus a per-run `journal.jsonl`. These carry no `agentId` in the main transcript, so they are **not** found by `ExtractAgentIDsFromMessage`. Instead `provider.ClaudeCode.DiscoverWorkflowFiles` (in `pkg/provider/claude_workflows.go`) scans the `subagents/workflows/` directory each `SyncAll` cycle and registers them via `pkg/sync.FileTracker.RegisterSidechainFile` under **path-encoded** backend `file_name`s, written verbatim (the backend resolves `<runId>` from the path and `<id>` via `path.Base`):
 
 - `subagents/workflows/<runId>/agent-<id>.jsonl` → `file_type=agent`
 - `subagents/workflows/<runId>/journal.jsonl` → `file_type=workflow_journal`
