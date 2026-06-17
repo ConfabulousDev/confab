@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/ConfabulousDev/confab/pkg/config"
+	"github.com/ConfabulousDev/confab/pkg/hookconfig"
 	"github.com/ConfabulousDev/confab/pkg/logger"
 	"github.com/ConfabulousDev/confab/pkg/types"
 )
@@ -398,20 +399,48 @@ func extractCursorSessionMetadataFromFile(transcriptPath string) SessionMetadata
 	return extractCursorMetadata(lines)
 }
 
-// InstallHooks is not yet implemented (T4 installs the ~/.cursor/hooks.json
-// bundle). Returning an error keeps `confab setup --provider cursor` from
-// silently appearing to succeed before the installer lands.
-func (Cursor) InstallHooks() (string, error) {
-	return "", fmt.Errorf("cursor: hook installation not yet implemented")
+// hooksPath returns <stateDir>/hooks.json — the user-level Cursor hooks file
+// (honors CONFAB_CURSOR_DIR). This covers the local IDE + CLI; cloud agents
+// don't read it and are out of scope (kata 6kys).
+func (p Cursor) hooksPath() (string, error) {
+	stateDir, err := p.StateDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(stateDir, "hooks.json"), nil
 }
 
-// UninstallHooks is not yet implemented (T4).
-func (Cursor) UninstallHooks() (string, error) {
-	return "", fmt.Errorf("cursor: hook uninstallation not yet implemented")
+// InstallHooks installs Confab's sessionStart (daemon spawn) and sessionEnd
+// (signal shutdown) hooks into ~/.cursor/hooks.json, preserving user hooks.
+// preToolUse/postToolUse are intentionally not installed (commit/PR linking
+// is deferred for Cursor). Returns the written hooks.json path.
+func (p Cursor) InstallHooks() (string, error) {
+	path, err := p.hooksPath()
+	if err != nil {
+		return "", err
+	}
+	return hookconfig.InstallCursorHooks(path)
 }
 
-// IsHooksInstalled reports false until T4 wires hook installation.
-func (Cursor) IsHooksInstalled() (bool, error) { return false, nil }
+// UninstallHooks removes Confab's managed hook entries from
+// ~/.cursor/hooks.json, preserving any user-authored hooks.
+func (p Cursor) UninstallHooks() (string, error) {
+	path, err := p.hooksPath()
+	if err != nil {
+		return "", err
+	}
+	return hookconfig.UninstallCursorHooks(path)
+}
+
+// IsHooksInstalled reports true only when both managed Cursor hook events
+// (sessionStart + sessionEnd) carry a confab command.
+func (p Cursor) IsHooksInstalled() (bool, error) {
+	path, err := p.hooksPath()
+	if err != nil {
+		return false, err
+	}
+	return hookconfig.IsCursorHooksInstalled(path)
+}
 
 // InstallSkills installs confab's bundled skills (/retro) into ~/.cursor/skills/.
 // Cursor auto-loads global skills from <stateDir>/skills/ using the generic

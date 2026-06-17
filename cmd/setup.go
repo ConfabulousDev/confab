@@ -273,7 +273,7 @@ func runSetupAuth(cmd *cobra.Command, binding config.Binding) (backendURL string
 func init() {
 	rootCmd.AddCommand(setupCmd)
 
-	setupCmd.Flags().StringVar(&setupProviderName, "provider", "", "Provider to set up (claude-code, codex, or opencode); auto-detects if unset")
+	setupCmd.Flags().StringVar(&setupProviderName, "provider", "", "Provider to set up (claude-code, codex, opencode, or cursor); auto-detects if unset. Cursor is not auto-detected — pass it explicitly.")
 	setupCmd.Flags().StringVar(&setupConfigDir, "config-dir", "", "Provider config dir to install into and bind to this backend (requires --provider; claude-code only). Defaults to the provider's default dir.")
 	setupCmd.Flags().String("backend-url", "", "Backend API URL (required)")
 	setupCmd.MarkFlagRequired("backend-url")

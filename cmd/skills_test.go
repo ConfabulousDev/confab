@@ -8,22 +8,24 @@ import (
 	"github.com/ConfabulousDev/confab/pkg/provider"
 )
 
-func setupSkillsCommandEnv(t *testing.T) (tmpDir, claudeDir, codexDir string) {
+func setupSkillsCommandEnv(t *testing.T) (tmpDir, claudeDir, codexDir, cursorDir string) {
 	t.Helper()
 	tmpDir = t.TempDir()
 	claudeDir = filepath.Join(tmpDir, ".claude")
 	codexDir = filepath.Join(tmpDir, ".codex")
+	cursorDir = filepath.Join(tmpDir, ".cursor")
 	t.Setenv("HOME", tmpDir)
 	t.Setenv(provider.ClaudeStateDirEnv, claudeDir)
 	t.Setenv(provider.CodexStateDirEnv, codexDir)
+	t.Setenv(provider.CursorStateDirEnv, cursorDir)
 	origProvider := skillsProviderName
 	skillsProviderName = ""
 	t.Cleanup(func() { skillsProviderName = origProvider })
-	return tmpDir, claudeDir, codexDir
+	return tmpDir, claudeDir, codexDir, cursorDir
 }
 
 func TestSkillsAddInstallsForAllDetectedProviders(t *testing.T) {
-	_, claudeDir, codexDir := setupSkillsCommandEnv(t)
+	_, claudeDir, codexDir, _ := setupSkillsCommandEnv(t)
 	stubProviderDetect(t, "claude", "codex")
 
 	if err := skillsAddCmd.RunE(skillsAddCmd, nil); err != nil {
@@ -41,10 +43,10 @@ func TestSkillsAddInstallsForAllDetectedProviders(t *testing.T) {
 }
 
 func TestSkillsRemoveRemovesFromAllProviderDirs(t *testing.T) {
-	_, claudeDir, codexDir := setupSkillsCommandEnv(t)
+	_, claudeDir, codexDir, cursorDir := setupSkillsCommandEnv(t)
 	stubProviderDetect(t, "claude")
 
-	for _, base := range []string{claudeDir, codexDir} {
+	for _, base := range []string{claudeDir, codexDir, cursorDir} {
 		for _, skill := range []string{"retro"} {
 			path := filepath.Join(base, "skills", skill, "SKILL.md")
 			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -60,7 +62,7 @@ func TestSkillsRemoveRemovesFromAllProviderDirs(t *testing.T) {
 		t.Fatalf("skills remove: %v", err)
 	}
 
-	for _, base := range []string{claudeDir, codexDir} {
+	for _, base := range []string{claudeDir, codexDir, cursorDir} {
 		for _, skill := range []string{"retro"} {
 			path := filepath.Join(base, "skills", skill)
 			if _, err := os.Stat(path); !os.IsNotExist(err) {
