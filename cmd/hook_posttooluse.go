@@ -47,7 +47,7 @@ func init() {
 // handlePostToolUse processes PostToolUse hook events.
 // Errors are logged but not printed to stderr - tool hooks run frequently
 // and visible errors would be too noisy. See SessionStart hook for visible errors.
-func handlePostToolUse(r io.Reader, _ io.Writer) error {
+func handlePostToolUse(r io.Reader, w io.Writer) error {
 	if config.IsLinkFromGitHubDisabled() {
 		logger.Info("GitHub linking disabled via %s", config.DisableLinkFromGitHubEnv)
 		return nil
@@ -57,6 +57,13 @@ func handlePostToolUse(r io.Reader, _ io.Writer) error {
 	if err != nil {
 		logger.Warn("PostToolUse skipped: %v", err)
 		return nil
+	}
+
+	// Cursor's postToolUse payload (tool_output is a JSON object {output,
+	// exitCode}) differs from Claude/Codex's tool_response, so it takes its own
+	// path.
+	if p.Name() == provider.NameCursor {
+		return handlePostToolUseCursor(p, r, w)
 	}
 
 	hookInput, err := readToolUseHookInput(p, r)

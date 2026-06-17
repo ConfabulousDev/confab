@@ -13,12 +13,19 @@ import (
 )
 
 // Cursor hook events Confab drives. sessionStart spawns the sync daemon;
-// sessionEnd signals a clean shutdown. We deliberately do NOT install stop
-// (fires per turn — same hazard as Codex's Stop) or preToolUse/postToolUse
-// (commit/PR linking is deferred for Cursor; kata 6kys).
+// sessionEnd signals a clean shutdown; preToolUse/postToolUse drive
+// bidirectional GitHub commit/PR linking (65aq). We deliberately do NOT
+// install stop (fires per turn — same hazard as Codex's Stop).
 const (
 	cursorSessionStartEvent = "sessionStart"
 	cursorSessionEndEvent   = "sessionEnd"
+	cursorPreToolUseEvent   = "preToolUse"
+	cursorPostToolUseEvent  = "postToolUse"
+
+	// cursorShellMatcher scopes the tool-use hooks to Cursor's Shell tool
+	// (matcher filters by tool type for preToolUse/postToolUse). The handler
+	// also checks tool_name=="Shell" defensively.
+	cursorShellMatcher = "Shell"
 
 	// cursorProviderFlag is the --provider value Confab passes to its Cursor
 	// hook subcommands. Kept as a literal here (not imported from pkg/provider)
@@ -35,6 +42,9 @@ const (
 type cursorHookEntry struct {
 	Command string `json:"command"`
 	Type    string `json:"type"`
+	// Matcher scopes a preToolUse/postToolUse hook to a tool type (e.g.
+	// "Shell"). Omitted (and round-tripped absent) for the lifecycle events.
+	Matcher string `json:"matcher,omitempty"`
 }
 
 // cursorHooksFile is the typed view of ~/.cursor/hooks.json used by the
@@ -48,19 +58,22 @@ type cursorHooksFile struct {
 // confabCursorEntry returns the managed hook entry for a Cursor event,
 // invoking the confab binary with the given subcommand. The command string
 // is the idempotency + clean-uninstall key (we match on a confab command for
-// the event), so it stays stable across installs.
-func confabCursorEntry(binPath, subcommand string) cursorHookEntry {
+// the event), so it stays stable across installs. A non-empty matcher scopes
+// the entry to a tool type (used for the tool-use events).
+func confabCursorEntry(binPath, subcommand, matcher string) cursorHookEntry {
 	return cursorHookEntry{
 		Command: binPath + " hook " + subcommand + " --provider " + cursorProviderFlag,
 		Type:    "command",
+		Matcher: matcher,
 	}
 }
 
-// InstallCursorHooks writes Confab's sessionStart + sessionEnd command hooks
-// into Cursor's hooks.json at hooksPath, preserving any user-authored hooks
-// (and unknown top-level keys), backing the file up first, and writing
-// atomically. Re-installing is idempotent: an existing confab command for an
-// event is not duplicated. Returns the hooksPath that was written.
+// InstallCursorHooks writes Confab's sessionStart + sessionEnd + preToolUse +
+// postToolUse command hooks into Cursor's hooks.json at hooksPath, preserving
+// any user-authored hooks (and unknown top-level keys), backing the file up
+// first, and writing atomically. The tool-use events carry matcher "Shell"
+// (commit/PR linking; 65aq). Re-installing is idempotent: an existing confab
+// command for an event is not duplicated. Returns the hooksPath written.
 func InstallCursorHooks(hooksPath string) (string, error) {
 	if err := os.MkdirAll(filepath.Dir(hooksPath), 0700); err != nil {
 		return "", fmt.Errorf("failed to create Cursor state directory: %w", err)
@@ -79,11 +92,18 @@ func InstallCursorHooks(hooksPath string) (string, error) {
 		return "", err
 	}
 
-	if err := top.ensureEntry(cursorSessionStartEvent, confabCursorEntry(binPath, "session-start")); err != nil {
-		return "", err
+	managed := []struct {
+		event, subcommand, matcher string
+	}{
+		{cursorSessionStartEvent, "session-start", ""},
+		{cursorSessionEndEvent, "session-end", ""},
+		{cursorPreToolUseEvent, "pre-tool-use", cursorShellMatcher},
+		{cursorPostToolUseEvent, "post-tool-use", cursorShellMatcher},
 	}
-	if err := top.ensureEntry(cursorSessionEndEvent, confabCursorEntry(binPath, "session-end")); err != nil {
-		return "", err
+	for _, m := range managed {
+		if err := top.ensureEntry(m.event, confabCursorEntry(binPath, m.subcommand, m.matcher)); err != nil {
+			return "", err
+		}
 	}
 	top.ensureVersion()
 
@@ -106,12 +126,16 @@ func UninstallCursorHooks(hooksPath string) (string, error) {
 	}
 	top.removeConfabEntries(cursorSessionStartEvent)
 	top.removeConfabEntries(cursorSessionEndEvent)
+	top.removeConfabEntries(cursorPreToolUseEvent)
+	top.removeConfabEntries(cursorPostToolUseEvent)
 	return writeCursorHooks(hooksPath, top)
 }
 
-// IsCursorHooksInstalled reports true only when both managed events
-// (sessionStart and sessionEnd) carry a confab command. A missing or
-// unparseable file reads as not installed.
+// IsCursorHooksInstalled reports true only when all four managed events
+// (sessionStart, sessionEnd, preToolUse, postToolUse) carry a confab command.
+// A legacy two-event install (pre-65aq, lifecycle only) reads as "not
+// installed" so `confab setup` re-emits the managed block and transparently
+// upgrades it. A missing or unparseable file reads as not installed.
 func IsCursorHooksInstalled(hooksPath string) (bool, error) {
 	data, err := os.ReadFile(hooksPath)
 	if err != nil {
@@ -125,7 +149,9 @@ func IsCursorHooksInstalled(hooksPath string) (bool, error) {
 		return false, fmt.Errorf("failed to parse Cursor hooks: %w", err)
 	}
 	return cursorEventHasConfab(f, cursorSessionStartEvent) &&
-		cursorEventHasConfab(f, cursorSessionEndEvent), nil
+		cursorEventHasConfab(f, cursorSessionEndEvent) &&
+		cursorEventHasConfab(f, cursorPreToolUseEvent) &&
+		cursorEventHasConfab(f, cursorPostToolUseEvent), nil
 }
 
 // cursorEventHasConfab reports whether any entry in the named event invokes
@@ -140,13 +166,14 @@ func cursorEventHasConfab(f cursorHooksFile, event string) bool {
 }
 
 // isConfabCursorCommand reports whether a hooks.json command string is one of
-// Confab's managed Cursor hooks. We key off the command signature
-// ("hook session-… --provider cursor") rather than the binary basename so
-// detection is independent of where the confab binary lives (and so tests,
-// whose os.Executable() is the test binary, still match). This signature is
-// what makes re-install idempotent and uninstall surgical.
+// Confab's managed Cursor hooks. We key off the command signature (" hook "
+// plus "--provider cursor") rather than the binary basename so detection is
+// independent of where the confab binary lives (and so tests, whose
+// os.Executable() is the test binary, still match). This signature is what
+// makes re-install idempotent and uninstall surgical, and it covers all four
+// managed events (session-start/end + pre-/post-tool-use).
 func isConfabCursorCommand(command string) bool {
-	return strings.Contains(command, " hook session-") &&
+	return strings.Contains(command, " hook ") &&
 		strings.Contains(command, "--provider "+cursorProviderFlag)
 }
 

@@ -485,8 +485,8 @@ func TestCursorCLIBinaryName(t *testing.T) {
 }
 
 func TestCursorSupportsCommitLinking(t *testing.T) {
-	if (Cursor{}).SupportsCommitLinking() {
-		t.Error("SupportsCommitLinking() = true, want false")
+	if !(Cursor{}).SupportsCommitLinking() {
+		t.Error("SupportsCommitLinking() = false, want true (65aq)")
 	}
 }
 
