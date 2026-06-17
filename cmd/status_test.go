@@ -125,9 +125,12 @@ func TestStatus_ClaudeOnlyCLI(t *testing.T) {
 	if !strings.Contains(output, "Provider: opencode") {
 		t.Fatalf("opencode block must appear in status\noutput:\n%s", output)
 	}
-	// One skills row per registered provider: claude-code, codex, opencode.
-	if strings.Count(output, "Skills: /retro") != 3 {
-		t.Fatalf("expected skills row for all three providers\noutput:\n%s", output)
+	if !strings.Contains(output, "Provider: cursor") {
+		t.Fatalf("cursor block must appear in status\noutput:\n%s", output)
+	}
+	// One skills row per registered provider: claude-code, codex, opencode, cursor.
+	if strings.Count(output, "Skills: /retro") != 4 {
+		t.Fatalf("expected skills row for all four providers\noutput:\n%s", output)
 	}
 }
 

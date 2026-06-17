@@ -1,8 +1,8 @@
 # confab
 
-Sync and explore Claude Code, Codex, and OpenCode sessions. Connect `confab` to your Confab backend to capture transcripts in real time for exploration, sharing, and analysis.
+Sync and explore Claude Code, Codex, OpenCode, and Cursor sessions. Connect `confab` to your Confab backend to capture transcripts in real time for exploration, sharing, and analysis.
 
-Your `claude`, `codex`, and `opencode` workflows stay unchanged.
+Your `claude`, `codex`, `opencode`, and `cursor` workflows stay unchanged.
 
 ![How Confab works](docs/how-it-works.svg)
 
@@ -16,7 +16,7 @@ curl -fsSL https://raw.githubusercontent.com/ConfabulousDev/confab/main/install.
 confab setup --backend-url https://confab.yourcompany.com
 ```
 
-`confab setup` detects provider CLIs (`claude`, `codex`, `opencode`) on `PATH` and wires each one. Claude Code, Codex, and OpenCode sessions sync in the same setup pass.
+`confab setup` detects providers (`claude`, `codex`, `opencode`, `cursor-agent` on `PATH`, or a present state dir such as `~/.cursor`) and wires each one. Claude Code, Codex, OpenCode, and Cursor sessions sync in the same setup pass.
 
 ## Connect to Your Backend
 
@@ -136,6 +136,27 @@ OpenCode has no on-disk transcript file — session data lives in a local SQLite
 - **Plugin-based install.** Lifecycle is driven by the installed plugin (not an OpenCode-native hook system). The daemon also monitors the parent OpenCode process and exits if it dies.
 - Bundled skills (`/retro`) install under `~/.config/opencode/skills/`.
 
+## Cursor
+
+Confab supports Cursor — both the `cursor-agent` CLI and the Cursor desktop IDE. `confab setup` detects Cursor when `cursor-agent` is on `PATH` **or** the `~/.cursor` state dir is present (so IDE-only users are detected too) and wires it automatically. Use `--provider cursor` to configure only Cursor.
+
+```bash
+# Auto-detect: wires every detected provider
+confab setup --backend-url https://confab.yourcompany.com
+
+# Cursor-only (explicit override)
+confab setup --provider cursor --backend-url https://confab.yourcompany.com
+```
+
+Cursor writes per-session transcripts to disk at `~/.cursor/projects/<workspace>/agent-transcripts/<id>/<id>.jsonl`. `confab setup` installs `sessionStart` + `sessionEnd` hooks into `~/.cursor/hooks.json` (merging into any user-authored hooks). Subagent transcripts live beside the root under `subagents/<id>.jsonl` and sync as `file_type=agent` sidechain files under the root session, through the same incremental, redacted pipeline as the other providers.
+
+### Caveats
+
+- **No tool results.** Cursor's transcript records prompts, assistant text, and tool *calls* but not tool *results*, so synced Cursor sessions show no tool outputs.
+- **Hybrid shutdown.** The CLI fires `sessionEnd` reliably, but the IDE only fires it on window/app close (not per chat-tab). The daemon's parent-PID liveness on the shared `Cursor.app` process is the primary IDE shutdown — a long IDE session with several chats keeps per-session daemons alive (still syncing incrementally) until the window closes.
+- **No GitHub commit/PR linking.** The bidirectional GitHub linking wired for Claude Code and Codex is not available for Cursor.
+- Bundled skills (`/retro`) install under `~/.cursor/skills/`.
+
 ## Configuration
 
 | File | Purpose |
@@ -151,6 +172,7 @@ OpenCode has no on-disk transcript file — session data lives in a local SQLite
 | `CONFAB_CODEX_DIR` | `~/.codex` | Override the Codex state directory |
 | `CONFAB_OPENCODE_CONFIG_DIR` | `~/.config/opencode` | Override the OpenCode config directory (plugin + skills) |
 | `CONFAB_OPENCODE_DB` | `~/.local/share/opencode/opencode.db` | Override the OpenCode SQLite database location |
+| `CONFAB_CURSOR_DIR` | `~/.cursor` | Override the Cursor state directory (hooks + skills + transcripts) |
 | `CONFAB_CONFIG_PATH` | `~/.confab/config.json` | Config file location |
 | `CONFAB_LOG_DIR` | `~/.confab/logs` | Log directory |
 

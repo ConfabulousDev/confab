@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -616,13 +617,64 @@ func TestCursorGetReturnsProvider(t *testing.T) {
 	}
 }
 
-func TestCursorNotInOrderedNames(t *testing.T) {
-	// T2 registers cursor but does NOT surface it in auto-detection (T7).
+func TestCursorInOrderedNames(t *testing.T) {
+	// T7 (r5mg) surfaces cursor in auto-detection: it must now appear in
+	// the canonical registry order, after opencode.
+	var found bool
 	for _, n := range OrderedNames() {
 		if n == NameCursor {
-			t.Errorf("OrderedNames() includes %q; cursor must stay out of auto-detect until T7", NameCursor)
+			found = true
 		}
 	}
+	if !found {
+		t.Errorf("OrderedNames() = %v; want it to include %q (cursor auto-detect enabled in T7)", OrderedNames(), NameCursor)
+	}
+}
+
+// TestDetectInstalled_Cursor covers the new cursor permutations: detected
+// when its CLI binary (cursor-agent) is on PATH, detected when only its
+// state dir (~/.cursor) is present (IDE-only user), and absent otherwise.
+func TestDetectInstalled_Cursor(t *testing.T) {
+	t.Run("cli only: cursor-agent on PATH", func(t *testing.T) {
+		stubLookPath(t, "cursor-agent")
+		stubStateDir(t)
+		got := DetectInstalled()
+		want := []string{NameCursor}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("DetectInstalled() = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("statedir only: ~/.cursor present (IDE-only)", func(t *testing.T) {
+		stubLookPath(t)
+		stubStateDir(t, NameCursor)
+		got := DetectInstalled()
+		want := []string{NameCursor}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("DetectInstalled() = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("neither: cursor absent", func(t *testing.T) {
+		stubLookPath(t)
+		stubStateDir(t)
+		got := DetectInstalled()
+		for _, n := range got {
+			if n == NameCursor {
+				t.Fatalf("DetectInstalled() = %v; cursor must be absent when neither CLI nor state dir present", got)
+			}
+		}
+	})
+
+	t.Run("order: cursor follows opencode", func(t *testing.T) {
+		stubLookPath(t, "opencode", "cursor-agent")
+		stubStateDir(t)
+		got := DetectInstalled()
+		want := []string{NameOpencode, NameCursor}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("DetectInstalled() = %v, want %v (fixed opencode, cursor order)", got, want)
+		}
+	})
 }
 
 func TestCursorGetWithDir_Unsupported(t *testing.T) {
