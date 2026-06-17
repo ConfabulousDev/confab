@@ -143,8 +143,23 @@ func (t *FileTracker) RegisterCodexRollout(path, fileName string, isRoot bool, m
 // SubagentsDir returns the <session>/subagents directory for this tracker.
 // Part of provider.WorkflowRegistrar: the Claude provider scans
 // subagents/workflows/<runId>/ beneath it to discover workflow files.
+//
+// NOTE: this is computed for Claude's layout (transcript at
+// <project>/<session-id>.jsonl → subagents at <project>/<session-id>/subagents/).
+// Cursor's subagents sit beside the transcript file
+// (<dir>/agent-transcripts/<id>/subagents/, i.e. filepath.Dir(transcript)/subagents),
+// so Cursor's DiscoverDescendants derives the dir from RootTranscriptPath()
+// rather than relying on this value.
 func (t *FileTracker) SubagentsDir() string {
 	return t.subagentsDir
+}
+
+// RootTranscriptPath returns the absolute path of the session's root transcript
+// file. Part of provider.RootTranscriptProvider: providers whose subagent
+// layout differs from Claude's (e.g. Cursor) derive their subagents directory
+// from this path instead of from SubagentsDir().
+func (t *FileTracker) RootTranscriptPath() string {
+	return t.transcriptPath
 }
 
 // RegisterSidechainFile is the entry point for registering path-encoded

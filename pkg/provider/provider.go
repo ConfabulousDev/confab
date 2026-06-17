@@ -68,6 +68,17 @@ type WorkflowRegistrar interface {
 	RegisterSidechainFile(path, name, fileType string) bool
 }
 
+// RootTranscriptProvider exposes the session's root transcript path. Providers
+// whose subagent files do NOT sit at SubagentsDir() (Cursor keeps them beside
+// the transcript at filepath.Dir(transcript)/subagents, not under the
+// Claude-shaped <session-id>/subagents) derive their subagents directory from
+// this path. *sync.FileTracker satisfies it via RootTranscriptPath. The
+// registrar passed to DiscoverDescendants is the *FileTracker, so Cursor
+// type-asserts to this (plus WorkflowRegistrar) to reach what it needs.
+type RootTranscriptProvider interface {
+	RootTranscriptPath() string
+}
+
 // OpencodeDescendantRegistrar is the surface Opencode.DiscoverDescendants
 // uses to register subagent sessions discovered in OpenCode's local SQLite
 // (CF-538). The daemon supplies an implementation that wraps *FileTracker,
