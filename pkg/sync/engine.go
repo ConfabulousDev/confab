@@ -21,9 +21,10 @@ import (
 // Compile-time assertions that the tracker types satisfy the provider
 // interfaces. Catches API drift at build time rather than at test time.
 var (
-	_ provider.TranscriptRegistrar = (*TrackedFile)(nil)
-	_ provider.DescendantRegistrar = (*FileTracker)(nil)
-	_ provider.WorkflowRegistrar   = (*FileTracker)(nil)
+	_ provider.TranscriptRegistrar    = (*TrackedFile)(nil)
+	_ provider.DescendantRegistrar    = (*FileTracker)(nil)
+	_ provider.WorkflowRegistrar      = (*FileTracker)(nil)
+	_ provider.RootTranscriptProvider = (*FileTracker)(nil)
 )
 
 // Engine is the core sync engine used by both daemon and manual save.

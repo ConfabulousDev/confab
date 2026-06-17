@@ -192,8 +192,8 @@ func (Cursor) DefaultCWD(transcriptPath string) string {
 	return filepath.Dir(transcriptPath)
 }
 
-// DiscoverDescendants is a stub for T2 (subagent sidechain capture is T6).
-func (Cursor) DiscoverDescendants(DescendantRegistrar, string) error { return nil }
+// DiscoverDescendants discovers Cursor subagent transcripts — see
+// cursor_subagents.go for the implementation and layout notes.
 
 // DiscoverWorkflowFiles is a no-op: Cursor has no Workflow-tool equivalent.
 func (Cursor) DiscoverWorkflowFiles(WorkflowRegistrar, func(string) bool) (int, error) {

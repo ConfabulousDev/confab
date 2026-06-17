@@ -134,6 +134,89 @@ func TestCursorDaemonSyncCycle(t *testing.T) {
 	}
 }
 
+// TestCursorDaemonSyncsSubagentSidechain proves T6 end to end: a subagent JSONL
+// file at <root-dir>/subagents/<sub-id>.jsonl is discovered each SyncAll cycle
+// and uploaded as a file_type=agent sidechain alongside the root transcript,
+// with backend file_name "subagents/<sub-id>.jsonl". Only one daemon runs (no
+// suppression needed — subagents fire subagentStart, which confab never hooks).
+func TestCursorDaemonSyncsSubagentSidechain(t *testing.T) {
+	mock := newMockBackend(t)
+	server := httptest.NewServer(mock)
+	defer server.Close()
+
+	tmpDir, transcriptPath := setupCursorTestEnv(t, server.URL)
+
+	content := strings.Join(cursorTranscriptLines(), "\n") + "\n"
+	if err := os.WriteFile(transcriptPath, []byte(content), 0o644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+
+	// Lay a subagent transcript as a sibling of the root: <root-dir>/subagents/<id>.jsonl.
+	const subID = "cursor-subagent-xyz789"
+	subDir := filepath.Join(filepath.Dir(transcriptPath), "subagents")
+	if err := os.MkdirAll(subDir, 0o755); err != nil {
+		t.Fatalf("mkdir subagents: %v", err)
+	}
+	subPath := filepath.Join(subDir, subID+".jsonl")
+	if err := os.WriteFile(subPath, []byte(content), 0o644); err != nil {
+		t.Fatalf("write subagent transcript: %v", err)
+	}
+
+	d := New(Config{
+		Provider:       provider.NameCursor,
+		ExternalID:     "cursor-session-abc123",
+		TranscriptPath: transcriptPath,
+		CWD:            tmpDir,
+		SyncInterval:   50 * time.Millisecond,
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- d.Run(ctx) }()
+
+	time.Sleep(200 * time.Millisecond)
+	cancel()
+
+	select {
+	case <-errCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("daemon did not exit")
+	}
+
+	// Exactly one init: a single daemon for the whole tree (no per-subagent daemon).
+	if got := len(mock.getInitRequests()); got != 1 {
+		t.Fatalf("init requests = %d, want exactly 1 (one daemon for the tree)", got)
+	}
+
+	// Both a transcript chunk (the root) and an agent chunk (the subagent) must
+	// arrive; the subagent's backend file_name is the path-relative subagents/<id>.jsonl.
+	chunkReqs := mock.getChunkRequests()
+	var sawTranscript, sawAgent bool
+	wantAgentName := "subagents/" + subID + ".jsonl"
+	for _, c := range chunkReqs {
+		switch c.FileType {
+		case "transcript":
+			sawTranscript = true
+		case "agent":
+			sawAgent = true
+			if c.FileName != wantAgentName {
+				t.Errorf("agent chunk file_name = %q, want %q", c.FileName, wantAgentName)
+			}
+			if len(c.Lines) != 3 {
+				t.Errorf("agent chunk lines = %d, want 3", len(c.Lines))
+			}
+		}
+	}
+	if !sawTranscript {
+		t.Error("expected a transcript chunk for the root session")
+	}
+	if !sawAgent {
+		t.Error("expected an agent chunk for the subagent sidechain")
+	}
+}
+
 // TestCursorDaemonIncrementalAndFinalSync drives the full lifecycle: an initial
 // sync, an incremental append, and a final sync on shutdown — the same
 // guarantees the Claude path gives, proven for provider=cursor.
