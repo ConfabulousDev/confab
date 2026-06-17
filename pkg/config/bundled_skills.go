@@ -10,6 +10,7 @@ const (
 	SkillProviderClaude   = "claude-code"
 	SkillProviderCodex    = "codex"
 	SkillProviderOpencode = "opencode"
+	SkillProviderCursor   = "cursor"
 )
 
 var bundledSkillNames = []string{retroSkillName}

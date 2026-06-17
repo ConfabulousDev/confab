@@ -33,8 +33,26 @@ func (a opencodeHookInputAdapter) CWD() string            { return a.inner.CWD }
 func (a opencodeHookInputAdapter) HookEventName() string  { return "" }
 func (a opencodeHookInputAdapter) ParentPID() int         { return a.inner.ParentPID }
 
+// cursorHookInputAdapter wraps *types.CursorHookInput so it satisfies the
+// HookInput interface. TranscriptPath() returns the (possibly derived) path
+// the provider populated at sessionStart. CWD() reports the first workspace
+// root, which Cursor uses as the session's working directory.
+type cursorHookInputAdapter struct{ inner *types.CursorHookInput }
+
+func (a cursorHookInputAdapter) SessionID() string      { return a.inner.SessionID }
+func (a cursorHookInputAdapter) TranscriptPath() string { return a.inner.TranscriptPath }
+func (a cursorHookInputAdapter) CWD() string {
+	if len(a.inner.WorkspaceRoots) > 0 {
+		return a.inner.WorkspaceRoots[0]
+	}
+	return ""
+}
+func (a cursorHookInputAdapter) HookEventName() string { return a.inner.HookEventName }
+func (a cursorHookInputAdapter) ParentPID() int        { return a.inner.ParentPID }
+
 var (
 	_ HookInput = claudeHookInputAdapter{}
 	_ HookInput = codexHookInputAdapter{}
 	_ HookInput = opencodeHookInputAdapter{}
+	_ HookInput = cursorHookInputAdapter{}
 )

@@ -135,6 +135,66 @@ type OpenCodeHookInput struct {
 	ParentID string `json:"parent_id,omitempty"`
 }
 
+// CursorHookInput represents hook data from Cursor (cursor-agent CLI and the
+// Cursor desktop IDE). Like ClaudeHookInput/CodexHookInput it is a union type
+// carrying fields from all observed Cursor hook events (sessionStart,
+// sessionEnd); JSON unmarshaling handles missing fields gracefully. The field
+// set is ground-truthed from live sessionStart/sessionEnd payloads (kata issue
+// 6kys T1 findings). No field has a variant/uncertain shape, so plain Go types
+// are used throughout.
+//
+// transcript_path is NULL at sessionStart (transcripts exist but the path is
+// not yet handed to the hook); it is populated from sessionEnd onward. The
+// Cursor provider DERIVES the path at sessionStart from workspace_roots[0] +
+// session_id, so an empty TranscriptPath here is expected, not an error.
+type CursorHookInput struct {
+	SessionID         string   `json:"session_id"`
+	ConversationID    string   `json:"conversation_id,omitempty"`
+	GenerationID      string   `json:"generation_id,omitempty"`
+	Model             string   `json:"model,omitempty"`
+	ComposerMode      string   `json:"composer_mode,omitempty"`
+	IsBackgroundAgent bool     `json:"is_background_agent,omitempty"`
+	HookEventName     string   `json:"hook_event_name,omitempty"`
+	CursorVersion     string   `json:"cursor_version,omitempty"`
+	WorkspaceRoots    []string `json:"workspace_roots,omitempty"`
+	UserEmail         string   `json:"user_email,omitempty"`
+	TranscriptPath    string   `json:"transcript_path,omitempty"` // null at sessionStart; populated from sessionEnd onward
+
+	// sessionEnd-specific fields.
+	Reason       string `json:"reason,omitempty"`        // completed|aborted|error|window_close|user_close
+	FinalStatus  string `json:"final_status,omitempty"`
+	ErrorMessage string `json:"error_message,omitempty"` // present when reason=error
+	DurationMS   int64  `json:"duration_ms,omitempty"`
+
+	ParentPID int `json:"parent_pid,omitempty"` // Cursor process ID (set by confab, not Cursor)
+}
+
+// ReadCursorHookInput reads and validates a Cursor hook payload. Validation
+// mirrors ReadClaudeHookInput: session_id is required and must pass
+// ValidateSessionID (it is used in derived filesystem paths). transcript_path
+// is intentionally NOT required — it is null at sessionStart and derived by the
+// provider.
+func ReadCursorHookInput(r io.Reader) (*CursorHookInput, error) {
+	data, err := io.ReadAll(io.LimitReader(r, MaxJSONLLineSize))
+	if err != nil {
+		return nil, fmt.Errorf("failed to read input: %w", err)
+	}
+
+	var input CursorHookInput
+	if err := json.Unmarshal(data, &input); err != nil {
+		return nil, fmt.Errorf("failed to parse cursor hook input: %w", err)
+	}
+
+	if input.SessionID == "" {
+		return nil, fmt.Errorf("session_id is required")
+	}
+	if err := ValidateSessionID(input.SessionID); err != nil {
+		return nil, err
+	}
+
+	return &input, nil
+}
+
 // sessionIDPattern validates session IDs contain only safe characters.
 // This prevents path traversal attacks (e.g., "../../tmp/evil") when
 // session IDs are used in file paths.
