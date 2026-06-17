@@ -26,8 +26,8 @@ Before CF-396 (Phase 2), hook install logic lived in `pkg/config` (Claude side) 
 
 | Function | Purpose |
 |---|---|
-| `InstallSyncHooks() error` | Install `SessionStart` (spawn daemon) + `SessionEnd` (signal shutdown) in `settings.json`. |
-| `UninstallSyncHooks() error` | Remove the two sync hooks. |
+| `InstallSyncHooks() error` | Install `SessionStart` (spawn daemon) + `SessionEnd` (signal shutdown) in `settings.json`. The command strings carry an explicit `--provider claude-code` (kata m9mb), matching codex/cursor. |
+| `UninstallSyncHooks() error` | Remove the two sync hooks. The matcher uses `Contains "hook session-start"/"session-end"`, so it removes both the `--provider claude-code` shape and old no-flag installs. |
 | `IsSyncHooksInstalled() (bool, error)` | True iff both sync hooks are present. |
 | `InstallPreToolUseHooks() error` | Install bash + GitHub MCP `PreToolUse` interceptors for git commit / PR tracking. |
 | `UninstallPreToolUseHooks() error` / `IsPreToolUseHooksInstalled() (bool, error)` | symmetric |

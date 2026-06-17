@@ -83,43 +83,11 @@ var skillsRemoveCmd = &cobra.Command{
 }
 
 func skillsAddTargets() ([]provider.Provider, error) {
-	if skillsProviderName != "" {
-		p, err := provider.Get(skillsProviderName)
-		if err != nil {
-			return nil, err
-		}
-		return []provider.Provider{p}, nil
-	}
-	detected := provider.DetectInstalled()
-	targets := make([]provider.Provider, 0, len(detected))
-	for _, name := range detected {
-		p, err := provider.Get(name)
-		if err != nil {
-			return nil, err
-		}
-		targets = append(targets, p)
-	}
-	return targets, nil
+	return detectedOrNamedProviders(skillsProviderName)
 }
 
 func skillsRemoveTargets() ([]provider.Provider, error) {
-	if skillsProviderName != "" {
-		p, err := provider.Get(skillsProviderName)
-		if err != nil {
-			return nil, err
-		}
-		return []provider.Provider{p}, nil
-	}
-	names := []string{provider.NameClaudeCode, provider.NameCodex, provider.NameCursor}
-	targets := make([]provider.Provider, 0, len(names))
-	for _, name := range names {
-		p, err := provider.Get(name)
-		if err != nil {
-			return nil, err
-		}
-		targets = append(targets, p)
-	}
-	return targets, nil
+	return allOrNamedProviders(skillsProviderName)
 }
 
 func init() {

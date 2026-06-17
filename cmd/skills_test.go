@@ -24,6 +24,34 @@ func setupSkillsCommandEnv(t *testing.T) (tmpDir, claudeDir, codexDir, cursorDir
 	return tmpDir, claudeDir, codexDir, cursorDir
 }
 
+// TestSkillsRemoveTargetsIncludesOpencode guards the m9mb bug fix:
+// skillsRemoveTargets previously omitted opencode even though opencode
+// installs the /retro skill, so `skills remove` left opencode skills behind.
+func TestSkillsRemoveTargetsIncludesOpencode(t *testing.T) {
+	origProvider := skillsProviderName
+	skillsProviderName = ""
+	t.Cleanup(func() { skillsProviderName = origProvider })
+
+	targets, err := skillsRemoveTargets()
+	if err != nil {
+		t.Fatalf("skillsRemoveTargets: %v", err)
+	}
+	got := make(map[string]bool)
+	for _, p := range targets {
+		got[p.Name()] = true
+	}
+	for _, want := range []string{
+		provider.NameClaudeCode,
+		provider.NameCodex,
+		provider.NameCursor,
+		provider.NameOpencode,
+	} {
+		if !got[want] {
+			t.Errorf("skillsRemoveTargets missing %q; got %v", want, got)
+		}
+	}
+}
+
 func TestSkillsAddInstallsForAllDetectedProviders(t *testing.T) {
 	_, claudeDir, codexDir, _ := setupSkillsCommandEnv(t)
 	stubProviderDetect(t, "claude", "codex")

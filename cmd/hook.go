@@ -40,6 +40,12 @@ Available handlers:
 }
 
 func init() {
+	// Deliberate back-compat exception (m9mb): unlike the user-facing list/save
+	// commands, the machine-invoked `hook` default stays claude-code. Installed
+	// Claude hook command strings now pass `--provider claude-code` explicitly
+	// (see pkg/hookconfig/claude.go), but OLD installs predating that migration
+	// invoke `confab hook session-start` with no flag. Retaining this default
+	// keeps those installs working until enough releases pass to drop it.
 	hookCmd.PersistentFlags().StringVar(&hookProviderName, "provider", provider.NameClaudeCode, "Provider for hook input (claude-code, codex, opencode, or cursor)")
 	rootCmd.AddCommand(hookCmd)
 }

@@ -111,6 +111,8 @@ Confab installs four hook bundles in `~/.claude/settings.json` (see `pkg/hookcon
 - `PostToolUse` (same matchers): links resulting GitHub artifacts back to the Confab session
 - `UserPromptSubmit`: re-spawns the daemon if it died between turns
 
+The installed Claude `session-start`/`session-end` command strings now carry an explicit `--provider claude-code` (kata m9mb), matching codex/cursor. The idempotency/uninstall matchers gate on `Contains "hook session-start"/"session-end"`, so they still match both the new shape and old no-flag installs. The machine-invoked `confab hook` command keeps a `claude-code` default (`cmd/hook.go`) as a back-compat safety net for installs predating the migration; the user-facing `confab list`/`save` commands instead **require** an explicit `--provider` (no claude-code default).
+
 The daemon also monitors its parent PID and shuts down if Claude Code exits unexpectedly.
 
 For Codex, three hook events are installed in `~/.codex/config.toml` (see `pkg/hookconfig/codex.go`):

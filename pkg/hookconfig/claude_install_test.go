@@ -816,13 +816,13 @@ func TestInstallHooks_WritesExactBinaryPath(t *testing.T) {
 			name:      "SessionStart",
 			install:   InstallSyncHooks,
 			eventName: "SessionStart",
-			want:      []string{binPath + " hook session-start"},
+			want:      []string{binPath + " hook session-start --provider claude-code"},
 		},
 		{
 			name:      "SessionEnd",
 			install:   InstallSyncHooks,
 			eventName: "SessionEnd",
-			want:      []string{binPath + " hook session-end"},
+			want:      []string{binPath + " hook session-end --provider claude-code"},
 		},
 		{
 			name:      "PreToolUse",

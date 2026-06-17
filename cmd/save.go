@@ -146,7 +146,8 @@ func uploadSingleSession(cfg *config.UploadConfig, providerName, sessionID, tran
 }
 
 func init() {
-	saveCmd.Flags().StringVar(&saveProviderName, "provider", provider.NameClaudeCode, "Provider to save sessions from (claude-code, codex, or cursor; opencode is live-sync only)")
+	saveCmd.Flags().StringVar(&saveProviderName, "provider", "", "Provider to save sessions from (claude-code, codex, or cursor; opencode is live-sync only)")
+	saveCmd.MarkFlagRequired("provider")
 	saveCmd.Flags().StringVar(&saveConfigDir, "config-dir", "", "Save into a non-default backend bound to this config dir (requires --provider; claude-code only)")
 	rootCmd.AddCommand(saveCmd)
 }
