@@ -235,6 +235,22 @@ func TestStateDirPresent_Opencode(t *testing.T) {
 	}
 }
 
+func TestStateDirPresent_Cursor(t *testing.T) {
+	tmp := t.TempDir()
+	dir := filepath.Join(tmp, ".cursor")
+	t.Setenv(CursorStateDirEnv, dir)
+
+	if stateDirPresent(Cursor{}) {
+		t.Fatal("absent ~/.cursor should not be present")
+	}
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if !stateDirPresent(Cursor{}) {
+		t.Fatal("existing ~/.cursor should be present")
+	}
+}
+
 // TestStateDirPresent_FileNotDir guards the IsDir() check: a regular file
 // at the state-dir path is not a present state dir.
 func TestStateDirPresent_FileNotDir(t *testing.T) {
@@ -265,5 +281,11 @@ func TestCLIBinaryName_Codex(t *testing.T) {
 func TestCLIBinaryName_Opencode(t *testing.T) {
 	if got := (Opencode{}).CLIBinaryName(); got != "opencode" {
 		t.Fatalf("Opencode.CLIBinaryName() = %q, want %q", got, "opencode")
+	}
+}
+
+func TestCLIBinaryName_Cursor(t *testing.T) {
+	if got := (Cursor{}).CLIBinaryName(); got != "cursor-agent" {
+		t.Fatalf("Cursor.CLIBinaryName() = %q, want %q", got, "cursor-agent")
 	}
 }

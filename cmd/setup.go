@@ -23,7 +23,7 @@ var setupCmd = &cobra.Command{
 
 This command:
 1. Authenticates with the backend (if not already logged in)
-2. Detects installed providers (claude, codex, opencode) and installs hooks for each
+2. Detects installed providers (claude, codex, opencode, cursor) and installs hooks for each
 3. Installs provider-specific skills
 
 If --provider is set, only that provider is configured. If unset, hooks
@@ -129,7 +129,7 @@ func runSetupAutoDetect(backendURL string, needsLogin bool) error {
 	if len(detected) == 0 {
 		fmt.Println("Detected providers: (none)")
 		fmt.Println()
-		fmt.Println("⚠️  No supported providers (claude, codex, opencode) found on PATH or via their config dirs.")
+		fmt.Println("⚠️  No supported providers (claude, codex, opencode, cursor) found on PATH or via their config dirs.")
 		fmt.Println("   Auth saved, but no hooks were installed.")
 		return nil
 	}
@@ -273,7 +273,7 @@ func runSetupAuth(cmd *cobra.Command, binding config.Binding) (backendURL string
 func init() {
 	rootCmd.AddCommand(setupCmd)
 
-	setupCmd.Flags().StringVar(&setupProviderName, "provider", "", "Provider to set up (claude-code, codex, opencode, or cursor); auto-detects if unset. Cursor is not auto-detected — pass it explicitly.")
+	setupCmd.Flags().StringVar(&setupProviderName, "provider", "", "Provider to set up (claude-code, codex, opencode, or cursor); auto-detects if unset.")
 	setupCmd.Flags().StringVar(&setupConfigDir, "config-dir", "", "Provider config dir to install into and bind to this backend (requires --provider; claude-code only). Defaults to the provider's default dir.")
 	setupCmd.Flags().String("backend-url", "", "Backend API URL (required)")
 	setupCmd.MarkFlagRequired("backend-url")

@@ -31,7 +31,7 @@ func stateDirPresent(p Provider) bool {
 
 // orderedNames is the fixed registry order callers iterate in, so output
 // is deterministic regardless of map lookup order.
-var orderedNames = []string{NameClaudeCode, NameCodex, NameOpencode}
+var orderedNames = []string{NameClaudeCode, NameCodex, NameOpencode, NameCursor}
 
 // OrderedNames returns the canonical provider names in fixed registry
 // order. Callers that render or detect per-provider iterate this instead

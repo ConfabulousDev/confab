@@ -40,6 +40,6 @@ Available handlers:
 }
 
 func init() {
-	hookCmd.PersistentFlags().StringVar(&hookProviderName, "provider", provider.NameClaudeCode, "Provider for hook input (claude-code, codex, or opencode)")
+	hookCmd.PersistentFlags().StringVar(&hookProviderName, "provider", provider.NameClaudeCode, "Provider for hook input (claude-code, codex, opencode, or cursor)")
 	rootCmd.AddCommand(hookCmd)
 }
