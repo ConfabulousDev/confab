@@ -8,6 +8,7 @@ import (
 	"github.com/ConfabulousDev/confab/pkg/daemon"
 	"github.com/ConfabulousDev/confab/pkg/logger"
 	"github.com/ConfabulousDev/confab/pkg/provider"
+	"github.com/ConfabulousDev/confab/pkg/types"
 	"github.com/spf13/cobra"
 )
 
@@ -67,6 +68,17 @@ func sessionEndFromReader(r io.Reader) error {
 		return sessionEndOpencode(r)
 	}
 
+	// Cursor: read CursorHookInput from stdin, stop the daemon under the cursor
+	// provider namespace. The default path below uses ClaudeCode parsing +
+	// StopDaemon (hardcoded to claude-code), which both rejects the Cursor
+	// transcript path and looks under the wrong provider namespace — so Cursor
+	// needs its own route, like OpenCode. sessionEnd is Cursor's clean shutdown
+	// signal (CLI always; IDE on window/app close); parent-PID liveness is the
+	// IDE backstop in the daemon (kata 6kys).
+	if providerName == provider.NameCursor {
+		return sessionEndCursor(r)
+	}
+
 	// Always output valid hook response, even on error
 	defer func() { writeClaudeHookResponse(os.Stdout, false) }()
 
@@ -106,6 +118,47 @@ func sessionEndOpencode(r io.Reader) error {
 	}
 
 	if err := daemon.StopDaemonForProvider(provider.NameOpencode, in.SessionID, nil); err != nil {
+		logger.Warn("Could not stop daemon: %v", err)
+		fmt.Fprintf(os.Stderr, "Note: %v\n", err)
+	} else {
+		fmt.Fprintln(os.Stderr, "Daemon signaled to stop (final sync in background)")
+	}
+
+	return nil
+}
+
+// sessionEndCursor handles session-end for Cursor. Reads the Cursor sessionEnd
+// payload (session_id, transcript_path, reason) and stops the daemon under the
+// cursor provider namespace. The Cursor session_end event carries a reason
+// (completed|aborted|error|window_close|user_close) which we forward to the
+// backend via a ClaudeHookInput-shaped inbox event — the daemon's inbox plumbing
+// is provider-agnostic and reads only session_id + reason.
+func sessionEndCursor(r io.Reader) error {
+	p := provider.Cursor{}
+
+	// Always output a valid hook response, even on error (fire-and-forget;
+	// Cursor's WriteHookResponse writes {}).
+	defer func() { _ = p.WriteHookResponse(os.Stdout, false, "") }()
+
+	fmt.Fprintln(os.Stderr, "=== Confab: Stopping Sync Daemon ===")
+	fmt.Fprintln(os.Stderr)
+
+	in, err := p.ReadSessionHookInput(r)
+	if err != nil {
+		logger.ErrorPrint("Error reading Cursor hook input: %v", err)
+		return nil
+	}
+
+	// Forward the Cursor reason to the backend as a session_end event. Only
+	// session_id + reason are consumed downstream (see Engine.SendSessionEnd).
+	hookInput := &types.ClaudeHookInput{
+		SessionID:      in.SessionID,
+		TranscriptPath: in.TranscriptPath,
+		Reason:         in.Reason,
+		HookEventName:  "SessionEnd",
+	}
+
+	if err := daemon.StopDaemonForProvider(provider.NameCursor, in.SessionID, hookInput); err != nil {
 		logger.Warn("Could not stop daemon: %v", err)
 		fmt.Fprintf(os.Stderr, "Note: %v\n", err)
 	} else {
