@@ -230,10 +230,14 @@ func (p Cursor) AnnotateChunk(c ChunkView, _ bool, redact func(string) string) A
 	path := c.FilePath()
 
 	// latest_message_at from the transcript file mtime (the only Cursor recency
-	// signal). Stat failures (missing/empty path) leave it unset.
+	// signal). Normalized to UTC — os.Stat's ModTime() is Local-zoned and the
+	// backend applies this value as-is (it trusts providers to send UTC, like
+	// OpenCode's explicit .UTC() and Claude/Codex's UTC-Z timestamps); without
+	// .UTC() the web list recency is off by the host's tz offset (kata 1zjr).
+	// Stat failures (missing/empty path) leave it unset.
 	if path != "" {
 		if info, err := os.Stat(path); err == nil {
-			c.SetLatestMessageAt(info.ModTime())
+			c.SetLatestMessageAt(info.ModTime().UTC())
 		}
 	}
 

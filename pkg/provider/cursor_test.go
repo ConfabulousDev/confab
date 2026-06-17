@@ -191,6 +191,47 @@ func TestCursorAnnotateChunk_SetsLatestMessageAtFromFileMtime(t *testing.T) {
 	}
 }
 
+// latest_message_at must be emitted in UTC, like every other provider
+// (OpenCode's explicit .UTC(); Claude/Codex's UTC-Z timestamps). os.Stat's
+// ModTime() returns a LOCAL-zoned time.Time, which Go marshals with the local
+// offset — so the backend (which trusts providers to send UTC and applies the
+// value as-is) reads it as the wrong instant. Assert the set value's Location
+// is time.UTC so the chunk carries a UTC instant regardless of the host tz
+// (kata 1zjr).
+func TestCursorAnnotateChunk_LatestMessageAtIsUTC(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "transcript.jsonl")
+	if err := os.WriteFile(path, []byte(cursorUserLine("hi")+"\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	// Set the mtime in a non-UTC location so a passthrough of ModTime() (which
+	// returns Local-zoned time) would carry that offset rather than UTC.
+	loc := time.FixedZone("PDT", -7*60*60)
+	mtime := time.Date(2026, 6, 16, 22, 9, 0, 0, loc)
+	if err := os.Chtimes(path, mtime, mtime); err != nil {
+		t.Fatalf("Chtimes: %v", err)
+	}
+
+	c := &cursorChunkStub{
+		fileType: FileTypeTranscript,
+		lines:    []string{cursorUserLine("hi")},
+		filePath: path,
+	}
+	(Cursor{}).AnnotateChunk(c, false, nil)
+	if !c.latestMessageAtSet {
+		t.Fatal("latest_message_at not set on transcript chunk")
+	}
+	if c.setLatestMessageAt.Location() != time.UTC {
+		t.Errorf("latest_message_at Location = %v, want time.UTC (got %v)",
+			c.setLatestMessageAt.Location(), c.setLatestMessageAt)
+	}
+	// And it must still be the same instant, just expressed in UTC.
+	if !c.setLatestMessageAt.Equal(mtime) {
+		t.Errorf("latest_message_at instant = %v, want %v (same instant, UTC zone)",
+			c.setLatestMessageAt, mtime)
+	}
+}
+
 // A missing transcript file (path empty or stat fails) must not error the
 // chunk: latest_message_at is simply left unset.
 func TestCursorAnnotateChunk_LatestMessageAtAbsentWhenNoFile(t *testing.T) {
