@@ -40,6 +40,11 @@ type daemonLaunchInput struct {
 	// Empty means the default binding (top-level config) — set empty by the
 	// no-bindings short-circuit and by providers/sessions with no custom dir.
 	ConfigDir string `json:"config_dir,omitempty"`
+	// Model is the session-constant LLM model name (Cursor only; from the
+	// sessionStart hook payload). The daemon forwards it to the sync engine,
+	// which stamps it onto transcript chunk metadata (spm9). Empty for other
+	// providers, whose JSONL carries the model inline.
+	Model string `json:"model,omitempty"`
 }
 
 // launchAsHookInput satisfies provider.HookInput for the sole purpose

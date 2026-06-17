@@ -77,6 +77,7 @@ type Daemon struct {
 	transcriptPath string
 	cwd            string
 	configDir      string // canonical provider config dir; "" = default binding (kata hpec)
+	model          string // session-constant LLM model (Cursor only); forwarded to the engine
 	parentPID      int
 	syncInterval   time.Duration
 	syncJitter     time.Duration
@@ -129,6 +130,7 @@ type Config struct {
 	TranscriptPath     string
 	CWD                string
 	ConfigDir          string // canonical provider config dir; "" = default binding (kata hpec)
+	Model              string // session-constant LLM model (Cursor only); stamped onto transcript chunk metadata (spm9)
 	ParentPID          int    // Claude Code process ID to monitor (0 to disable)
 	SyncInterval       time.Duration
 	SyncIntervalJitter time.Duration // 0 to disable jitter (for testing)
@@ -158,6 +160,7 @@ func New(cfg Config) *Daemon {
 		transcriptPath: cfg.TranscriptPath,
 		cwd:            cfg.CWD,
 		configDir:      cfg.ConfigDir,
+		model:          cfg.Model,
 		parentPID:      cfg.ParentPID,
 		syncInterval:   interval,
 		syncJitter:     jitter,
@@ -455,6 +458,7 @@ func (d *Daemon) tryInit() error {
 			ExternalID:     d.externalID,
 			TranscriptPath: d.transcriptPath,
 			CWD:            d.cwd,
+			Model:          d.model,
 		}
 
 		// Get authenticated config lazily, only when we need to talk to backend.

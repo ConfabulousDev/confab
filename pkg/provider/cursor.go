@@ -200,13 +200,23 @@ func (Cursor) DiscoverWorkflowFiles(WorkflowRegistrar, func(string) bool) (int, 
 	return 0, nil
 }
 
-// AnnotateChunk sets first_user_message on the first transcript chunk so the
-// session is listable (the backend hides sessions with neither a summary nor a
-// first_user_message — verified kata kk5t). Cursor has no inline summary and no
-// summary-link records, so only first_user_message is written. Non-transcript
-// (agent sidechain) chunks are a no-op. Mirrors ClaudeCode.AnnotateChunk minus
-// summaries: IncludedFirstUserMessage stays false so the engine's
-// sentFirstUserMessage flag is untouched (same as Claude).
+// AnnotateChunk annotates transcript chunks with the session metadata the
+// backend needs for Cursor (spm9). On every transcript chunk it sets:
+//
+//   - first_user_message — so the session is listable (the backend hides
+//     sessions with neither a summary nor a first_user_message; kata kk5t).
+//   - latest_message_at — from the transcript file's mtime. Cursor JSONL lines
+//     carry NO per-line timestamp, so the backend opts Cursor out of per-line
+//     extraction and feeds session.last_message_at SOLELY from this field. The
+//     mtime is universal across the CLI and IDE.
+//   - summary — from the CLI meta.json title when present (CLI-only; absent for
+//     IDE sessions, which keep first_user_message alone). Best-effort.
+//
+// Non-transcript (agent sidechain) chunks are a no-op. IncludedFirstUserMessage
+// stays false so the engine's sentFirstUserMessage flag is untouched (same as
+// Claude). The model is set engine-side from the daemon config (sourced from
+// the sessionStart hook), not here. Every read here is best-effort: a missing
+// file or meta.json never errors the chunk.
 func (p Cursor) AnnotateChunk(c ChunkView, _ bool, redact func(string) string) AnnotationResult {
 	if c.FileType() != FileTypeTranscript {
 		return AnnotationResult{}
@@ -216,7 +226,69 @@ func (p Cursor) AnnotateChunk(c ChunkView, _ bool, redact func(string) string) A
 		firstUserMessage = redact(firstUserMessage)
 	}
 	c.SetFirstUserMessage(firstUserMessage)
+
+	path := c.FilePath()
+
+	// latest_message_at from the transcript file mtime (the only Cursor recency
+	// signal). Stat failures (missing/empty path) leave it unset.
+	if path != "" {
+		if info, err := os.Stat(path); err == nil {
+			c.SetLatestMessageAt(info.ModTime())
+		}
+	}
+
+	// summary from the CLI meta.json title (best-effort; CLI-only).
+	if title := p.metaJSONTitle(path); title != "" {
+		if redact != nil {
+			title = redact(title)
+		}
+		c.SetSummary(title)
+	}
+
 	return AnnotationResult{}
+}
+
+// cursorMetaJSON is the read contract for ~/.cursor/chats/<hash>/<id>/meta.json,
+// written by the cursor-agent CLI (absent for IDE sessions). Verified on disk:
+// {schemaVersion, createdAtMs, hasConversation, title?, updatedAtMs}. Only the
+// title is consumed here; title is optional (CLI omits it for untitled chats).
+type cursorMetaJSON struct {
+	Title string `json:"title"`
+}
+
+// metaJSONTitle returns the CLI meta.json title for the session whose transcript
+// lives at transcriptPath, or "" when the file or title is absent. The session
+// id is the transcript's basename (sans .jsonl); meta.json lives at a sibling
+// tree ~/.cursor/chats/<hash>/<id>/meta.json, so the <hash> is resolved by glob.
+// Entirely best-effort: any error yields "" (no summary), never an error.
+func (p Cursor) metaJSONTitle(transcriptPath string) string {
+	if transcriptPath == "" {
+		return ""
+	}
+	sessionID := strings.TrimSuffix(filepath.Base(transcriptPath), ".jsonl")
+	if sessionID == "" {
+		return ""
+	}
+	stateDir, err := p.StateDir()
+	if err != nil {
+		return ""
+	}
+	matches, err := filepath.Glob(filepath.Join(stateDir, "chats", "*", sessionID, "meta.json"))
+	if err != nil || len(matches) == 0 {
+		return ""
+	}
+	data, err := os.ReadFile(matches[0])
+	if err != nil {
+		return ""
+	}
+	var meta cursorMetaJSON
+	if err := json.Unmarshal(data, &meta); err != nil {
+		return ""
+	}
+	if meta.Title == "" {
+		return ""
+	}
+	return TruncateUTF8(sanitizeText(meta.Title), types.MaxMetadataFieldLength/2)
 }
 
 // ExtractMetadata parses the first user message from in-memory Cursor

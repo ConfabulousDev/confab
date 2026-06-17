@@ -134,6 +134,76 @@ func TestCursorDaemonSyncCycle(t *testing.T) {
 	}
 }
 
+// TestCursorDaemonSendsSessionMetadata proves the spm9 vertical slice: a
+// provider=cursor daemon configured with a model uploads its transcript chunk
+// carrying metadata.latest_message_at (from the transcript file mtime) and
+// metadata.model (from the daemon config — sourced from the sessionStart hook).
+func TestCursorDaemonSendsSessionMetadata(t *testing.T) {
+	mock := newMockBackend(t)
+	server := httptest.NewServer(mock)
+	defer server.Close()
+
+	tmpDir, transcriptPath := setupCursorTestEnv(t, server.URL)
+
+	content := strings.Join(cursorTranscriptLines(), "\n") + "\n"
+	if err := os.WriteFile(transcriptPath, []byte(content), 0o644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+	// Pin a known mtime so the assertion is deterministic.
+	mtime := time.Date(2026, 6, 16, 10, 0, 0, 0, time.UTC)
+	if err := os.Chtimes(transcriptPath, mtime, mtime); err != nil {
+		t.Fatalf("chtimes: %v", err)
+	}
+
+	d := New(Config{
+		Provider:       provider.NameCursor,
+		ExternalID:     "cursor-session-abc123",
+		TranscriptPath: transcriptPath,
+		CWD:            tmpDir,
+		Model:          "composer-2.5-fast",
+		SyncInterval:   50 * time.Millisecond,
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- d.Run(ctx) }()
+
+	time.Sleep(200 * time.Millisecond)
+	cancel()
+
+	select {
+	case <-errCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("daemon did not exit")
+	}
+
+	chunkReqs := mock.getChunkRequests()
+	var transcriptChunk *sync.ChunkRequest
+	for i := range chunkReqs {
+		if chunkReqs[i].FileType == "transcript" {
+			transcriptChunk = &chunkReqs[i]
+			break
+		}
+	}
+	if transcriptChunk == nil {
+		t.Fatal("expected a transcript chunk upload")
+	}
+	if transcriptChunk.Metadata == nil {
+		t.Fatal("transcript chunk carried no metadata")
+	}
+	if transcriptChunk.Metadata.LatestMessageAt == nil {
+		t.Error("transcript chunk metadata.latest_message_at is nil; want the file mtime")
+	} else if !transcriptChunk.Metadata.LatestMessageAt.Equal(mtime) {
+		t.Errorf("metadata.latest_message_at = %v, want file mtime %v",
+			transcriptChunk.Metadata.LatestMessageAt, mtime)
+	}
+	if transcriptChunk.Metadata.Model != "composer-2.5-fast" {
+		t.Errorf("metadata.model = %q, want %q", transcriptChunk.Metadata.Model, "composer-2.5-fast")
+	}
+}
+
 // TestCursorDaemonSyncsSubagentSidechain proves T6 end to end: a subagent JSONL
 // file at <root-dir>/subagents/<sub-id>.jsonl is discovered each SyncAll cycle
 // and uploaded as a file_type=agent sidechain alongside the root transcript,

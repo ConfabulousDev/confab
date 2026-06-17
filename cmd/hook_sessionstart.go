@@ -140,6 +140,14 @@ func buildStandardLaunchArgs(p provider.Provider, r io.Reader) (*daemonLaunchInp
 		CWD:            in.CWD(),
 	}
 
+	// Cursor's only model signal is the sessionStart payload (its JSONL carries
+	// none). Read it via an optional type-assert so the shared HookInput surface
+	// stays minimal (mirrors Opencode's SessionParentID()). Empty for providers
+	// without a Model() accessor.
+	if m, ok := in.(interface{ Model() string }); ok {
+		launch.Model = m.Model()
+	}
+
 	if launch.ExternalID != "" {
 		rootID, rootPath, _ := p.WalkUpToRoot(launch.ExternalID)
 		if rootID != "" && rootID != launch.ExternalID {
@@ -294,6 +302,7 @@ func runDaemon(hookInputJSON string) error {
 		TranscriptPath:     launch.TranscriptPath,
 		CWD:                launch.CWD,
 		ConfigDir:          launch.ConfigDir,
+		Model:              launch.Model,
 		ParentPID:          launch.ParentPID,
 		SyncInterval:       syncInterval,
 		SyncIntervalJitter: syncJitter,

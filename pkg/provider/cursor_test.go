@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ConfabulousDev/confab/pkg/config"
 	"github.com/ConfabulousDev/confab/pkg/redactor"
@@ -33,21 +34,29 @@ const cursorTurnEndedLine = `{"type":"turn_ended","status":"success"}`
 type cursorChunkStub struct {
 	fileType            string
 	lines               []string
+	filePath            string
 	setSummary          string
 	setFirstUserMessage string
+	setLatestMessageAt  time.Time
 	summarySet          bool
 	firstUserMessageSet bool
+	latestMessageAtSet  bool
 }
 
 func (s *cursorChunkStub) FileType() string                              { return s.fileType }
 func (s *cursorChunkStub) FirstLine() int                                { return 1 }
 func (s *cursorChunkStub) Lines() []string                               { return s.lines }
+func (s *cursorChunkStub) FilePath() string                              { return s.filePath }
 func (s *cursorChunkStub) FileCodexRollout() *CodexRolloutMetadata       { return nil }
 func (s *cursorChunkStub) SetCodexRolloutMetadata(*CodexRolloutMetadata) {}
 func (s *cursorChunkStub) SetSummary(v string)                           { s.setSummary = v; s.summarySet = true }
 func (s *cursorChunkStub) SetFirstUserMessage(v string) {
 	s.setFirstUserMessage = v
 	s.firstUserMessageSet = true
+}
+func (s *cursorChunkStub) SetLatestMessageAt(ts time.Time) {
+	s.setLatestMessageAt = ts
+	s.latestMessageAtSet = true
 }
 
 func TestCursorExtractMetadata_FirstUserMessageUnwrapped(t *testing.T) {
@@ -148,8 +157,123 @@ func TestCursorAnnotateChunk_NonTranscriptNoOp(t *testing.T) {
 		lines:    []string{cursorUserLine("subagent prompt")},
 	}
 	(Cursor{}).AnnotateChunk(c, false, nil)
-	if c.firstUserMessageSet || c.summarySet {
+	if c.firstUserMessageSet || c.summarySet || c.latestMessageAtSet {
 		t.Error("AnnotateChunk mutated a non-transcript chunk; want no-op")
+	}
+}
+
+// On a transcript chunk, AnnotateChunk sets latest_message_at from the
+// transcript file's mtime (the universal CLI+IDE recency signal — Cursor
+// JSONL lines carry no timestamp, so the backend relies solely on this).
+func TestCursorAnnotateChunk_SetsLatestMessageAtFromFileMtime(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "transcript.jsonl")
+	if err := os.WriteFile(path, []byte(cursorUserLine("hi")+"\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	want := time.Date(2026, 6, 16, 8, 30, 0, 0, time.UTC)
+	if err := os.Chtimes(path, want, want); err != nil {
+		t.Fatalf("Chtimes: %v", err)
+	}
+
+	c := &cursorChunkStub{
+		fileType: FileTypeTranscript,
+		lines:    []string{cursorUserLine("hi")},
+		filePath: path,
+	}
+	(Cursor{}).AnnotateChunk(c, false, nil)
+	if !c.latestMessageAtSet {
+		t.Fatal("latest_message_at not set on transcript chunk")
+	}
+	if !c.setLatestMessageAt.Equal(want) {
+		t.Errorf("latest_message_at = %v, want file mtime %v", c.setLatestMessageAt, want)
+	}
+}
+
+// A missing transcript file (path empty or stat fails) must not error the
+// chunk: latest_message_at is simply left unset.
+func TestCursorAnnotateChunk_LatestMessageAtAbsentWhenNoFile(t *testing.T) {
+	c := &cursorChunkStub{
+		fileType: FileTypeTranscript,
+		lines:    []string{cursorUserLine("hi")},
+		filePath: "/nonexistent/transcript.jsonl",
+	}
+	(Cursor{}).AnnotateChunk(c, false, nil)
+	if c.latestMessageAtSet {
+		t.Error("latest_message_at set despite missing file; want unset")
+	}
+}
+
+// When a CLI meta.json with a title exists for the session, AnnotateChunk
+// sets Summary from that title (redacted). The session id is derived from the
+// transcript file path; meta.json lives at ~/.cursor/chats/<hash>/<id>/meta.json.
+func TestCursorAnnotateChunk_SetsSummaryFromMetaJSONTitle(t *testing.T) {
+	stateDir := t.TempDir()
+	t.Setenv(CursorStateDirEnv, stateDir)
+	const id = "8b8e4d09-c7c9-402f-82c0-a61e11e7d0a5"
+
+	metaDir := filepath.Join(stateDir, "chats", "cc8a6da7d6e3be93253f636ea5916b2e", id)
+	if err := os.MkdirAll(metaDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	meta := `{"schemaVersion":1,"createdAtMs":1781651890835,"hasConversation":true,"title":"Code Explorer","updatedAtMs":1781651975907}`
+	if err := os.WriteFile(filepath.Join(metaDir, "meta.json"), []byte(meta), 0o644); err != nil {
+		t.Fatalf("WriteFile meta: %v", err)
+	}
+
+	transcriptPath := filepath.Join(stateDir, "projects", "ws", "agent-transcripts", id, id+".jsonl")
+	c := &cursorChunkStub{
+		fileType: FileTypeTranscript,
+		lines:    []string{cursorUserLine("hi")},
+		filePath: transcriptPath,
+	}
+	(Cursor{}).AnnotateChunk(c, false, nil)
+	if !c.summarySet || c.setSummary != "Code Explorer" {
+		t.Errorf("Summary = %q (set=%v), want %q", c.setSummary, c.summarySet, "Code Explorer")
+	}
+}
+
+// An IDE session (no meta.json) leaves Summary empty — first_user_message
+// alone keeps it listable. No error.
+func TestCursorAnnotateChunk_SummaryEmptyWhenNoMetaJSON(t *testing.T) {
+	stateDir := t.TempDir()
+	t.Setenv(CursorStateDirEnv, stateDir)
+	const id = "ide-session-no-meta"
+	transcriptPath := filepath.Join(stateDir, "projects", "ws", "agent-transcripts", id, id+".jsonl")
+	c := &cursorChunkStub{
+		fileType: FileTypeTranscript,
+		lines:    []string{cursorUserLine("hi")},
+		filePath: transcriptPath,
+	}
+	(Cursor{}).AnnotateChunk(c, false, nil)
+	if c.summarySet && c.setSummary != "" {
+		t.Errorf("Summary = %q, want empty (no meta.json for IDE session)", c.setSummary)
+	}
+}
+
+// A meta.json that exists but carries no title (also a real shape) leaves
+// Summary empty.
+func TestCursorAnnotateChunk_SummaryEmptyWhenMetaJSONHasNoTitle(t *testing.T) {
+	stateDir := t.TempDir()
+	t.Setenv(CursorStateDirEnv, stateDir)
+	const id = "124c525a-6723-48f8-a683-e71cfc6dae13"
+	metaDir := filepath.Join(stateDir, "chats", "cc8a6da7d6e3be93253f636ea5916b2e", id)
+	if err := os.MkdirAll(metaDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	meta := `{"schemaVersion":1,"createdAtMs":1781654342896,"hasConversation":true,"updatedAtMs":1781654347667}`
+	if err := os.WriteFile(filepath.Join(metaDir, "meta.json"), []byte(meta), 0o644); err != nil {
+		t.Fatalf("WriteFile meta: %v", err)
+	}
+	transcriptPath := filepath.Join(stateDir, "projects", "ws", "agent-transcripts", id, id+".jsonl")
+	c := &cursorChunkStub{
+		fileType: FileTypeTranscript,
+		lines:    []string{cursorUserLine("hi")},
+		filePath: transcriptPath,
+	}
+	(Cursor{}).AnnotateChunk(c, false, nil)
+	if c.summarySet && c.setSummary != "" {
+		t.Errorf("Summary = %q, want empty (meta.json has no title)", c.setSummary)
 	}
 }
 
