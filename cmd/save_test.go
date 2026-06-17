@@ -110,6 +110,17 @@ func setupSaveTestEnv(t *testing.T, serverURL string) (tmpDir string, sessionID 
 	return tmpDir, sessionID, sessionPath
 }
 
+// saveViaDefault resolves the default-binding context and uploads — the common
+// path the legacy tests exercise (no --config-dir).
+func saveViaDefault(t *testing.T, p provider.Provider, ids []string) error {
+	t.Helper()
+	cfg, rp, err := resolveSaveContext(p.Name(), "")
+	if err != nil {
+		return err
+	}
+	return saveSessionsForProvider(cfg, rp, ids)
+}
+
 func TestSaveSessionsByID(t *testing.T) {
 	backend := &saveTestBackend{}
 	server := httptest.NewServer(backend)
@@ -122,7 +133,7 @@ func TestSaveSessionsByID(t *testing.T) {
 		atomic.StoreInt32(&backend.chunkCount, 0)
 		backend.initReqs = nil
 
-		err := saveSessionsForProvider(provider.ClaudeCode{}, []string{sessionID})
+		err := saveViaDefault(t, provider.ClaudeCode{}, []string{sessionID})
 		if err != nil {
 			t.Fatalf("saveSessionsByID failed: %v", err)
 		}
@@ -142,7 +153,7 @@ func TestSaveSessionsByID(t *testing.T) {
 		atomic.StoreInt32(&backend.initCount, 0)
 		atomic.StoreInt32(&backend.chunkCount, 0)
 
-		err := saveSessionsForProvider(provider.ClaudeCode{}, []string{"aaaaaaaa"})
+		err := saveViaDefault(t, provider.ClaudeCode{}, []string{"aaaaaaaa"})
 		if err != nil {
 			t.Fatalf("saveSessionsByID failed: %v", err)
 		}
@@ -177,7 +188,7 @@ func TestSaveSessionsByID(t *testing.T) {
 		atomic.StoreInt32(&backend.initCount, 0)
 		atomic.StoreInt32(&backend.chunkCount, 0)
 
-		err := saveSessionsForProvider(provider.ClaudeCode{}, []string{sessionID1, sessionID2})
+		err := saveViaDefault(t, provider.ClaudeCode{}, []string{sessionID1, sessionID2})
 		if err != nil {
 			t.Fatalf("saveSessionsByID failed: %v", err)
 		}
@@ -191,7 +202,7 @@ func TestSaveSessionsByID(t *testing.T) {
 		atomic.StoreInt32(&backend.initCount, 0)
 
 		// Should not return error, just print error message
-		err := saveSessionsForProvider(provider.ClaudeCode{}, []string{"nonexistent", sessionID})
+		err := saveViaDefault(t, provider.ClaudeCode{}, []string{"nonexistent", sessionID})
 		if err != nil {
 			t.Fatalf("saveSessionsByID should not fail: %v", err)
 		}
@@ -213,7 +224,7 @@ func TestSaveSessionsByID_UploadError(t *testing.T) {
 	_, sessionID, _ := setupSaveTestEnv(t, server.URL)
 
 	// Upload should continue even when individual uploads fail
-	err := saveSessionsForProvider(provider.ClaudeCode{}, []string{sessionID})
+	err := saveViaDefault(t, provider.ClaudeCode{}, []string{sessionID})
 	if err != nil {
 		t.Fatalf("saveSessionsByID should not fail on upload error: %v", err)
 	}
@@ -224,7 +235,7 @@ func TestSaveSessionsByID_NoAuth(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("CONFAB_CONFIG_PATH", filepath.Join(tmpDir, "nonexistent", "config.json"))
 
-	err := saveSessionsForProvider(provider.ClaudeCode{}, []string{"some-session"})
+	err := saveViaDefault(t, provider.ClaudeCode{}, []string{"some-session"})
 	if err == nil {
 		t.Fatal("Expected auth error, got nil")
 	}
@@ -246,7 +257,7 @@ func TestSaveCodexSessionsByID_UploadsWithCodexProvider(t *testing.T) {
 	sessionID := "cccccccc-3333-3333-3333-333333333333"
 	writeCodexTestRollout(t, tmpDir, sessionID, `"thread_source":"user","cwd":"/work/user"`)
 
-	if err := saveSessionsForProvider(provider.Codex{}, []string{"cccccccc"}); err != nil {
+	if err := saveViaDefault(t, provider.Codex{}, []string{"cccccccc"}); err != nil {
 		t.Fatalf("saveSessionsByIDForProvider failed: %v", err)
 	}
 
@@ -312,7 +323,7 @@ func TestSaveCodex_RootUUID_UploadsRootAndAllChildren_RecordsChunksOnBackend(t *
 		WithSessionMeta("/work", "gpt-5").
 		WithUserMessage("plan b")
 
-	if err := saveSessionsForProvider(provider.Codex{}, []string{rootID}); err != nil {
+	if err := saveViaDefault(t, provider.Codex{}, []string{rootID}); err != nil {
 		t.Fatalf("save: %v", err)
 	}
 	if backend.initCount != 1 {
@@ -343,7 +354,7 @@ func TestSaveCodex_SubagentUUID_ResolvesToRoot_StillUploadsWholeTree(t *testing.
 	fixture.AddSubagent(rootID, childID, codextest.SubagentOpts{AgentRole: "reviewer"}).
 		WithSessionMeta("/work", "gpt-5").WithUserMessage("hi child")
 
-	if err := saveSessionsForProvider(provider.Codex{}, []string{childID}); err != nil {
+	if err := saveViaDefault(t, provider.Codex{}, []string{childID}); err != nil {
 		t.Fatalf("save: %v", err)
 	}
 	if backend.initReqs[0].ExternalID != rootID {
@@ -367,7 +378,7 @@ func TestSaveCodex_MultipleSessionsArgs_Independent(t *testing.T) {
 	fixture.AddRoot(root1).WithSessionMeta("/a", "gpt-5").WithUserMessage("a")
 	fixture.AddRoot(root2).WithSessionMeta("/b", "gpt-5").WithUserMessage("b")
 
-	if err := saveSessionsForProvider(provider.Codex{}, []string{root1, root2}); err != nil {
+	if err := saveViaDefault(t, provider.Codex{}, []string{root1, root2}); err != nil {
 		t.Fatalf("save: %v", err)
 	}
 	if backend.initCount != 2 {
@@ -397,7 +408,7 @@ func TestSaveCodex_OneSessionFails_OthersContinue(t *testing.T) {
 	fixture.AddRoot(rootID).WithSessionMeta("/work", "gpt-5").WithUserMessage("ok")
 
 	unknown := "ffffffff-ffff-ffff-ffff-ffffffffffff"
-	if err := saveSessionsForProvider(provider.Codex{}, []string{unknown, rootID}); err != nil {
+	if err := saveViaDefault(t, provider.Codex{}, []string{unknown, rootID}); err != nil {
 		t.Fatalf("save should not return error on per-session failure: %v", err)
 	}
 	if backend.initCount != 1 {
@@ -423,7 +434,7 @@ func TestSaveCodex_StateDBMissing_FallsBackToSingleRolloutSync_NoCrash(t *testin
 	// branch is exercised on this test's first lookup.
 	provider.ResetStateDBPathCacheForTest()
 
-	if err := saveSessionsForProvider(provider.Codex{}, []string{rootID}); err != nil {
+	if err := saveViaDefault(t, provider.Codex{}, []string{rootID}); err != nil {
 		t.Fatalf("save should still work with missing state DB: %v", err)
 	}
 	if backend.initCount != 1 {
