@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 
 	_ "modernc.org/sqlite"
 )
@@ -87,6 +88,17 @@ func (r *OpenCodeDBReader) ReadSession(ctx context.Context, sessionID, sinceMess
 	}
 	defer rows.Close()
 
+	return scanEnvelopes(rows)
+}
+
+// scanEnvelopes assembles ocRawEnvelopes from a (message, part) LEFT JOIN
+// result set ordered by (message.time_created, message.id, part.id). Each row
+// carries the message columns plus nullable part columns; the loop groups
+// consecutive rows by message id and injects id/sessionID/messageID into the
+// raw JSON (these live in DB columns, never the stored JSON). Shared by
+// ReadSession (full/incremental materialization) and FirstUserMessageText
+// (bounded leading read) so both produce byte-identical envelope shapes.
+func scanEnvelopes(rows *sql.Rows) ([]ocRawEnvelope, error) {
 	// haveCur acts as a "first row not yet processed" sentinel: it's distinct
 	// from the empty-string initial value of curMsgID, so the very first row
 	// always triggers the flush-and-start path even if (pathologically) mID
@@ -231,6 +243,192 @@ func (r *OpenCodeDBReader) ListDescendants(ctx context.Context, rootSessionID st
 		return nil, fmt.Errorf("iterate opencode descendant rows: %w", err)
 	}
 	return ids, nil
+}
+
+// OpenCodeRootSession is one row returned by ListRootSessions: the minimal
+// columns offline session discovery (ScanSessions) needs to build a
+// SessionInfo. FirstUserMessage is fetched separately (a bounded secondary
+// read) because it lives in the message/part tables, not the session row.
+type OpenCodeRootSession struct {
+	ID          string
+	Directory   string
+	TimeCreated int64 // unix epoch seconds (session.time_created)
+}
+
+// ListRootSessions enumerates root sessions (parent_id IS NULL), newest first,
+// for offline `confab list --provider opencode`. Children are excluded,
+// mirroring the daemon's root-only spawn rule. Returns a clear error when the
+// DB is missing/unreadable so the list command can report it (manual commands
+// surface DB errors rather than the daemon's Warn-and-continue).
+func (r *OpenCodeDBReader) ListRootSessions(ctx context.Context) ([]OpenCodeRootSession, error) {
+	db, err := r.openRO()
+	if err != nil {
+		return nil, err
+	}
+	defer db.Close()
+
+	const query = `
+		SELECT id, directory, time_created
+		FROM session
+		WHERE parent_id IS NULL
+		ORDER BY time_created DESC`
+	rows, err := db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("query opencode root sessions: %w", err)
+	}
+	defer rows.Close()
+
+	var roots []OpenCodeRootSession
+	for rows.Next() {
+		var row OpenCodeRootSession
+		if err := rows.Scan(&row.ID, &row.Directory, &row.TimeCreated); err != nil {
+			return nil, fmt.Errorf("scan opencode root session row: %w", err)
+		}
+		roots = append(roots, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate opencode root session rows: %w", err)
+	}
+	return roots, nil
+}
+
+// FirstUserMessageText returns the first user message's first text part for a
+// session, used to populate the list TITLE column (OpenCode has no summary).
+// Bounded: it reads only the small leading slice of the session needed to find
+// the first user text, via a single LEFT JOIN over the user message with the
+// lowest message id. Returns ("", nil) when there is no usable user text — the
+// list TITLE is then blank, not an error.
+//
+// firstUserMessageScanLimit caps how many leading messages are scanned so the
+// secondary per-session read stays cheap even for long sessions.
+func (r *OpenCodeDBReader) FirstUserMessageText(ctx context.Context, sessionID string) (string, error) {
+	db, err := r.openRO()
+	if err != nil {
+		return "", err
+	}
+	defer db.Close()
+
+	// Pull the first few messages with their parts, ordered the same way
+	// ReadSession orders them, then reuse the shared extraction helper that
+	// AnnotateChunk uses so offline and live first-user-message logic stay
+	// identical.
+	const query = `
+		SELECT m.id, m.session_id, m.data, p.id, p.session_id, p.data
+		FROM (
+			SELECT id, session_id, data, time_created
+			FROM message
+			WHERE session_id = ?
+			ORDER BY time_created, id
+			LIMIT ?
+		) m
+		LEFT JOIN part p ON p.message_id = m.id
+		ORDER BY m.time_created, m.id, p.id`
+	rows, err := db.QueryContext(ctx, query, sessionID, firstUserMessageScanLimit)
+	if err != nil {
+		return "", fmt.Errorf("query opencode first user message for %s: %w", sessionID, err)
+	}
+	defer rows.Close()
+
+	envs, err := scanEnvelopes(rows)
+	if err != nil {
+		return "", err
+	}
+	lines := make([]string, 0, len(envs))
+	for _, e := range envs {
+		line, err := json.Marshal(e)
+		if err != nil {
+			return "", fmt.Errorf("marshal envelope: %w", err)
+		}
+		lines = append(lines, string(line))
+	}
+	return ocFirstUserMessageText(lines)
+}
+
+// firstUserMessageScanLimit bounds the FirstUserMessageText secondary read.
+// The first user message is the very first conversation turn, so a small cap
+// always covers it while keeping the per-session list cost negligible.
+const firstUserMessageScanLimit = 8
+
+// MatchSessionIDs returns every session id (root or descendant) whose id has
+// partialID as a prefix, ordered for determinism. Used by FindSessionByID to
+// resolve a partial id the way the file-based providers do. An empty partialID
+// matches everything (the caller then reports ambiguity unless there is
+// exactly one session).
+func (r *OpenCodeDBReader) MatchSessionIDs(ctx context.Context, partialID string) ([]string, error) {
+	db, err := r.openRO()
+	if err != nil {
+		return nil, err
+	}
+	defer db.Close()
+
+	// LIKE with an escaped prefix; partialID is a session id, not free text,
+	// but escape LIKE metacharacters defensively so a stray %/_ can't widen
+	// the match.
+	const query = `SELECT id FROM session WHERE id LIKE ? ESCAPE '\' ORDER BY id`
+	rows, err := db.QueryContext(ctx, query, likePrefix(partialID))
+	if err != nil {
+		return nil, fmt.Errorf("query opencode session ids for %q: %w", partialID, err)
+	}
+	defer rows.Close()
+
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan opencode session id row: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate opencode session id rows: %w", err)
+	}
+	return ids, nil
+}
+
+// ResolveOpencodeRoot walks session.parent_id up from sessionID to the topmost
+// root (parent_id IS NULL) and returns its id. A session that is already a root
+// returns itself. Bounded by opencodeRootWalkLimit as a cycle defense. Used by
+// FindSessionByID so passing any descendant id resolves to the user-facing
+// root (consistent with the root+descendants save scope).
+func (r *OpenCodeDBReader) ResolveOpencodeRoot(ctx context.Context, sessionID string) (string, error) {
+	db, err := r.openRO()
+	if err != nil {
+		return "", err
+	}
+	defer db.Close()
+
+	cur := sessionID
+	for depth := 0; depth < opencodeRootWalkLimit; depth++ {
+		const query = `SELECT COALESCE(parent_id, '') FROM session WHERE id = ?`
+		var parent string
+		err := db.QueryRowContext(ctx, query, cur).Scan(&parent)
+		if errors.Is(err, sql.ErrNoRows) {
+			// cur is not in the session table. If it's the original id, the
+			// caller already matched it via MatchSessionIDs, so this only
+			// happens if a parent_id dangles — treat cur as the root.
+			return cur, nil
+		}
+		if err != nil {
+			return "", fmt.Errorf("walk opencode parent of %s: %w", cur, err)
+		}
+		if parent == "" {
+			return cur, nil
+		}
+		cur = parent
+	}
+	return "", fmt.Errorf("opencode parent walk for %s exceeded depth %d (possible cycle)", sessionID, opencodeRootWalkLimit)
+}
+
+// opencodeRootWalkLimit caps the parent_id walk in ResolveOpencodeRoot.
+// Realistic OpenCode subagent trees are 1 deep; the cap defends against a
+// pathological parent_id cycle.
+const opencodeRootWalkLimit = 100
+
+// likePrefix builds a SQL LIKE pattern that prefix-matches s, escaping the
+// LIKE metacharacters % _ \ so they are treated literally (ESCAPE '\').
+func likePrefix(s string) string {
+	r := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+	return r.Replace(s) + "%"
 }
 
 // ReadSessionInfo fetches a session row's directory and parent_id from the

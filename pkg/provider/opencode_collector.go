@@ -162,6 +162,24 @@ func (c *OpenCodeCollector) reconcile(ctx context.Context) (int, error) {
 	return written, nil
 }
 
+// Materialize runs a single seed + reconcile pass for one OpenCode session,
+// writing every currently-complete message to outputPath, and returns the
+// number of lines appended on this pass. It is the offline counterpart to Run
+// (no ticker, no parent process): `confab save --provider opencode` calls it to
+// produce the materialized JSONL the file-based sync engine then uploads.
+//
+// Reuses the collector's reconcile — same completeness gating, ULID ordering,
+// stop-at-first-incomplete, and idempotent re-seed from any existing file — so
+// offline and live materialization can never diverge. interval is only used as
+// the warn cadence floor; pass 0 for the default.
+func MaterializeOpenCodeSession(ctx context.Context, source ocSource, sessionID, outputPath string, interval time.Duration) (int, error) {
+	c := NewOpenCodeCollector(source, sessionID, outputPath, interval)
+	if err := c.seed(); err != nil {
+		return 0, err
+	}
+	return c.reconcile(ctx)
+}
+
 // Run seeds, then reconciles on every tick until ctx is cancelled. There
 // is no remote stream to reconnect to — the SQLite DB is local and the
 // poll is the only liveness mechanism.

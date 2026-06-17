@@ -134,6 +134,14 @@ func uploadSingleSession(cfg *config.UploadConfig, providerName, sessionID, tran
 		return result
 	}
 
+	// OpenCode offline save (t6d5): wire the descendant registrar so SyncAll's
+	// DiscoverDescendants materializes + registers the subagent tree as agent
+	// sidechains (parity with live capture). No-op for other providers.
+	if err := setupOpencodeSaveEngine(engine, providerName); err != nil {
+		result.Error = err
+		return result
+	}
+
 	result.InternalID = engine.SessionID()
 
 	chunks, err := engine.SyncAll()
@@ -146,7 +154,7 @@ func uploadSingleSession(cfg *config.UploadConfig, providerName, sessionID, tran
 }
 
 func init() {
-	saveCmd.Flags().StringVar(&saveProviderName, "provider", "", "Provider to save sessions from (claude-code, codex, or cursor; opencode is live-sync only)")
+	saveCmd.Flags().StringVar(&saveProviderName, "provider", "", "Provider to save sessions from (claude-code, codex, cursor, or opencode)")
 	saveCmd.MarkFlagRequired("provider")
 	saveCmd.Flags().StringVar(&saveConfigDir, "config-dir", "", "Save into a non-default backend bound to this config dir (requires --provider; claude-code only)")
 	rootCmd.AddCommand(saveCmd)

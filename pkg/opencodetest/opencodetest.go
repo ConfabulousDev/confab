@@ -143,15 +143,23 @@ func (b *Builder) AddSession(id, parentID string) *Builder {
 // surfaces. Used by CF-549 tests that assert on directory + parent_id.
 func (b *Builder) AddSessionWithDir(id, parentID, directory string) *Builder {
 	b.t.Helper()
+	return b.AddSessionAt(id, parentID, directory, 0)
+}
+
+// AddSessionAt is AddSessionWithDir plus an explicit time_created (unix
+// epoch). Used by offline-discovery tests (t6d5) that assert on the
+// newest-first ordering ListRootSessions returns and on SessionInfo.ModTime.
+func (b *Builder) AddSessionAt(id, parentID, directory string, timeCreated int64) *Builder {
+	b.t.Helper()
 	var pid any
 	if parentID != "" {
 		pid = parentID
 	}
 	const stmt = `INSERT INTO session
 		(id, project_id, parent_id, slug, directory, title, version, time_created, time_updated)
-		VALUES (?, 'proj_test', ?, 'slug', ?, 'title', '1.15.13', 0, 0)`
-	if _, err := b.db.Exec(stmt, id, pid, directory); err != nil {
-		b.t.Fatalf("opencodetest: AddSessionWithDir(%q): %v", id, err)
+		VALUES (?, 'proj_test', ?, 'slug', ?, 'title', '1.15.13', ?, ?)`
+	if _, err := b.db.Exec(stmt, id, pid, directory, timeCreated, timeCreated); err != nil {
+		b.t.Fatalf("opencodetest: AddSessionAt(%q): %v", id, err)
 	}
 	return b
 }

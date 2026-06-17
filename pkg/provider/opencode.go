@@ -311,17 +311,104 @@ func (p Opencode) ReadSessionHookInput(r io.Reader) (*types.OpenCodeHookInput, e
 	return &input, nil
 }
 
-// ScanSessions is unsupported for OpenCode: live capture happens via the
-// sync daemon's SQLite-backed collector, and offline manual mode is
-// deferred (would require its own SQLite session enumeration).
+// opencodeScanTimeout bounds the SQLite reads ScanSessions/FindSessionByID
+// issue for offline manual commands. Generous enough to survive a busy DB
+// (5s busy_timeout on the read connection plus margin), bounded so a wedged DB
+// fails the command cleanly rather than hanging.
+const opencodeScanTimeout = 10 * time.Second
+
+// ScanSessions enumerates OpenCode root sessions from the local SQLite DB for
+// `confab list --provider opencode` (t6d5). Children are excluded (parent_id IS
+// NULL), mirroring the daemon's root-only rule. Each row maps to a SessionInfo
+// whose TITLE source is the first user message (OpenCode has no summary), read
+// per-session via a bounded secondary query. The DB is opened read-only and
+// honors CONFAB_OPENCODE_DB; a missing/unreadable DB returns a clear error.
+//
+// TranscriptPath is left empty here: OpenCode has no on-disk transcript, so the
+// path is produced lazily by FindSessionByID (which materializes on demand).
 func (Opencode) ScanSessions() ([]SessionInfo, error) {
-	return nil, fmt.Errorf("opencode: manual session scan not supported (sessions sync live via the daemon; offline manual mode is not yet implemented)")
+	dbPath, err := OpenCodeDBPath()
+	if err != nil {
+		return nil, err
+	}
+	reader := NewOpenCodeDBReader(dbPath)
+
+	ctx, cancel := context.WithTimeout(context.Background(), opencodeScanTimeout)
+	defer cancel()
+
+	roots, err := reader.ListRootSessions(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	sessions := make([]SessionInfo, 0, len(roots))
+	for _, row := range roots {
+		fum, err := reader.FirstUserMessageText(ctx, row.ID)
+		if err != nil {
+			// A per-session preview failure shouldn't drop the session from
+			// the list; degrade to a blank TITLE.
+			logger.Debug("opencode: first user message read failed for %s: %v", row.ID, err)
+			fum = ""
+		}
+		sessions = append(sessions, SessionInfo{
+			SessionID:        row.ID,
+			ProjectPath:      row.Directory,
+			ModTime:          time.Unix(row.TimeCreated, 0),
+			FirstUserMessage: fum,
+		})
+	}
+	return sessions, nil
 }
 
-// FindSessionByID is unsupported for OpenCode for the same reason as
-// ScanSessions; manual `confab save <id>` is deferred.
-func (Opencode) FindSessionByID(string) (string, string, error) {
-	return "", "", fmt.Errorf("opencode: manual session lookup not supported (sessions sync live via the daemon; offline manual mode is not yet implemented)")
+// FindSessionByID resolves a full or partial OpenCode session id to its full
+// ROOT id, materializes the root's transcript to
+// ~/.confab/opencode/<root>/messages.jsonl, and returns (rootID, path). A
+// descendant id resolves up to its root (consistent with the root+descendants
+// save scope); descendants themselves are materialized + registered later by
+// the save path (saveOpencodeDescendants). Prefix match mirrors the other
+// providers: a unique prefix is required (ambiguous → error). Honors
+// CONFAB_OPENCODE_DB; a missing/unreadable DB returns a clear error.
+func (Opencode) FindSessionByID(partialID string) (string, string, error) {
+	dbPath, err := OpenCodeDBPath()
+	if err != nil {
+		return "", "", err
+	}
+	reader := NewOpenCodeDBReader(dbPath)
+
+	ctx, cancel := context.WithTimeout(context.Background(), opencodeScanTimeout)
+	defer cancel()
+
+	rootID, err := resolveOpencodeRoot(ctx, reader, partialID)
+	if err != nil {
+		return "", "", err
+	}
+
+	outputPath, err := confabpath.Subpath("opencode", rootID, "messages.jsonl")
+	if err != nil {
+		return "", "", err
+	}
+	if _, err := MaterializeOpenCodeSession(ctx, reader, rootID, outputPath, 0); err != nil {
+		return "", "", fmt.Errorf("materialize opencode session %s: %w", rootID, err)
+	}
+	return rootID, outputPath, nil
+}
+
+// resolveOpencodeRoot resolves a (partial) session id to its full root id. It
+// prefix-matches against ALL sessions (roots and descendants) so a user can
+// pass any id from a tree; a descendant match walks up to its root via
+// ResolveOpencodeRoot. A unique match is required.
+func resolveOpencodeRoot(ctx context.Context, reader *OpenCodeDBReader, partialID string) (string, error) {
+	matches, err := reader.MatchSessionIDs(ctx, partialID)
+	if err != nil {
+		return "", err
+	}
+	if len(matches) == 0 {
+		return "", fmt.Errorf("session not found: %s", partialID)
+	}
+	if len(matches) > 1 {
+		return "", fmt.Errorf("ambiguous session ID '%s' matches %d sessions", partialID, len(matches))
+	}
+	return reader.ResolveOpencodeRoot(ctx, matches[0])
 }
 
 func (Opencode) ExtractMetadata([]string) SessionMetadata {
