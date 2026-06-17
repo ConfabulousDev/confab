@@ -71,6 +71,22 @@ type ChunkMetadata struct {
 	Summary          string                `json:"summary,omitempty"`
 	FirstUserMessage string                `json:"first_user_message,omitempty"`
 	CodexRollout     *CodexRolloutMetadata `json:"codex_rollout,omitempty"`
+
+	// LatestMessageAt carries an explicit session timestamp for providers
+	// whose transcript lines have no per-line timestamp (Cursor). The backend
+	// feeds session.last_message_at from this on transcript chunks, since it
+	// opts Cursor out of per-line timestamp extraction. Serialized RFC3339
+	// (time.Time default) to match the backend's *time.Time reader; omitted
+	// when nil. Cursor sets it from the transcript file mtime.
+	LatestMessageAt *time.Time `json:"latest_message_at,omitempty"`
+
+	// Model names the LLM that produced this session (Cursor only; sourced
+	// from the sessionStart hook payload). Cursor JSONL carries no model field,
+	// so this is the only model signal. Set engine-side from daemon config on
+	// transcript chunks; omitted when empty, so other providers send nothing.
+	// NOTE: accepted on the wire but not yet persisted by the backend (pending
+	// a confab-web migration), so it is currently forward-looking/inert.
+	Model string `json:"model,omitempty"`
 }
 
 // CodexRolloutMetadata is the per-rollout metadata transmitted on the FIRST

@@ -3,6 +3,7 @@ package provider
 import (
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/ConfabulousDev/confab/pkg/config"
 )
@@ -108,10 +109,17 @@ type ChunkView interface {
 	FileType() string
 	FirstLine() int
 	Lines() []string
+	// FilePath is the absolute path of the source file this chunk was read
+	// from. Cursor uses it to stat the transcript mtime (latest_message_at)
+	// and to derive the session id for the CLI meta.json title lookup.
+	FilePath() string
 	FileCodexRollout() *CodexRolloutMetadata
 	SetCodexRolloutMetadata(*CodexRolloutMetadata)
 	SetSummary(string)
 	SetFirstUserMessage(string)
+	// SetLatestMessageAt records an explicit session timestamp on the chunk
+	// metadata (Cursor only — its JSONL lines have no per-line timestamp).
+	SetLatestMessageAt(time.Time)
 }
 
 // SummaryLink describes a parent-session summary link extracted from a

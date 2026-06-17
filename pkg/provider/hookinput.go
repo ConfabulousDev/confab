@@ -50,6 +50,12 @@ func (a cursorHookInputAdapter) CWD() string {
 func (a cursorHookInputAdapter) HookEventName() string { return a.inner.HookEventName }
 func (a cursorHookInputAdapter) ParentPID() int        { return a.inner.ParentPID }
 
+// Model exposes the model from the Cursor sessionStart payload. It is NOT part
+// of the shared HookInput interface (only Cursor has it); the SessionStart hook
+// handler reads it via an optional type-assert, mirroring Opencode's
+// SessionParentID() accessor (kept off the shared surface to keep it minimal).
+func (a cursorHookInputAdapter) Model() string { return a.inner.Model }
+
 var (
 	_ HookInput = claudeHookInputAdapter{}
 	_ HookInput = codexHookInputAdapter{}

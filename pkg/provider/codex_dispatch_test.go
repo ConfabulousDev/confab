@@ -3,6 +3,7 @@ package provider_test
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ConfabulousDev/confab/pkg/codextest"
 	"github.com/ConfabulousDev/confab/pkg/provider"
@@ -258,22 +259,26 @@ type stubChunkView struct {
 	fileType      string
 	firstLine     int
 	lines         []string
+	filePath      string
 	codexFromFile *provider.CodexRolloutMetadata
 
 	setRollout          *provider.CodexRolloutMetadata
 	setSummary          string
 	setFirstUserMessage string
+	setLatestMessageAt  time.Time
 }
 
 func (s *stubChunkView) FileType() string                                 { return s.fileType }
 func (s *stubChunkView) FirstLine() int                                   { return s.firstLine }
 func (s *stubChunkView) Lines() []string                                  { return s.lines }
+func (s *stubChunkView) FilePath() string                                 { return s.filePath }
 func (s *stubChunkView) FileCodexRollout() *provider.CodexRolloutMetadata { return s.codexFromFile }
 func (s *stubChunkView) SetCodexRolloutMetadata(m *provider.CodexRolloutMetadata) {
 	s.setRollout = m
 }
-func (s *stubChunkView) SetSummary(v string)          { s.setSummary = v }
-func (s *stubChunkView) SetFirstUserMessage(v string) { s.setFirstUserMessage = v }
+func (s *stubChunkView) SetSummary(v string)            { s.setSummary = v }
+func (s *stubChunkView) SetFirstUserMessage(v string)   { s.setFirstUserMessage = v }
+func (s *stubChunkView) SetLatestMessageAt(t time.Time) { s.setLatestMessageAt = t }
 
 func TestCodex_AnnotateChunk_FirstChunkAttachesCodexRollout(t *testing.T) {
 	roll := &provider.CodexRolloutMetadata{ThreadUUID: "tA", RolloutPath: "/x.jsonl"}

@@ -41,6 +41,11 @@ type Engine struct {
 	initialized          bool
 	sentFirstUserMessage bool
 
+	// model is the session-constant LLM model name (Cursor only; sourced from
+	// the sessionStart hook). When non-empty, the engine stamps it onto every
+	// transcript chunk's metadata. Empty for providers that send no model.
+	model string
+
 	// Workflow-file capability gating (CF-533). The backend capability is
 	// probed lazily (only when the Claude provider finds a workflow run dir)
 	// and cached for the engine's lifetime == one backend + one session.
@@ -83,6 +88,10 @@ type EngineConfig struct {
 	ExternalID     string
 	TranscriptPath string
 	CWD            string
+	// Model is the session-constant LLM model name (Cursor only; sourced from
+	// the sessionStart hook payload). Empty for other providers. The engine
+	// stamps it onto transcript chunk metadata when non-empty.
+	Model string
 }
 
 // New creates a new sync engine with the given configuration.
@@ -116,6 +125,7 @@ func New(uploadCfg *config.UploadConfig, engineCfg EngineConfig) (*Engine, error
 		externalID:     engineCfg.ExternalID,
 		transcriptPath: engineCfg.TranscriptPath,
 		cwd:            engineCfg.CWD,
+		model:          engineCfg.Model,
 	}, nil
 }
 
@@ -134,6 +144,7 @@ func NewWithBackend(backend Backend, r *redactor.Redactor, engineCfg EngineConfi
 		externalID:     engineCfg.ExternalID,
 		transcriptPath: engineCfg.TranscriptPath,
 		cwd:            engineCfg.CWD,
+		model:          engineCfg.Model,
 	}, nil
 }
 
@@ -162,6 +173,13 @@ func (cv *chunkView) FileType() string { return cv.chunk.FileType }
 func (cv *chunkView) FirstLine() int   { return cv.chunk.FirstLine }
 func (cv *chunkView) Lines() []string  { return cv.chunk.Lines }
 
+func (cv *chunkView) FilePath() string {
+	if cv.file == nil {
+		return ""
+	}
+	return cv.file.Path
+}
+
 func (cv *chunkView) FileCodexRollout() *provider.CodexRolloutMetadata {
 	if cv.file == nil {
 		return nil
@@ -179,6 +197,10 @@ func (cv *chunkView) SetSummary(s string) {
 
 func (cv *chunkView) SetFirstUserMessage(s string) {
 	ensureChunkMetadata(cv.chunk).FirstUserMessage = s
+}
+
+func (cv *chunkView) SetLatestMessageAt(t time.Time) {
+	ensureChunkMetadata(cv.chunk).LatestMessageAt = &t
 }
 
 // Init initializes the sync session with the backend.
@@ -358,6 +380,14 @@ func (e *Engine) SyncAll() (int, error) {
 				)
 				for _, link := range annotation.SummaryLinks {
 					e.linkSummaryToPreviousSession(link.Summary, link.LeafUUID)
+				}
+
+				// Stamp the session-constant model onto transcript chunks
+				// (Cursor only — its model comes from the sessionStart hook,
+				// not the transcript). Generic + omitempty: providers with an
+				// empty model send nothing, so no provider branch lives here.
+				if e.model != "" && chunk.FileType == provider.FileTypeTranscript {
+					ensureChunkMetadata(chunk).Model = e.model
 				}
 
 				// Upload chunk

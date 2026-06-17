@@ -58,6 +58,26 @@ func TestOpencodeHookInputAdapter(t *testing.T) {
 	}
 }
 
+// TestCursorHookInputAdapter_Model verifies the cursor adapter exposes the
+// model from the sessionStart payload via an optional Model() accessor — the
+// universal model signal (Cursor JSONL carries none), read by the hook handler
+// to plumb it onto chunk metadata.
+func TestCursorHookInputAdapter_Model(t *testing.T) {
+	src := &types.CursorHookInput{
+		SessionID:      "cursor-session-abc",
+		WorkspaceRoots: []string{"/work/cursor"},
+		Model:          "composer-2.5-fast",
+	}
+	a := cursorHookInputAdapter{inner: src}
+
+	if got := a.Model(); got != "composer-2.5-fast" {
+		t.Errorf("Model() = %q, want %q", got, "composer-2.5-fast")
+	}
+	if got := a.CWD(); got != "/work/cursor" {
+		t.Errorf("CWD() = %q, want first workspace root", got)
+	}
+}
+
 func TestCodexHookInputAdapter(t *testing.T) {
 	src := &types.CodexHookInput{
 		SessionID:      "11111111-1111-1111-1111-111111111111",
