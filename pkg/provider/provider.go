@@ -11,6 +11,7 @@ const (
 	NameClaudeCode = "claude-code"
 	NameCodex      = "codex"
 	NameOpencode   = "opencode"
+	NameCursor     = "cursor"
 )
 
 // HookInput is the provider-agnostic view of a hook payload, exposing the
@@ -238,6 +239,7 @@ var registry = map[string]Provider{
 	NameClaudeCode: ClaudeCode{},
 	NameCodex:      Codex{},
 	NameOpencode:   Opencode{},
+	NameCursor:     Cursor{},
 }
 
 // Get returns the registered Provider for name. An empty string resolves
@@ -248,8 +250,8 @@ func Get(name string) (Provider, error) {
 	}
 	p, ok := registry[name]
 	if !ok {
-		return nil, fmt.Errorf("unsupported provider %q (expected %q, %q, or %q)",
-			name, NameClaudeCode, NameCodex, NameOpencode)
+		return nil, fmt.Errorf("unsupported provider %q (expected %q, %q, %q, or %q)",
+			name, NameClaudeCode, NameCodex, NameOpencode, NameCursor)
 	}
 	return p, nil
 }
