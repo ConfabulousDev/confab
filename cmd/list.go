@@ -113,6 +113,7 @@ func formatDuration(d time.Duration) string {
 
 func init() {
 	listCmd.Flags().StringVarP(&listDuration, "duration", "d", "", "Filter sessions by duration (e.g., 5d, 12h, 30m)")
-	listCmd.Flags().StringVar(&listProviderName, "provider", provider.NameClaudeCode, "Provider to list sessions from (claude-code, codex, or cursor; opencode is live-sync only)")
+	listCmd.Flags().StringVar(&listProviderName, "provider", "", "Provider to list sessions from (claude-code, codex, or cursor; opencode is live-sync only)")
+	listCmd.MarkFlagRequired("provider")
 	rootCmd.AddCommand(listCmd)
 }

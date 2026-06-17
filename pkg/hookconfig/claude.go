@@ -184,13 +184,20 @@ func InstallSyncHooks(settingsPath string) error {
 	if err != nil {
 		return fmt.Errorf("failed to get binary path: %w", err)
 	}
+	// Installed strings carry an explicit `--provider claude-code` (m9mb), like
+	// codex/cursor already do. The idempotency/uninstall matchers below use
+	// Contains "hook session-start"/"session-end", so they still match both this
+	// new shape and old no-flag installs.
+	// The provider literal mirrors pkg/hookconfig/codex.go's `--provider codex`
+	// (a constant would require importing pkg/provider, which imports this
+	// package — an import cycle).
 	sessionStartHook := map[string]any{
 		"type":    "command",
-		"command": fmt.Sprintf("%s hook session-start", binaryPath),
+		"command": fmt.Sprintf("%s hook session-start --provider claude-code", binaryPath),
 	}
 	sessionEndHook := map[string]any{
 		"type":    "command",
-		"command": fmt.Sprintf("%s hook session-end", binaryPath),
+		"command": fmt.Sprintf("%s hook session-end --provider claude-code", binaryPath),
 	}
 	return config.AtomicUpdateSettingsAt(settingsPath, func(settings *config.ClaudeSettings) error {
 		if err := installHook(settings, sessionStartHook, "SessionStart", "*", true); err != nil {
