@@ -7,7 +7,7 @@ CLI command layer built on [Cobra](https://github.com/spf13/cobra). Each file de
 | File | Role |
 |------|------|
 | `root.go` | Root command, persistent pre/post hooks, logger init |
-| `helpers.go` | Shared command helpers for authenticated HTTP clients and session API error translation |
+| `helpers.go` | Shared command helpers for authenticated HTTP clients and session API error translation. `newAuthedClient()` (default binding) → `newAuthedClientForBinding(Binding)` → `clientForFlags(provider, configDir)` resolves the retrieval commands' `--provider`/`--config-dir` binding selection (kata szwk). |
 | `hook.go` | Parent command for hook handlers (`confab hook <type>`) |
 | `hook_sessionstart.go` | `session-start` hook: spawns sync daemon. Provider-agnostic — selects via `--provider` flag and routes through `provider.Provider`. |
 | `hook_sessionend.go` | `session-end` hook: stops sync daemon. Claude, OpenCode, and Cursor handle it (OpenCode's plugin fires it on `dispose`, routed to `sessionEndOpencode`; Cursor routes to `sessionEndCursor`, which reads the `CursorHookInput`, forwards the `reason` as a session_end event, and stops the daemon under the `cursor` provider namespace); Codex shutdown is parent-PID driven and explicitly rejects this command. For Cursor the CLI `sessionEnd` is reliable, but the IDE only fires it on window/app close (not per chat-tab) — so the daemon's parent-PID liveness on `Cursor.app` is the primary IDE shutdown, with `sessionEnd` a clean bonus (kata 6kys). |
@@ -28,7 +28,7 @@ CLI command layer built on [Cobra](https://github.com/spf13/cobra). Each file de
 | `install.go` | Copy binary to `~/.local/bin/` |
 | `update.go` | Check/install updates from GitHub Releases |
 | `retro.go` | `confab retro` — fetch session transcript for retrospective (invoked by /retro skill) |
-| `session.go` | Parent command for session subcommands (`confab session <cmd>`) |
+| `session.go` | Parent command for session subcommands (`confab session <cmd>`). Owns the persistent `--provider`/`--config-dir` binding-selection flags shared by all three subcommands (kata szwk). |
 | `session_get_summary.go` | `confab session get-summary` — fetch condensed session transcript from backend |
 | `session_download.go` | `confab session download` — download raw JSONL transcript files from backend |
 | `session_list_files.go` | `confab session list-files` — list transcript file metadata for a session |
@@ -140,7 +140,9 @@ This is a cross-cutting change spanning multiple packages:
 
 **Cursor reuses the Claude file-first lifecycle with a hybrid shutdown (kata mpys/6kys).** SessionStart needs no `cmd/` cursor branch: Cursor's `transcript_path` is `null` at sessionStart, but `Cursor.ParseSessionHook` derives it from `workspace_roots[0]` + `session_id`, so the standard `buildStandardLaunchArgs` path produces a non-empty path and `maybeSpawnDaemon`'s "transcript_path required" gate passes unchanged. The daemon then runs the same file-watch path as Claude (`waitForTranscript` handles the file lagging sessionStart; no OpenCode-style collector). SessionEnd routes to `sessionEndCursor` (`StopDaemonForProvider(NameCursor, ...)`) — Cursor's daemon state lives under the `cursor` namespace, so the Claude-hardcoded `StopDaemon` would never find it. Shutdown is **hybrid**: CLI `sessionEnd` is reliable, but the IDE only fires it on window/app close (not per chat-tab), so the daemon's generic parent-PID liveness on the shared, long-lived `Cursor.app` is the primary IDE shutdown. Caveat: a long IDE session with multiple chats keeps per-session daemons alive (syncing incrementally) until window close.
 
-**Backend session commands share auth/client setup.** `helpers.go` owns the repeated `EnsureAuthenticated` + `pkg/http.NewClient` path and the common "session not found" translation for session fetch/list/download commands. Keep endpoint-specific behavior in the command files, not in the helper.
+**Backend session commands share auth/client setup.** `helpers.go` owns the repeated auth + `pkg/http.NewClient` path and the common "session not found" translation for session fetch/list/download commands. Keep endpoint-specific behavior in the command files, not in the helper.
+
+**Retrieval commands honor per-(provider, config-dir) backends (kata szwk).** `session get-summary`/`download`/`list-files` (persistent flags on `sessionCmd`) and `retro` (its own flags) accept `--provider` + `--config-dir` to target a session living on a non-default binding. All four resolve through one path: `clientForFlags(provider, configDir)` → `provider.BindingFor` → `config.EnsureAuthenticatedFor` (via `newAuthedClientForBinding`). With both flags empty the path is byte-identical to before (default/top-level binding), so single-backend users see no change. `--config-dir` requires `--provider` (mirrors `setup`); a binding with no stored credentials surfaces `config.ErrNoBinding` with an actionable "run 'confab setup …'" message — it never falls back to the default backend (leak-free, matching the daemon/hook path).
 
 **Testable function pattern.** Hook handlers extract core logic into functions that take `io.Reader`/`io.Writer` parameters (e.g., `sessionStartFromReader(r io.Reader, w io.Writer)`). Tests call these directly without needing stdin/stdout. Some functions use overridable function variables (e.g., `spawnDaemonFunc`) for test injection.
 

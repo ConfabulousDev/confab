@@ -12,8 +12,10 @@ import (
 )
 
 var (
-	retroMaxChars  int
-	retroOutputDir string
+	retroMaxChars     int
+	retroOutputDir    string
+	retroProviderName string
+	retroConfigDir    string
 )
 
 var retroCmd = &cobra.Command{
@@ -41,11 +43,13 @@ Examples:
 func init() {
 	retroCmd.Flags().IntVar(&retroMaxChars, "max-chars", 0, "Truncate transcript to last N characters")
 	retroCmd.Flags().StringVar(&retroOutputDir, "output-dir", "", "Write response.json and transcript.xml to this directory")
+	retroCmd.Flags().StringVar(&retroProviderName, "provider", "", "Target the backend bound to this provider (default: top-level backend)")
+	retroCmd.Flags().StringVar(&retroConfigDir, "config-dir", "", "Target the backend bound to this provider's config dir (requires --provider)")
 	rootCmd.AddCommand(retroCmd)
 }
 
 func runRetro(id string, maxChars int, outputDir string) error {
-	client, err := newAuthedClient()
+	client, err := clientForFlags(retroProviderName, retroConfigDir)
 	if err != nil {
 		return err
 	}

@@ -31,7 +31,7 @@ func init() {
 }
 
 func runSessionListFiles(id string) error {
-	client, err := newAuthedClient()
+	client, err := clientForFlags(sessionProviderName, sessionConfigDir)
 	if err != nil {
 		return err
 	}

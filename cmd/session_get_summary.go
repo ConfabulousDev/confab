@@ -56,7 +56,7 @@ func buildSessionGetSummaryPath(id string, maxChars int) string {
 }
 
 func runSessionGetSummary(id string, maxChars int) error {
-	client, err := newAuthedClient()
+	client, err := clientForFlags(sessionProviderName, sessionConfigDir)
 	if err != nil {
 		return err
 	}
