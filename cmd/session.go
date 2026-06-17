@@ -4,6 +4,14 @@ package cmd
 
 import "github.com/spf13/cobra"
 
+// Shared binding-selection flags for the session subcommands (kata szwk). They
+// target a per-(provider, config-dir) backend; both empty keeps the unchanged
+// default-binding path.
+var (
+	sessionProviderName string
+	sessionConfigDir    string
+)
+
 var sessionCmd = &cobra.Command{
 	Use:   "session",
 	Short: "Query and retrieve sessions",
@@ -11,5 +19,7 @@ var sessionCmd = &cobra.Command{
 }
 
 func init() {
+	sessionCmd.PersistentFlags().StringVar(&sessionProviderName, "provider", "", "Target the backend bound to this provider (default: top-level backend)")
+	sessionCmd.PersistentFlags().StringVar(&sessionConfigDir, "config-dir", "", "Target the backend bound to this provider's config dir (requires --provider)")
 	rootCmd.AddCommand(sessionCmd)
 }
