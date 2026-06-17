@@ -195,6 +195,83 @@ func ReadCursorHookInput(r io.Reader) (*CursorHookInput, error) {
 	return &input, nil
 }
 
+// CursorToolUseHookInput represents a Cursor preToolUse / postToolUse hook
+// payload. The field set is ground-truthed from the 65aq spike (real captured
+// preToolUse/postToolUse payloads from the cursor-agent CLI). Unlike the
+// session-lifecycle CursorHookInput, these events carry the firing tool's
+// identity (tool_name / tool_input / tool_use_id) and — on postToolUse — the
+// raw tool_output object.
+//
+// tool_output is kept as raw JSON (ToolOutputRaw) and decoded on demand via
+// ToolOutput(): it is absent on preToolUse and present on postToolUse as
+// {"output":"<raw stdout>","exitCode":N}. For Shell the tool_input carries
+// {command, cwd, timeout}; ToolInput stays map[string]any so non-Shell tools
+// (which we ignore) decode without a typed shape.
+type CursorToolUseHookInput struct {
+	SessionID      string          `json:"session_id"`
+	TranscriptPath string          `json:"transcript_path,omitempty"`
+	CWD            string          `json:"cwd,omitempty"`
+	ToolName       string          `json:"tool_name,omitempty"`
+	ToolUseID      string          `json:"tool_use_id,omitempty"`
+	ToolInput      map[string]any  `json:"tool_input,omitempty"`
+	ToolOutputRaw  json.RawMessage `json:"tool_output,omitempty"` // postToolUse only
+}
+
+// CursorToolOutput is the decoded postToolUse tool_output object. exitCode is
+// the shell exit status; Output is the raw terminal stdout (carries the commit
+// SHA line / PR URL).
+type CursorToolOutput struct {
+	Output   string `json:"output"`
+	ExitCode int    `json:"exitCode"`
+}
+
+// ToolOutput decodes the raw tool_output JSON object. The second return is
+// false when tool_output is absent (preToolUse) or fails to decode.
+func (c *CursorToolUseHookInput) ToolOutput() (CursorToolOutput, bool) {
+	if len(c.ToolOutputRaw) == 0 {
+		return CursorToolOutput{}, false
+	}
+	var out CursorToolOutput
+	if err := json.Unmarshal(c.ToolOutputRaw, &out); err != nil {
+		return CursorToolOutput{}, false
+	}
+	return out, true
+}
+
+// ReadCursorToolUseHookInput reads and validates a Cursor preToolUse /
+// postToolUse hook payload. Like ReadCursorHookInput it requires a safe
+// session_id (used in derived filesystem paths); tool_output is optional.
+func ReadCursorToolUseHookInput(r io.Reader) (*CursorToolUseHookInput, error) {
+	data, err := io.ReadAll(io.LimitReader(r, MaxJSONLLineSize))
+	if err != nil {
+		return nil, fmt.Errorf("failed to read input: %w", err)
+	}
+
+	var input CursorToolUseHookInput
+	if err := json.Unmarshal(data, &input); err != nil {
+		return nil, fmt.Errorf("failed to parse cursor tool-use hook input: %w", err)
+	}
+
+	if input.SessionID == "" {
+		return nil, fmt.Errorf("session_id is required")
+	}
+	if err := ValidateSessionID(input.SessionID); err != nil {
+		return nil, err
+	}
+
+	return &input, nil
+}
+
+// CursorToolUseResponse is the JSON response Cursor expects from a preToolUse
+// hook: a permission decision ("allow"/"deny"/"ask") and an optional
+// updated_input object that rewrites the tool input before execution. Confab
+// uses updated_input to inject the Confab-Link trailer / PR-body line into a
+// Shell command in place (65aq), rather than Claude's deny+instruct round-trip.
+type CursorToolUseResponse struct {
+	Permission   string         `json:"permission,omitempty"`
+	UpdatedInput map[string]any `json:"updated_input,omitempty"`
+}
+
 // sessionIDPattern validates session IDs contain only safe characters.
 // This prevents path traversal attacks (e.g., "../../tmp/evil") when
 // session IDs are used in file paths.

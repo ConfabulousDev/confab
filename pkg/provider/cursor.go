@@ -34,9 +34,11 @@ func (Cursor) Name() string { return NameCursor }
 // CLIBinaryName returns "cursor-agent" — the CLI binary users install.
 func (Cursor) CLIBinaryName() string { return "cursor-agent" }
 
-// SupportsCommitLinking reports false: commit/PR linking is deferred for
-// Cursor (matches OpenCode). No PreToolUse/PostToolUse equivalent is installed.
-func (Cursor) SupportsCommitLinking() bool { return false }
+// SupportsCommitLinking reports true: Cursor wires bidirectional GitHub
+// commit/PR linking (65aq) via preToolUse (updated_input rewrite to inject the
+// Confab-Link trailer / PR-body line) and postToolUse (link the resulting
+// commit SHA / PR URL back to the session).
+func (Cursor) SupportsCommitLinking() bool { return true }
 
 // StateDir returns the Cursor config/install directory. Precedence:
 // CONFAB_CURSOR_DIR > the default ~/.cursor.
@@ -486,10 +488,10 @@ func (p Cursor) hooksPath() (string, error) {
 	return filepath.Join(stateDir, "hooks.json"), nil
 }
 
-// InstallHooks installs Confab's sessionStart (daemon spawn) and sessionEnd
-// (signal shutdown) hooks into ~/.cursor/hooks.json, preserving user hooks.
-// preToolUse/postToolUse are intentionally not installed (commit/PR linking
-// is deferred for Cursor). Returns the written hooks.json path.
+// InstallHooks installs Confab's sessionStart (daemon spawn), sessionEnd
+// (signal shutdown), and preToolUse/postToolUse (GitHub commit/PR linking;
+// 65aq) hooks into ~/.cursor/hooks.json, preserving user hooks. Returns the
+// written hooks.json path.
 func (p Cursor) InstallHooks() (string, error) {
 	path, err := p.hooksPath()
 	if err != nil {

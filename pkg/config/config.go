@@ -309,4 +309,7 @@ func GetBinaryPath() (string, error) {
 const (
 	ToolNameBash              = "Bash"
 	ToolNameMCPGitHubCreatePR = "mcp__github__create_pull_request"
+	// ToolNameCursorShell is Cursor's shell tool name (its equivalent of
+	// Bash); both `git commit` and `gh pr create` run through it.
+	ToolNameCursorShell = "Shell"
 )

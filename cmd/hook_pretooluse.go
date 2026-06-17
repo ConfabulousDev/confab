@@ -108,6 +108,12 @@ func handlePreToolUse(r io.Reader, w io.Writer) error {
 		return nil
 	}
 
+	// Cursor uses a distinct response shape (permission/updated_input rewrite)
+	// instead of Claude/Codex's deny+instruct, so it takes its own path.
+	if p.Name() == provider.NameCursor {
+		return handlePreToolUseCursor(p, r, w)
+	}
+
 	hookInput, err := readToolUseHookInput(p, r)
 	if err != nil {
 		logger.Warn("Failed to read hook input: %v", err)

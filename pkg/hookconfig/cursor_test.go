@@ -68,7 +68,15 @@ func TestInstallCursorHooksWritesBothEvents(t *testing.T) {
 }
 
 func TestIsCursorHooksInstalled(t *testing.T) {
-	const confabBoth = `{"version":1,"hooks":{
+	// All four managed events present → installed (65aq added pre/postToolUse).
+	const confabAllFour = `{"version":1,"hooks":{
+		"sessionStart":[{"command":"/usr/local/bin/confab hook session-start --provider cursor","type":"command"}],
+		"sessionEnd":[{"command":"/usr/local/bin/confab hook session-end --provider cursor","type":"command"}],
+		"preToolUse":[{"command":"/usr/local/bin/confab hook pre-tool-use --provider cursor","type":"command","matcher":"Shell"}],
+		"postToolUse":[{"command":"/usr/local/bin/confab hook post-tool-use --provider cursor","type":"command","matcher":"Shell"}]
+	}}`
+	// Legacy two-event install (pre-65aq) → not installed, so setup upgrades it.
+	const confabTwoEvent = `{"version":1,"hooks":{
 		"sessionStart":[{"command":"/usr/local/bin/confab hook session-start --provider cursor","type":"command"}],
 		"sessionEnd":[{"command":"/usr/local/bin/confab hook session-end --provider cursor","type":"command"}]
 	}}`
@@ -87,7 +95,8 @@ func TestIsCursorHooksInstalled(t *testing.T) {
 	}{
 		{"missing file", "", false},
 		{"empty object", "{}", false},
-		{"both events confab", confabBoth, true},
+		{"all four events confab", confabAllFour, true},
+		{"legacy two-event confab", confabTwoEvent, false},
 		{"only sessionStart confab", startOnly, false},
 		{"only non-confab hooks", otherOnly, false},
 	}
