@@ -99,7 +99,7 @@ Methods every provider must implement:
 
 ## `Get(name)` and the registry
 
-`Get(name)` returns the registered `Provider` for a canonical name (empty string defaults to `claude-code`). `NormalizeName(name)` is the same lookup but returns the canonical name string. The registry is a package-level read-only map populated at init time — to add a new provider, add its instance to the map and implement the interface.
+`Get(name)` returns the registered `Provider` for a canonical name; an empty name is an explicit `ErrNoProvider` rather than a silent `claude-code` fallback (kata frm7). `NormalizeName(name)` is the same lookup but returns the canonical name string. The registry is a package-level read-only map populated at init time — to add a new provider, add its instance to the map and implement the interface.
 
 ## Invariants
 

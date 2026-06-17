@@ -90,6 +90,9 @@ func engineWithStub(t *testing.T) (*Engine, *stubProvider, *mockBackend, string)
 		mustNewClient(t, server.URL, tmpDir),
 		nil,
 		EngineConfig{
+			// Any valid provider; the real provider is swapped for the stub
+			// below. Empty is no longer accepted (kata frm7).
+			Provider:       provider.NameClaudeCode,
 			ExternalID:     "dispatch-test",
 			TranscriptPath: transcriptPath,
 			CWD:            tmpDir,

@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -17,7 +18,8 @@ func TestGet(t *testing.T) {
 		{"explicit claude-code", NameClaudeCode, NameClaudeCode, ""},
 		{"explicit codex", NameCodex, NameCodex, ""},
 		{"explicit opencode", NameOpencode, NameOpencode, ""},
-		{"empty string defaults to claude-code", "", NameClaudeCode, ""},
+		{"explicit cursor", NameCursor, NameCursor, ""},
+		{"empty string is an explicit error", "", "", "no provider"},
 		{"unknown provider returns error", "openai", "", "unsupported provider"},
 	}
 	for _, tt := range tests {
@@ -55,7 +57,8 @@ func TestNormalizeName(t *testing.T) {
 		{"explicit claude-code", NameClaudeCode, NameClaudeCode, false},
 		{"explicit codex", NameCodex, NameCodex, false},
 		{"explicit opencode", NameOpencode, NameOpencode, false},
-		{"empty defaults to claude-code", "", NameClaudeCode, false},
+		{"explicit cursor", NameCursor, NameCursor, false},
+		{"empty is an explicit error", "", "", true},
 		{"unknown provider errors", "openai", "", true},
 	}
 	for _, tt := range tests {
@@ -74,6 +77,27 @@ func TestNormalizeName(t *testing.T) {
 				t.Fatalf("NormalizeName(%q) = %q, want %q", tt.input, got, tt.want)
 			}
 		})
+	}
+}
+
+// TestEmptyNameYieldsErrNoProvider asserts the empty provider name no longer
+// silently aliases to claude-code: both Get and NormalizeName return the
+// sentinel ErrNoProvider so callers can match on it.
+func TestEmptyNameYieldsErrNoProvider(t *testing.T) {
+	p, err := Get("")
+	if !errors.Is(err, ErrNoProvider) {
+		t.Fatalf("Get(\"\"): error = %v, want ErrNoProvider", err)
+	}
+	if p != nil {
+		t.Fatalf("Get(\"\"): provider = %v, want nil", p)
+	}
+
+	name, err := NormalizeName("")
+	if !errors.Is(err, ErrNoProvider) {
+		t.Fatalf("NormalizeName(\"\"): error = %v, want ErrNoProvider", err)
+	}
+	if name != "" {
+		t.Fatalf("NormalizeName(\"\"): name = %q, want empty", name)
 	}
 }
 
