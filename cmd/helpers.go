@@ -55,13 +55,21 @@ func clientForFlags(providerName, configDir string) (*confabhttp.Client, error) 
 	b := provider.BindingFor(p, configDir)
 	client, err := newAuthedClientForBinding(b)
 	if err != nil {
-		if errors.Is(err, config.ErrNoBinding) {
-			return nil, fmt.Errorf("%w: run 'confab setup --provider %s --config-dir %s' first",
-				err, p.Name(), configDir)
-		}
-		return nil, err
+		return nil, withSetupHint(err, p.Name(), configDir)
 	}
 	return client, nil
+}
+
+// withSetupHint annotates a config.ErrNoBinding with the exact `confab setup`
+// command that would create the missing (provider, config-dir) binding, and
+// passes any other error through unchanged. Shared by the retrieval commands
+// (clientForFlags) and save (resolveSaveContext) so the hint copy stays in sync.
+func withSetupHint(err error, providerName, configDir string) error {
+	if errors.Is(err, config.ErrNoBinding) {
+		return fmt.Errorf("%w: run 'confab setup --provider %s --config-dir %s' first",
+			err, providerName, configDir)
+	}
+	return err
 }
 
 func translateSessionErr(err error, action string) error {
