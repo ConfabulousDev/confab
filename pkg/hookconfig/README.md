@@ -1,8 +1,8 @@
 # pkg/hookconfig
 
-Owns the install/uninstall/check logic for Confab hooks in Claude Code's `~/.claude/settings.json` and Codex's `~/.codex/config.toml`. Provider methods (`pkg/provider/{claude,codex}.go`) delegate here so the provider package stays focused on paths, process detection, and rollout metadata.
+Owns the install/uninstall/check logic for Confab hooks in Claude Code's `~/.claude/settings.json`, Codex's `~/.codex/config.toml`, and Cursor's `~/.cursor/hooks.json`. Provider methods (`pkg/provider/{claude,codex,cursor}.go`) delegate here so the provider package stays focused on paths, process detection, and rollout metadata.
 
-OpenCode is **not** handled here. It has no settings/config hook system; `Opencode.InstallHooks` (in `pkg/provider/opencode.go`) writes a TS plugin to `~/.config/opencode/plugins/` directly. This package covers the two settings-file providers only.
+OpenCode is **not** handled here. It has no settings/config hook system; `Opencode.InstallHooks` (in `pkg/provider/opencode.go`) writes a TS plugin to `~/.config/opencode/plugins/` directly. This package covers the three settings/config-file providers only.
 
 ## Why a separate package
 
@@ -18,6 +18,7 @@ Before CF-396 (Phase 2), hook install logic lived in `pkg/config` (Claude side) 
 |------|------|
 | `claude.go` | Claude Code hook install/uninstall: sync (`SessionStart`/`SessionEnd`), `PreToolUse`, `PostToolUse`, `UserPromptSubmit`. Each `Install*`/`Uninstall*`/`Is*Installed` function takes an explicit `settingsPath` (the provider passes `p.SettingsPath()`) and edits it via `config.AtomicUpdateSettingsAt` / `config.ReadSettingsAt` — so hooks install into a non-default config dir (kata hpec) without env mutation. |
 | `codex.go` | Codex hook install/uninstall: writes a confab-managed `[features]` block plus `SessionStart`, `PreToolUse`, and `PostToolUse` hooks in `~/.codex/config.toml`. Preserves user config; atomic write with backup. |
+| `cursor.go` | Cursor hook install/uninstall: writes `sessionStart` (daemon spawn) + `sessionEnd` (signal shutdown) command hooks into `~/.cursor/hooks.json` (`{"version":1,"hooks":{"<event>":[{"command","type"}]}}`). Plain-JSON merge that preserves user-authored hooks and unknown top-level keys (top level + per-event arrays kept as `json.RawMessage`); atomic write with backup; idempotent. No `preToolUse`/`postToolUse` (commit/PR linking deferred) and no `stop` (per-turn). |
 
 ## Public API
 
@@ -53,20 +54,30 @@ Each event also writes a `[hooks.state."<configPath>:<event_lower>:<group_idx>:<
 
 The hash blob covers `{event_name, hooks: [{async, command, statusMessage, timeout, type}], matcher}` with fields in alphabetical order. `statusMessage` is `"Starting Confab sync"` for SessionStart and `""` for the tool-use events — empty-string is load-bearing because Codex's TOML `Option<String>` deserializes `statusMessage = ""` to `Some("")`, which canonical-JSON-serializes as `"statusMessage": ""`; omitting the field would round-trip to `None` and yield a hash mismatch.
 
+### Cursor
+
+| Function | Purpose |
+|---|---|
+| `InstallCursorHooks(hooksPath string) (string, error)` | Idempotent install of `sessionStart` + `sessionEnd` command hooks into `hooks.json`. Returns the file path. |
+| `UninstallCursorHooks(hooksPath string) (string, error)` | Remove confab's managed entries; prune an event key only when it becomes empty. A missing file is a no-op. |
+| `IsCursorHooksInstalled(hooksPath string) (bool, error)` | True only when **both** managed events (`sessionStart`, `sessionEnd`) carry a confab command. |
+
+Cursor's `hooks.json` is plain JSON (`{"version":1,"hooks":{"<event>":[{"command","type"}]}}`, kata 6kys), not Claude's settings schema or Codex's TOML — so the installer is JSON-native (no reuse of the Claude/Codex helpers). It loads the top level as `map[string]json.RawMessage` and each event array as `[]json.RawMessage`, so unknown top-level keys and user-authored hook entries (which may carry keys beyond `command`/`type`) survive byte-faithfully; confab edits only its own two events. Confab entries are identified by the **command signature** (`hook session-…` + `--provider cursor`) rather than the binary basename — this keeps detection robust where the binary lives, makes re-install idempotent, and uninstall surgical. Installs `sessionStart` (daemon spawn → `hook session-start --provider cursor`) and `sessionEnd` (signal shutdown → `hook session-end --provider cursor`). No `preToolUse`/`postToolUse` (commit/PR linking is deferred for Cursor) and no `stop` (fires per turn — same hazard as Codex's `Stop`; shutdown stays parent-PID + `sessionEnd` driven).
+
 ## Invariants
 
-- **Atomic writes.** Both providers use `config.AtomicUpdateSettings` (Claude) or a `.bak` + atomic rename (Codex) so a crashed install never leaves a half-edited config.
-- **Idempotent.** Calling `Install...` twice produces the same file as calling it once. Tests pin this for both providers.
-- **Preserves user config.** Neither provider rewrites unmanaged config. Codex only touches `[features]` and the managed Confab hook block.
+- **Atomic writes.** All providers use `config.AtomicUpdateSettings` (Claude) or a `.confab-backup-*` + atomic rename (Codex, Cursor) so a crashed install never leaves a half-edited config.
+- **Idempotent.** Calling `Install...` twice produces the same file as calling it once. Tests pin this for all three providers.
+- **Preserves user config.** No provider rewrites unmanaged config. Codex only touches `[features]` and the managed Confab hook block; Cursor only touches its two event arrays and leaves every other hook / top-level key untouched.
 - **No `[[hooks.Stop]]` / `[[hooks.UserPromptSubmit]]` for Codex.** Codex fires `Stop` at every agent/turn boundary (Stop-driven shutdown would kill the root daemon prematurely), and parent-PID monitoring already covers the Claude `UserPromptSubmit` teleport case.
 - **Trusted-hash positional keys.** Codex's `[hooks.state."<configPath>:<event>:<group_idx>:<hook_idx>"]` key uses the hook's actual position in the existing `[[hooks.<Event>]]` list. `countCodexHookMatcherGroups` runs **per event** and on the post-strip config so re-installs interleave correctly with any unmanaged user-authored blocks at any of the three event types.
 
 ## Dependencies
 
-- `pkg/config` — for `ClaudeSettings`, `AtomicUpdateSettings`, `GetBinaryPath`, tool-name constants. Codex side uses `config.GetBinaryPath` only.
+- `pkg/config` — for `ClaudeSettings`, `AtomicUpdateSettings`, `GetBinaryPath`, tool-name constants. Codex and Cursor sides use `config.GetBinaryPath` only.
 - `pkg/logger` — Claude side logs install/uninstall events.
 - `github.com/pelletier/go-toml/v2` — Codex TOML parsing.
 
 ## Used By
 
-`pkg/provider/claude.go` and `pkg/provider/codex.go` (not `opencode.go` — it manages its own plugin file). No other package imports this directly — `cmd/` routes through the `Provider` interface.
+`pkg/provider/claude.go`, `pkg/provider/codex.go`, and `pkg/provider/cursor.go` (not `opencode.go` — it manages its own plugin file). No other package imports this directly — `cmd/` routes through the `Provider` interface.

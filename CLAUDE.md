@@ -120,11 +120,17 @@ For Codex, three hook events are installed in `~/.codex/config.toml` (see `pkg/h
 
 Daemon shutdown stays parent-PID driven (see Codex provider differences above for why `Stop` / `SessionEnd` and `UserPromptSubmit` are not installed).
 
+For Cursor, two hook events are installed in `~/.cursor/hooks.json` (see `pkg/hookconfig/cursor.go`):
+- `sessionStart`: spawns the sync daemon
+- `sessionEnd`: signals daemon shutdown (clean for CLI / app-quit)
+
+`hooks.json` is plain JSON (`{"version":1,"hooks":{"<event>":[{"command","type"}]}}`); the installer merges into the `hooks` object per event, preserving user-authored hooks and unknown top-level keys. No `preToolUse`/`postToolUse` (commit/PR linking deferred) and no `stop` (fires per turn); daemon shutdown stays parent-PID driven with `sessionEnd` as a clean signal. Cursor is **not** auto-detected (`provider.DetectInstalled`) yet — reach it via explicit `--provider cursor`.
+
 OpenCode has no settings/config hook system. Instead, `confab setup` installs a TypeScript plugin into `~/.config/opencode/plugins/` (see `pkg/provider/opencode.go` `InstallHooks`) that drives the daemon lifecycle: `session.created` → `session-start`, `dispose` → `session-end`. See the OpenCode provider differences above for the full lifecycle and shutdown behavior.
 
 ## Skills
 
-Confab installs bundled skills for every configured provider: Claude Code uses `~/.claude/skills/`, Codex uses `~/.codex/skills/`, and OpenCode uses `~/.config/opencode/skills/`.
+Confab installs bundled skills for every configured provider: Claude Code uses `~/.claude/skills/`, Codex uses `~/.codex/skills/`, OpenCode uses `~/.config/opencode/skills/`, and Cursor uses `~/.cursor/skills/`.
 - `/retro`: Review and discuss session transcripts — user types `/retro <session-id> [question]`, the harness fetches the condensed transcript via `confab retro`, optionally reads local raw JSONL for richer data, and engages in discussion about the session.
 
 Skills are managed separately from hooks: `confab skills add/remove` (vs `confab hooks add/remove`).

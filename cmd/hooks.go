@@ -25,7 +25,10 @@ For Claude Code: SessionStart/End, PreToolUse, PostToolUse, and
 UserPromptSubmit hooks are installed in ~/.claude/settings.json.
 
 For Codex: SessionStart, PreToolUse, and PostToolUse hooks are installed
-in ~/.codex/config.toml. Shutdown stays parent-PID driven.`,
+in ~/.codex/config.toml. Shutdown stays parent-PID driven.
+
+For Cursor: sessionStart and sessionEnd hooks are installed in
+~/.cursor/hooks.json (no commit/PR linking).`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger.Info("Running hooks add command")
 		providerName, err := provider.NormalizeName(hooksProviderName)
@@ -77,7 +80,7 @@ var hooksRemoveCmd = &cobra.Command{
 }
 
 func init() {
-	hooksCmd.PersistentFlags().StringVar(&hooksProviderName, "provider", provider.NameClaudeCode, "Provider to manage hooks for (claude-code, codex, or opencode)")
+	hooksCmd.PersistentFlags().StringVar(&hooksProviderName, "provider", provider.NameClaudeCode, "Provider to manage hooks for (claude-code, codex, opencode, or cursor)")
 	rootCmd.AddCommand(hooksCmd)
 	hooksCmd.AddCommand(hooksAddCmd)
 	hooksCmd.AddCommand(hooksRemoveCmd)

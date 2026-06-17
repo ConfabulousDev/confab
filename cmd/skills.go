@@ -110,7 +110,7 @@ func skillsRemoveTargets() ([]provider.Provider, error) {
 		}
 		return []provider.Provider{p}, nil
 	}
-	names := []string{provider.NameClaudeCode, provider.NameCodex}
+	names := []string{provider.NameClaudeCode, provider.NameCodex, provider.NameCursor}
 	targets := make([]provider.Provider, 0, len(names))
 	for _, name := range names {
 		p, err := provider.Get(name)
@@ -123,7 +123,7 @@ func skillsRemoveTargets() ([]provider.Provider, error) {
 }
 
 func init() {
-	skillsCmd.PersistentFlags().StringVar(&skillsProviderName, "provider", "", "Provider to manage skills for (claude-code or codex); defaults to detected providers for add and all providers for remove")
+	skillsCmd.PersistentFlags().StringVar(&skillsProviderName, "provider", "", "Provider to manage skills for (claude-code, codex, or cursor); defaults to detected providers for add and all providers for remove")
 	rootCmd.AddCommand(skillsCmd)
 	skillsCmd.AddCommand(skillsAddCmd)
 	skillsCmd.AddCommand(skillsRemoveCmd)

@@ -465,6 +465,74 @@ func TestRunSetupCodexProviderOutput(t *testing.T) {
 	}
 }
 
+func TestRunSetupCursorProviderOutput(t *testing.T) {
+	backend := &setupTestBackend{validateValid: true}
+	server := httptest.NewServer(backend)
+	defer server.Close()
+
+	tmpDir, _ := setupSetupTestEnv(t, server.URL)
+	cursorDir := filepath.Join(tmpDir, ".cursor")
+	t.Setenv(provider.CursorStateDirEnv, cursorDir)
+
+	origProvider := setupProviderName
+	setupProviderName = provider.NameCursor
+	defer func() { setupProviderName = origProvider }()
+
+	cmd := &cobra.Command{}
+	cmd.Flags().String("backend-url", server.URL, "")
+	cmd.Flags().String("api-key", "cfb_cursor-test-key-1234567", "")
+
+	output := captureStdout(t, func() {
+		if err := runSetup(cmd, nil); err != nil {
+			t.Fatalf("runSetup failed: %v", err)
+		}
+	})
+
+	wantSnippets := []string{
+		"▶ cursor",
+		"✓ hooks installed",
+		"✅ Setup complete. cursor sessions will sync to " + server.URL,
+	}
+	for _, want := range wantSnippets {
+		if !strings.Contains(output, want) {
+			t.Fatalf("setup output missing %q\noutput:\n%s", want, output)
+		}
+	}
+
+	// hooks.json must be schema-valid JSON carrying both managed events.
+	hooksPath := filepath.Join(cursorDir, "hooks.json")
+	data, err := os.ReadFile(hooksPath)
+	if err != nil {
+		t.Fatalf("failed to read Cursor hooks.json: %v", err)
+	}
+	var parsed struct {
+		Version int `json:"version"`
+		Hooks   map[string][]struct {
+			Command string `json:"command"`
+			Type    string `json:"type"`
+		} `json:"hooks"`
+	}
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("hooks.json is not valid JSON: %v\n%s", err, data)
+	}
+	if parsed.Version != 1 {
+		t.Errorf("hooks.json version = %d, want 1", parsed.Version)
+	}
+	content := string(data)
+	if !strings.Contains(content, "hook session-start --provider cursor") {
+		t.Error("hooks.json missing Cursor session-start hook")
+	}
+	if !strings.Contains(content, "hook session-end --provider cursor") {
+		t.Error("hooks.json missing Cursor session-end hook")
+	}
+
+	// /retro skill must be installed under ~/.cursor/skills/.
+	skillPath := filepath.Join(cursorDir, "skills", "retro", "SKILL.md")
+	if _, err := os.Stat(skillPath); err != nil {
+		t.Fatalf("expected Cursor /retro skill after setup: %v", err)
+	}
+}
+
 func captureStdout(t *testing.T, fn func()) string {
 	t.Helper()
 
