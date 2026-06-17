@@ -1,12 +1,19 @@
 package provider
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"time"
 
 	"github.com/ConfabulousDev/confab/pkg/config"
 )
+
+// ErrNoProvider is returned by Get/NormalizeName when the provider name is
+// empty. The empty name used to silently alias to claude-code; that fallback
+// was a correctness hazard now that multiple providers exist (kata frm7), so
+// callers must pass a concrete provider name (or route through DetectInstalled).
+var ErrNoProvider = errors.New("no provider specified")
 
 const (
 	NameClaudeCode = "claude-code"
@@ -261,11 +268,11 @@ var registry = map[string]Provider{
 	NameCursor:     Cursor{},
 }
 
-// Get returns the registered Provider for name. An empty string resolves
-// to Claude Code for backwards compatibility with NormalizeName.
+// Get returns the registered Provider for name. An empty name is an explicit
+// error (ErrNoProvider) rather than a silent claude-code fallback (kata frm7).
 func Get(name string) (Provider, error) {
 	if name == "" {
-		name = NameClaudeCode
+		return nil, ErrNoProvider
 	}
 	p, ok := registry[name]
 	if !ok {
@@ -308,7 +315,8 @@ func GetWithDir(name, dir string) (Provider, error) {
 }
 
 // NormalizeName returns the canonical provider name. Backed by the
-// registry so it can't drift from the Provider list.
+// registry so it can't drift from the Provider list. An empty name returns
+// ErrNoProvider via Get (no implicit claude-code fallback; kata frm7).
 func NormalizeName(name string) (string, error) {
 	p, err := Get(name)
 	if err != nil {

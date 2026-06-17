@@ -1622,6 +1622,12 @@ func TestEngine_SyncAll_MixedAgentIDFormats(t *testing.T) {
 // Fatals on error to keep test bodies clean.
 func newEngineWithBackend(t *testing.T, backend Backend, r *redactor.Redactor, cfg EngineConfig) *Engine {
 	t.Helper()
+	// Default to claude-code for fixtures that don't set a provider. The empty
+	// name used to alias to claude-code inside provider.Get; that alias is now a
+	// hard error (kata frm7), so claude-path fixtures opt in explicitly here.
+	if cfg.Provider == "" {
+		cfg.Provider = provider.NameClaudeCode
+	}
 	engine, err := NewWithBackend(backend, r, cfg)
 	if err != nil {
 		t.Fatalf("NewWithBackend: %v", err)
