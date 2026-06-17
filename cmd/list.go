@@ -42,13 +42,10 @@ func listSessions(p provider.Provider, durationStr string) error {
 	}
 
 	if len(sessions) == 0 {
-		switch {
-		case durationStr != "":
+		if durationStr != "" {
 			fmt.Printf("No sessions found within the last %s\n", durationStr)
-		case p.Name() == provider.NameCodex:
-			fmt.Println("No sessions found in ~/.codex/sessions/")
-		default:
-			fmt.Println("No sessions found in ~/.claude/projects/")
+		} else {
+			fmt.Printf("No %s sessions found\n", p.Name())
 		}
 		return nil
 	}
@@ -67,11 +64,18 @@ func printSessionTable(p provider.Provider, sessions []provider.SessionInfo) {
 		fmt.Printf("%-8s  %-50s  %s\n", id, title, activity)
 	}
 
-	providerFlag := ""
-	if p.Name() == provider.NameCodex {
-		providerFlag = "--provider codex "
+	fmt.Printf("\n%d session(s) found. Use 'confab save %s<id>' to upload.\n", len(sessions), providerSaveHint(p))
+}
+
+// providerSaveHint returns the `--provider <name> ` fragment to splice into the
+// "confab save" suggestion. It is empty for the default provider (claude-code),
+// since save defaults to it, and names any other provider so the copy-pasteable
+// command targets the right one.
+func providerSaveHint(p provider.Provider) string {
+	if p.Name() == provider.NameClaudeCode {
+		return ""
 	}
-	fmt.Printf("\n%d session(s) found. Use 'confab save %s<id>' to upload.\n", len(sessions), providerFlag)
+	return fmt.Sprintf("--provider %s ", p.Name())
 }
 
 // formatSessionRow formats a single session for display.
@@ -109,6 +113,6 @@ func formatDuration(d time.Duration) string {
 
 func init() {
 	listCmd.Flags().StringVarP(&listDuration, "duration", "d", "", "Filter sessions by duration (e.g., 5d, 12h, 30m)")
-	listCmd.Flags().StringVar(&listProviderName, "provider", provider.NameClaudeCode, "Provider to list sessions from (claude-code or codex)")
+	listCmd.Flags().StringVar(&listProviderName, "provider", provider.NameClaudeCode, "Provider to list sessions from (claude-code, codex, or cursor; opencode is live-sync only)")
 	rootCmd.AddCommand(listCmd)
 }
