@@ -6,7 +6,302 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/ConfabulousDev/confab/pkg/config"
+	"github.com/ConfabulousDev/confab/pkg/redactor"
 )
+
+// ---- T3 transcript-metadata fixtures (grounded in real captured Cursor JSONL,
+// kata 6kys §7). Message lines are {role, message:{content:[...]}} with NO
+// top-level "type" field; user text is wrapped in <user_query>…</user_query>;
+// status lines are {type:"turn_ended", status}. Tool results never appear.
+
+// cursorUserLine is a real user message line shape: a single text part whose
+// text is wrapped in the <user_query> sentinel.
+func cursorUserLine(text string) string {
+	return `{"role":"user","message":{"content":[{"type":"text","text":"<user_query>\n` + text + `\n</user_query>"}]}}`
+}
+
+// cursorAssistantToolLine is a real assistant line carrying a tool_use part.
+func cursorAssistantToolLine(name, inputJSON string) string {
+	return `{"role":"assistant","message":{"content":[{"type":"tool_use","name":"` + name + `","input":` + inputJSON + `}]}}`
+}
+
+const cursorTurnEndedLine = `{"type":"turn_ended","status":"success"}`
+
+// cursorChunkStub is a minimal internal ChunkView double for AnnotateChunk tests.
+type cursorChunkStub struct {
+	fileType            string
+	lines               []string
+	setSummary          string
+	setFirstUserMessage string
+	summarySet          bool
+	firstUserMessageSet bool
+}
+
+func (s *cursorChunkStub) FileType() string                              { return s.fileType }
+func (s *cursorChunkStub) FirstLine() int                                { return 1 }
+func (s *cursorChunkStub) Lines() []string                               { return s.lines }
+func (s *cursorChunkStub) FileCodexRollout() *CodexRolloutMetadata       { return nil }
+func (s *cursorChunkStub) SetCodexRolloutMetadata(*CodexRolloutMetadata) {}
+func (s *cursorChunkStub) SetSummary(v string)                           { s.setSummary = v; s.summarySet = true }
+func (s *cursorChunkStub) SetFirstUserMessage(v string) {
+	s.setFirstUserMessage = v
+	s.firstUserMessageSet = true
+}
+
+func TestCursorExtractMetadata_FirstUserMessageUnwrapped(t *testing.T) {
+	lines := []string{
+		cursorUserLine("Reply with exactly the word: ok"),
+		`{"role":"assistant","message":{"content":[{"type":"text","text":"ok"}]}}`,
+		cursorTurnEndedLine,
+	}
+	meta := (Cursor{}).ExtractMetadata(lines)
+	if meta.FirstUserMessage != "Reply with exactly the word: ok" {
+		t.Errorf("FirstUserMessage = %q, want unwrapped query text", meta.FirstUserMessage)
+	}
+	if meta.Summary != "" {
+		t.Errorf("Summary = %q, want empty (Cursor has no inline summary)", meta.Summary)
+	}
+	if meta.SummaryLinks != nil {
+		t.Errorf("SummaryLinks = %v, want nil (Cursor has none)", meta.SummaryLinks)
+	}
+}
+
+// A transcript whose first line is a status line (not a message) must be
+// skipped defensively — the first user message is still found.
+func TestCursorExtractMetadata_SkipsLeadingStatusLine(t *testing.T) {
+	lines := []string{
+		cursorTurnEndedLine,
+		cursorUserLine("first real prompt"),
+	}
+	meta := (Cursor{}).ExtractMetadata(lines)
+	if meta.FirstUserMessage != "first real prompt" {
+		t.Errorf("FirstUserMessage = %q, want %q", meta.FirstUserMessage, "first real prompt")
+	}
+}
+
+// Only the FIRST user message wins; a later user line must not overwrite it.
+func TestCursorExtractMetadata_FirstUserMessageWins(t *testing.T) {
+	lines := []string{
+		cursorUserLine("the first one"),
+		`{"role":"assistant","message":{"content":[{"type":"text","text":"reply"}]}}`,
+		cursorUserLine("the second one"),
+	}
+	meta := (Cursor{}).ExtractMetadata(lines)
+	if meta.FirstUserMessage != "the first one" {
+		t.Errorf("FirstUserMessage = %q, want the first", meta.FirstUserMessage)
+	}
+}
+
+func TestCursorExtractMetadata_EmptyOnNoUserMessage(t *testing.T) {
+	lines := []string{
+		`{"role":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}`,
+		cursorTurnEndedLine,
+	}
+	meta := (Cursor{}).ExtractMetadata(lines)
+	if meta.FirstUserMessage != "" {
+		t.Errorf("FirstUserMessage = %q, want empty", meta.FirstUserMessage)
+	}
+}
+
+func TestCursorAnnotateChunk_SetsFirstUserMessageOnTranscript(t *testing.T) {
+	c := &cursorChunkStub{
+		fileType: FileTypeTranscript,
+		lines:    []string{cursorUserLine("hello cursor")},
+	}
+	res := (Cursor{}).AnnotateChunk(c, false, nil)
+	if !c.firstUserMessageSet || c.setFirstUserMessage != "hello cursor" {
+		t.Errorf("first_user_message = %q (set=%v), want %q", c.setFirstUserMessage, c.firstUserMessageSet, "hello cursor")
+	}
+	if c.summarySet && c.setSummary != "" {
+		t.Errorf("Summary set to %q, want empty", c.setSummary)
+	}
+	if res.SummaryLinks != nil {
+		t.Errorf("SummaryLinks = %v, want nil", res.SummaryLinks)
+	}
+	if res.IncludedFirstUserMessage {
+		t.Error("IncludedFirstUserMessage = true, want false (match Claude)")
+	}
+}
+
+func TestCursorAnnotateChunk_AppliesRedaction(t *testing.T) {
+	c := &cursorChunkStub{
+		fileType: FileTypeTranscript,
+		lines:    []string{cursorUserLine("my key is AKIAIOSFODNN7EXAMPLE done")},
+	}
+	(Cursor{}).AnnotateChunk(c, false, func(s string) string {
+		return strings.ReplaceAll(s, "AKIAIOSFODNN7EXAMPLE", "[REDACTED]")
+	})
+	if strings.Contains(c.setFirstUserMessage, "AKIAIOSFODNN7EXAMPLE") {
+		t.Errorf("first_user_message = %q still contains secret", c.setFirstUserMessage)
+	}
+	if !strings.Contains(c.setFirstUserMessage, "[REDACTED]") {
+		t.Errorf("first_user_message = %q, want redacted", c.setFirstUserMessage)
+	}
+}
+
+// Non-transcript (agent sidechain) chunks are a no-op.
+func TestCursorAnnotateChunk_NonTranscriptNoOp(t *testing.T) {
+	c := &cursorChunkStub{
+		fileType: FileTypeAgent,
+		lines:    []string{cursorUserLine("subagent prompt")},
+	}
+	(Cursor{}).AnnotateChunk(c, false, nil)
+	if c.firstUserMessageSet || c.summarySet {
+		t.Error("AnnotateChunk mutated a non-transcript chunk; want no-op")
+	}
+}
+
+// The standard ReadChunk redaction path (RedactJSONLine) scrubs a secret in a
+// tool_use input.command — verifying the captured Cursor line shape is handled.
+func TestCursorTranscriptRedaction_ScrubsToolUseSecret(t *testing.T) {
+	red, err := redactor.NewFromConfig(&config.RedactionConfig{Enabled: true}) // default high-precision patterns
+	if err != nil {
+		t.Fatalf("NewFromConfig: %v", err)
+	}
+	if red == nil {
+		t.Fatal("expected a non-nil redactor with default patterns")
+	}
+	line := cursorAssistantToolLine("Shell", `{"command":"aws --key AKIAIOSFODNN7EXAMPLE s3 ls","description":"list"}`)
+	out := red.RedactJSONLine(line)
+	if strings.Contains(out, "AKIAIOSFODNN7EXAMPLE") {
+		t.Errorf("redacted line still contains AWS key: %s", out)
+	}
+}
+
+func writeCursorFixtureSession(t *testing.T, stateDir, workspaceRoot, sessionID string, lines []string) string {
+	t.Helper()
+	dir := filepath.Join(stateDir, "projects", sanitizeWorkspaceRoot(workspaceRoot), "agent-transcripts", sessionID)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	path := filepath.Join(dir, sessionID+".jsonl")
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	return path
+}
+
+func TestCursorScanSessions_ResolvesFixture(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(CursorStateDirEnv, dir)
+	const id = "8b8e4d09-c7c9-402f-82c0-a61e11e7d0a5"
+	path := writeCursorFixtureSession(t, dir, "/Users/jackie/dev/confab", id, []string{
+		cursorUserLine("scan me"),
+		cursorTurnEndedLine,
+	})
+
+	sessions, err := (Cursor{}).ScanSessions()
+	if err != nil {
+		t.Fatalf("ScanSessions: %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("ScanSessions returned %d sessions, want 1", len(sessions))
+	}
+	s := sessions[0]
+	if s.SessionID != id {
+		t.Errorf("SessionID = %q, want %q", s.SessionID, id)
+	}
+	if s.TranscriptPath != path {
+		t.Errorf("TranscriptPath = %q, want %q", s.TranscriptPath, path)
+	}
+	if s.FirstUserMessage != "scan me" {
+		t.Errorf("FirstUserMessage = %q, want %q", s.FirstUserMessage, "scan me")
+	}
+}
+
+func TestCursorFindSessionByID_PrefixMatch(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(CursorStateDirEnv, dir)
+	const id = "8b8e4d09-c7c9-402f-82c0-a61e11e7d0a5"
+	path := writeCursorFixtureSession(t, dir, "/Users/jackie/dev/confab", id, []string{
+		cursorUserLine("find me"),
+	})
+
+	gotID, gotPath, err := (Cursor{}).FindSessionByID("8b8e4d09")
+	if err != nil {
+		t.Fatalf("FindSessionByID: %v", err)
+	}
+	if gotID != id {
+		t.Errorf("id = %q, want %q", gotID, id)
+	}
+	if gotPath != path {
+		t.Errorf("path = %q, want %q", gotPath, path)
+	}
+}
+
+func TestCursorFindSessionByID_NotFound(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(CursorStateDirEnv, dir)
+	if err := os.MkdirAll(filepath.Join(dir, "projects"), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if _, _, err := (Cursor{}).FindSessionByID("nope"); err == nil {
+		t.Error("FindSessionByID returned nil error for missing session")
+	}
+}
+
+// Subagent sidechain files live under subagents/ and must NOT surface as
+// top-level sessions in ScanSessions.
+func TestCursorScanSessions_IgnoresSubagentFiles(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(CursorStateDirEnv, dir)
+	const id = "8b8e4d09-c7c9-402f-82c0-a61e11e7d0a5"
+	writeCursorFixtureSession(t, dir, "/Users/jackie/dev/confab", id, []string{cursorUserLine("root")})
+	subDir := filepath.Join(dir, "projects", "Users-jackie-dev-confab", "agent-transcripts", id, "subagents")
+	if err := os.MkdirAll(subDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	subID := "9c4d4938-b532-406a-b0b4-9ad8e765e24c"
+	if err := os.WriteFile(filepath.Join(subDir, subID+".jsonl"), []byte(cursorUserLine("child")+"\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	sessions, err := (Cursor{}).ScanSessions()
+	if err != nil {
+		t.Fatalf("ScanSessions: %v", err)
+	}
+	if len(sessions) != 1 || sessions[0].SessionID != id {
+		t.Fatalf("ScanSessions = %+v, want only the root session %q", sessions, id)
+	}
+}
+
+func TestCursorValidateTranscriptPath(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(CursorStateDirEnv, dir)
+	projects := filepath.Join(dir, "projects")
+	good := filepath.Join(projects, "Users-jackie-dev-confab", "agent-transcripts", "id", "id.jsonl")
+
+	if err := (Cursor{}).ValidateTranscriptPath(good); err != nil {
+		t.Errorf("ValidateTranscriptPath(%q) = %v, want nil", good, err)
+	}
+	if err := (Cursor{}).ValidateTranscriptPath("relative/path.jsonl"); err == nil {
+		t.Error("ValidateTranscriptPath accepted a relative path")
+	}
+	if err := (Cursor{}).ValidateTranscriptPath(filepath.Join(projects, "..", "etc", "passwd")); err == nil {
+		t.Error("ValidateTranscriptPath accepted a path with '..'")
+	}
+	if err := (Cursor{}).ValidateTranscriptPath("/somewhere/else/id.jsonl"); err == nil {
+		t.Error("ValidateTranscriptPath accepted a path outside projects/")
+	}
+}
+
+func TestCursorReadSessionHookInput_RequiresTranscriptPath(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(CursorStateDirEnv, dir)
+	// No transcript_path → rejected (the validating variant per T3).
+	in := `{"session_id":"abc","hook_event_name":"sessionEnd"}`
+	if _, err := (Cursor{}).ReadSessionHookInput(strings.NewReader(in)); err == nil {
+		t.Error("ReadSessionHookInput accepted input with no transcript_path")
+	}
+
+	good := filepath.Join(dir, "projects", "Users-jackie-dev-confab", "agent-transcripts", "abc", "abc.jsonl")
+	ok := `{"session_id":"abc","transcript_path":"` + good + `"}`
+	if _, err := (Cursor{}).ReadSessionHookInput(strings.NewReader(ok)); err != nil {
+		t.Errorf("ReadSessionHookInput rejected a valid payload: %v", err)
+	}
+}
 
 // Compile-time interface satisfaction (mirrors provider_test.go).
 var _ Provider = Cursor{}

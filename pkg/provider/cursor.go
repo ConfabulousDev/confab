@@ -1,14 +1,17 @@
 package provider
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/ConfabulousDev/confab/pkg/config"
+	"github.com/ConfabulousDev/confab/pkg/logger"
 	"github.com/ConfabulousDev/confab/pkg/types"
 )
 
@@ -96,7 +99,7 @@ func (p Cursor) deriveTranscriptPath(sessionID string, workspaceRoots []string) 
 // payload that already carries an explicit transcript_path (e.g. sessionEnd)
 // keeps it.
 func (p Cursor) ParseSessionHook(r io.Reader) (HookInput, error) {
-	in, err := p.ReadSessionHookInput(r)
+	in, err := p.ReadHookInput(r)
 	if err != nil {
 		return nil, err
 	}
@@ -106,10 +109,52 @@ func (p Cursor) ParseSessionHook(r io.Reader) (HookInput, error) {
 	return cursorHookInputAdapter{inner: in}, nil
 }
 
-// ReadSessionHookInput reads and validates Cursor hook JSON. Unlike Claude it
-// does not require transcript_path (null at sessionStart — derived later).
-func (Cursor) ReadSessionHookInput(r io.Reader) (*types.CursorHookInput, error) {
+// ReadHookInput reads and validates raw Cursor hook JSON: session_id required
+// and safe; transcript_path NOT required (null at sessionStart, derived by
+// ParseSessionHook). This is the non-strict reader used on the spawn path.
+func (Cursor) ReadHookInput(r io.Reader) (*types.CursorHookInput, error) {
 	return types.ReadCursorHookInput(r)
+}
+
+// ReadSessionHookInput reads Cursor session hook JSON and additionally requires
+// + validates transcript_path, mirroring ClaudeCode.ReadSessionHookInput. Used
+// where a populated transcript_path is required (e.g. sessionEnd / offline
+// flows); the spawn path uses ReadHookInput + path derivation instead.
+func (p Cursor) ReadSessionHookInput(r io.Reader) (*types.CursorHookInput, error) {
+	input, err := p.ReadHookInput(r)
+	if err != nil {
+		return nil, err
+	}
+	if input.TranscriptPath == "" {
+		return nil, fmt.Errorf("transcript_path is required")
+	}
+	if err := p.ValidateTranscriptPath(input.TranscriptPath); err != nil {
+		return nil, fmt.Errorf("invalid transcript_path: %w", err)
+	}
+	return input, nil
+}
+
+// ValidateTranscriptPath checks that a Cursor transcript path is safe, mirroring
+// ClaudeCode.ValidateTranscriptPath: absolute, no ".." components, and under the
+// Cursor projects directory.
+func (p Cursor) ValidateTranscriptPath(path string) error {
+	if !filepath.IsAbs(path) {
+		return fmt.Errorf("must be an absolute path")
+	}
+	cleaned := filepath.Clean(path)
+	for _, part := range strings.Split(cleaned, string(filepath.Separator)) {
+		if part == ".." {
+			return fmt.Errorf("must not contain '..' components")
+		}
+	}
+	projectsDir, err := p.ProjectsDir()
+	if err != nil {
+		return err
+	}
+	if pathIsUnderAnyRoot(cleaned, []string{projectsDir}) {
+		return nil
+	}
+	return fmt.Errorf("must be under Cursor projects directory (%s)", projectsDir)
 }
 
 // WalkUpToRoot is the identity walk for Cursor: subagents fire their own
@@ -154,25 +199,203 @@ func (Cursor) DiscoverWorkflowFiles(WorkflowRegistrar, func(string) bool) (int, 
 	return 0, nil
 }
 
-// AnnotateChunk is a stub for T2 (metadata extraction is fleshed out in T3).
-func (Cursor) AnnotateChunk(ChunkView, bool, func(string) string) AnnotationResult {
+// AnnotateChunk sets first_user_message on the first transcript chunk so the
+// session is listable (the backend hides sessions with neither a summary nor a
+// first_user_message — verified kata kk5t). Cursor has no inline summary and no
+// summary-link records, so only first_user_message is written. Non-transcript
+// (agent sidechain) chunks are a no-op. Mirrors ClaudeCode.AnnotateChunk minus
+// summaries: IncludedFirstUserMessage stays false so the engine's
+// sentFirstUserMessage flag is untouched (same as Claude).
+func (p Cursor) AnnotateChunk(c ChunkView, _ bool, redact func(string) string) AnnotationResult {
+	if c.FileType() != FileTypeTranscript {
+		return AnnotationResult{}
+	}
+	firstUserMessage := p.ExtractMetadata(c.Lines()).FirstUserMessage
+	if redact != nil {
+		firstUserMessage = redact(firstUserMessage)
+	}
+	c.SetFirstUserMessage(firstUserMessage)
 	return AnnotationResult{}
 }
 
-// ExtractMetadata is a stub for T2 (transcript parsing is T3).
-func (Cursor) ExtractMetadata([]string) SessionMetadata {
-	return SessionMetadata{}
+// ExtractMetadata parses the first user message from in-memory Cursor
+// transcript lines. Cursor's JSONL message lines are {role, message:{content}}
+// with NO top-level "type" field; status lines are {type:"turn_ended", …} and
+// carry no role (kata 6kys §7). FirstUserMessage is the first role=="user"
+// line's first text part, with the <user_query>…</user_query> wrapper stripped.
+// Summary stays empty (Cursor has no inline summary) and SummaryLinks stays nil
+// (Cursor has none). Lines beyond maxLinesForExtraction are ignored.
+func (Cursor) ExtractMetadata(lines []string) SessionMetadata {
+	if len(lines) > maxLinesForExtraction {
+		lines = lines[:maxLinesForExtraction]
+	}
+	return extractCursorMetadata(lines)
 }
 
-// ScanSessions is unsupported for Cursor: live capture happens via the sync
-// daemon, and offline manual mode is deferred.
-func (Cursor) ScanSessions() ([]SessionInfo, error) {
-	return nil, fmt.Errorf("cursor: manual session scan not supported (sessions sync live via the daemon; offline manual mode is not yet implemented)")
+// cursorUserQueryRe strips the <user_query>…</user_query> sentinel Cursor wraps
+// around user prompts. It is non-greedy and matches across newlines so the
+// inner text is recovered intact.
+var cursorUserQueryRe = regexp.MustCompile(`(?s)^\s*<user_query>(.*?)</user_query>\s*$`)
+
+// extractCursorMetadata is the in-memory extraction primitive shared by
+// ExtractMetadata (chunk-time) and the scan-time file reader.
+func extractCursorMetadata(lines []string) SessionMetadata {
+	var result SessionMetadata
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var entry struct {
+			Role    string `json:"role"`
+			Message struct {
+				Content []struct {
+					Type string `json:"type"`
+					Text string `json:"text"`
+				} `json:"content"`
+			} `json:"message"`
+		}
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			continue
+		}
+		if entry.Role != "user" {
+			continue // skip assistant lines and status lines (turn_ended/error)
+		}
+		for _, part := range entry.Message.Content {
+			if part.Type == "text" && part.Text != "" {
+				text := stripCursorUserQuery(part.Text)
+				result.FirstUserMessage = TruncateUTF8(sanitizeText(text), types.MaxMetadataFieldLength/2)
+				return result
+			}
+		}
+	}
+	return result
 }
 
-// FindSessionByID is unsupported for Cursor for the same reason as ScanSessions.
-func (Cursor) FindSessionByID(string) (string, string, error) {
-	return "", "", fmt.Errorf("cursor: manual session lookup not supported (sessions sync live via the daemon; offline manual mode is not yet implemented)")
+// stripCursorUserQuery removes the <user_query>…</user_query> wrapper Cursor
+// adds to user prompts, returning the inner text. Text without the wrapper is
+// returned unchanged.
+func stripCursorUserQuery(text string) string {
+	if m := cursorUserQueryRe.FindStringSubmatch(text); m != nil {
+		return m[1]
+	}
+	return text
+}
+
+// ScanSessions walks <stateDir>/projects/*/agent-transcripts/*/<id>.jsonl and
+// returns all user sessions sorted oldest first. Subagent sidechain files
+// (nested under .../subagents/) are excluded — only the top-level transcript
+// whose basename equals its parent directory name is a session. Cursor writes
+// real transcript files, so offline `confab save <id>` is supported (unlike
+// OpenCode, which has no on-disk file). Permission errors per path are reported
+// to stderr and do not fail the scan.
+func (p Cursor) ScanSessions() ([]SessionInfo, error) {
+	projectsDir, err := p.ProjectsDir()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get projects directory: %w", err)
+	}
+	if _, err := os.Stat(projectsDir); os.IsNotExist(err) {
+		return nil, nil
+	}
+
+	var sessions []SessionInfo
+	var skippedPaths []string
+	err = filepath.WalkDir(projectsDir, func(path string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			logger.Warn("Failed to access path during scan: %s: %v", path, walkErr)
+			skippedPaths = append(skippedPaths, path)
+			return nil
+		}
+		if session := parseCursorSessionFromPath(path, d); session != nil {
+			sessions = append(sessions, *session)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to walk projects directory: %w", err)
+	}
+	reportSkippedPaths(skippedPaths, "scan")
+
+	sort.Slice(sessions, func(i, j int) bool {
+		return sessions[i].ModTime.Before(sessions[j].ModTime)
+	})
+	return sessions, nil
+}
+
+// FindSessionByID resolves a full or partial Cursor session ID to its full ID
+// and transcript path (prefix match, mirroring the other providers). Walk-up is
+// identity for Cursor (subagents fire their own hooks). Returns an error on
+// no-match or ambiguous prefix.
+func (p Cursor) FindSessionByID(partialID string) (string, string, error) {
+	projectsDir, err := p.ProjectsDir()
+	if err != nil {
+		return "", "", err
+	}
+
+	var matches []SessionInfo
+	var skippedPaths []string
+	err = filepath.WalkDir(projectsDir, func(path string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			logger.Warn("Failed to access path during search: %s: %v", path, walkErr)
+			skippedPaths = append(skippedPaths, path)
+			return nil
+		}
+		session := parseCursorSessionFromPath(path, d)
+		if session != nil && strings.HasPrefix(session.SessionID, partialID) {
+			matches = append(matches, *session)
+		}
+		return nil
+	})
+	if err != nil {
+		logger.Warn("Failed to walk projects directory: %v", err)
+	}
+	reportSkippedPaths(skippedPaths, "search")
+
+	if len(matches) == 0 {
+		return "", "", fmt.Errorf("session not found: %s", partialID)
+	}
+	if len(matches) > 1 {
+		return "", "", fmt.Errorf("ambiguous session ID '%s' matches %d sessions", partialID, len(matches))
+	}
+	return matches[0].SessionID, matches[0].TranscriptPath, nil
+}
+
+// parseCursorSessionFromPath checks whether a path is a top-level Cursor
+// session transcript and, if so, returns its SessionInfo with the first user
+// message extracted. A session transcript lives at
+// .../agent-transcripts/<id>/<id>.jsonl, so the file basename (sans .jsonl)
+// must equal its parent directory name. This excludes subagent files (nested
+// under .../subagents/, whose parent dir is "subagents") and any stray files.
+func parseCursorSessionFromPath(path string, d os.DirEntry) *SessionInfo {
+	if d.IsDir() || !strings.HasSuffix(path, ".jsonl") {
+		return nil
+	}
+	sessionID := strings.TrimSuffix(d.Name(), ".jsonl")
+	if filepath.Base(filepath.Dir(path)) != sessionID {
+		return nil
+	}
+	info, err := d.Info()
+	if err != nil {
+		return nil
+	}
+	meta := extractCursorSessionMetadataFromFile(path)
+	return &SessionInfo{
+		SessionID:        sessionID,
+		TranscriptPath:   path,
+		ModTime:          info.ModTime(),
+		SizeBytes:        info.Size(),
+		FirstUserMessage: meta.FirstUserMessage,
+	}
+}
+
+// extractCursorSessionMetadataFromFile reads the head of a transcript file and
+// returns its first user message. Open failures degrade silently (empty
+// metadata); scan errors log a warning but whatever was read is still parsed.
+func extractCursorSessionMetadataFromFile(transcriptPath string) SessionMetadata {
+	lines, err := readHeadLines(transcriptPath)
+	if err != nil && lines != nil {
+		logger.Warn("Error reading transcript %s during metadata extraction: %v", transcriptPath, err)
+	}
+	return extractCursorMetadata(lines)
 }
 
 // InstallHooks is not yet implemented (T4 installs the ~/.cursor/hooks.json
