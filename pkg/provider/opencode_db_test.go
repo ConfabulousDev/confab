@@ -506,6 +506,176 @@ func TestListDescendantsRootSelfExcluded(t *testing.T) {
 	}
 }
 
+// t6d5 ListRootSessions tests ---------------------------------------------
+
+// TestListRootSessionsExcludesChildren asserts ListRootSessions returns only
+// sessions whose parent_id IS NULL (roots), mirroring the daemon's root-only
+// spawn rule. Children must not appear in offline `confab list` output.
+func TestListRootSessionsExcludesChildren(t *testing.T) {
+	const rootA = "ses_0000000000000000000roota"
+	const rootB = "ses_0000000000000000000rootb"
+	const child = "ses_0000000000000000000child"
+	b := opencodetest.NewDB(t)
+	b.AddSessionWithDir(rootA, "", "/work/a").
+		AddSessionWithDir(rootB, "", "/work/b").
+		AddSessionWithDir(child, rootA, "/work/a")
+
+	r := NewOpenCodeDBReader(b.Path())
+	roots, err := r.ListRootSessions(context.Background())
+	if err != nil {
+		t.Fatalf("ListRootSessions: %v", err)
+	}
+	if len(roots) != 2 {
+		t.Fatalf("got %d root sessions, want 2 (children must be excluded): %+v", len(roots), roots)
+	}
+	got := map[string]string{}
+	for _, row := range roots {
+		got[row.ID] = row.Directory
+	}
+	if got[rootA] != "/work/a" {
+		t.Errorf("rootA dir = %q, want /work/a", got[rootA])
+	}
+	if got[rootB] != "/work/b" {
+		t.Errorf("rootB dir = %q, want /work/b", got[rootB])
+	}
+	if _, ok := got[child]; ok {
+		t.Errorf("child session %q leaked into root list", child)
+	}
+}
+
+// TestListRootSessionsOrdersNewestFirst asserts roots come back ordered by
+// time_created descending so the most recent sessions surface first in
+// `confab list`.
+func TestListRootSessionsOrdersNewestFirst(t *testing.T) {
+	b := opencodetest.NewDB(t)
+	// AddSessionAt lets us set time_created explicitly.
+	b.AddSessionAt("ses_old", "", "/work", 100).
+		AddSessionAt("ses_new", "", "/work", 300).
+		AddSessionAt("ses_mid", "", "/work", 200)
+
+	r := NewOpenCodeDBReader(b.Path())
+	roots, err := r.ListRootSessions(context.Background())
+	if err != nil {
+		t.Fatalf("ListRootSessions: %v", err)
+	}
+	want := []string{"ses_new", "ses_mid", "ses_old"}
+	if len(roots) != len(want) {
+		t.Fatalf("got %d roots, want %d", len(roots), len(want))
+	}
+	for i, w := range want {
+		if roots[i].ID != w {
+			t.Errorf("roots[%d].ID = %q, want %q (want newest-first)", i, roots[i].ID, w)
+		}
+	}
+}
+
+// TestListRootSessionsCarriesTimeCreated asserts the TimeCreated column is
+// surfaced (unix epoch) so ScanSessions can build SessionInfo.ModTime.
+func TestListRootSessionsCarriesTimeCreated(t *testing.T) {
+	b := opencodetest.NewDB(t)
+	b.AddSessionAt("ses_t", "", "/work", 1750000000)
+
+	r := NewOpenCodeDBReader(b.Path())
+	roots, err := r.ListRootSessions(context.Background())
+	if err != nil {
+		t.Fatalf("ListRootSessions: %v", err)
+	}
+	if len(roots) != 1 {
+		t.Fatalf("got %d roots, want 1", len(roots))
+	}
+	if roots[0].TimeCreated != 1750000000 {
+		t.Errorf("TimeCreated = %d, want 1750000000", roots[0].TimeCreated)
+	}
+}
+
+// TestListRootSessionsEmptyDB asserts an empty DB returns an empty slice and
+// nil error (clean "no sessions" for the list command).
+func TestListRootSessionsEmptyDB(t *testing.T) {
+	b := opencodetest.NewDB(t)
+	r := NewOpenCodeDBReader(b.Path())
+	roots, err := r.ListRootSessions(context.Background())
+	if err != nil {
+		t.Fatalf("ListRootSessions: %v", err)
+	}
+	if len(roots) != 0 {
+		t.Errorf("got %d roots, want 0 for empty DB", len(roots))
+	}
+}
+
+// TestListRootSessionsMissingDBReturnsError asserts a missing DB yields a
+// clear error so `confab list --provider opencode` reports it rather than
+// silently showing nothing.
+func TestListRootSessionsMissingDBReturnsError(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "does", "not", "exist", "opencode.db")
+	r := NewOpenCodeDBReader(missing)
+	_, err := r.ListRootSessions(context.Background())
+	if err == nil {
+		t.Fatal("ListRootSessions returned nil err for missing DB, want error")
+	}
+}
+
+// t6d5 FirstUserMessage helper tests ---------------------------------------
+
+// TestFirstUserMessageTextReturnsFirstUserText asserts the helper returns the
+// first user message's first text part, used to populate the list TITLE
+// column (OpenCode has no summary).
+func TestFirstUserMessageTextReturnsFirstUserText(t *testing.T) {
+	const sid = "ses_fum"
+	b := opencodetest.NewDB(t)
+	b.AddSession(sid, "")
+	b.AddMessage(sid, "msg_00000000000000000000a1", opencodetest.UserTextMessage("first prompt"))
+	b.AddPart("msg_00000000000000000000a1", "prt_a", opencodetest.TextPart("first prompt"))
+	b.AddMessage(sid, "msg_00000000000000000000b2", opencodetest.UserTextMessage("second prompt"))
+	b.AddPart("msg_00000000000000000000b2", "prt_b", opencodetest.TextPart("second prompt"))
+
+	r := NewOpenCodeDBReader(b.Path())
+	got, err := r.FirstUserMessageText(context.Background(), sid)
+	if err != nil {
+		t.Fatalf("FirstUserMessageText: %v", err)
+	}
+	if got != "first prompt" {
+		t.Errorf("FirstUserMessageText = %q, want \"first prompt\"", got)
+	}
+}
+
+// TestFirstUserMessageTextSkipsAssistant asserts an assistant-led transcript
+// still finds the first *user* message text, not the assistant's.
+func TestFirstUserMessageTextSkipsAssistant(t *testing.T) {
+	const sid = "ses_fum_skip"
+	b := opencodetest.NewDB(t)
+	b.AddSession(sid, "")
+	b.AddMessage(sid, "msg_00000000000000000000a1", opencodetest.AssistantMessageFinished("stop"))
+	b.AddPart("msg_00000000000000000000a1", "prt_a", opencodetest.TextPart("assistant text"))
+	b.AddMessage(sid, "msg_00000000000000000000b2", opencodetest.UserTextMessage("the user prompt"))
+	b.AddPart("msg_00000000000000000000b2", "prt_b", opencodetest.TextPart("the user prompt"))
+
+	r := NewOpenCodeDBReader(b.Path())
+	got, err := r.FirstUserMessageText(context.Background(), sid)
+	if err != nil {
+		t.Fatalf("FirstUserMessageText: %v", err)
+	}
+	if got != "the user prompt" {
+		t.Errorf("FirstUserMessageText = %q, want \"the user prompt\"", got)
+	}
+}
+
+// TestFirstUserMessageTextEmptyWhenNone asserts an empty session (no user
+// text) returns "" and nil error — list TITLE is then blank, not an error.
+func TestFirstUserMessageTextEmptyWhenNone(t *testing.T) {
+	const sid = "ses_fum_none"
+	b := opencodetest.NewDB(t)
+	b.AddSession(sid, "")
+
+	r := NewOpenCodeDBReader(b.Path())
+	got, err := r.FirstUserMessageText(context.Background(), sid)
+	if err != nil {
+		t.Fatalf("FirstUserMessageText: %v", err)
+	}
+	if got != "" {
+		t.Errorf("FirstUserMessageText = %q, want \"\"", got)
+	}
+}
+
 // CF-549 ReadSessionInfo tests --------------------------------------------
 
 // TestReadSessionInfoReturnsDirAndParent asserts ReadSessionInfo reads
