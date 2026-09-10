@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ConfabulousDev/confab/pkg/backendtest"
 	"github.com/ConfabulousDev/confab/pkg/codextest"
 	"github.com/ConfabulousDev/confab/pkg/provider"
 	"github.com/ConfabulousDev/confab/pkg/sync"
@@ -63,7 +64,8 @@ func (b *saveTestBackend) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "/api/v1/sync/init":
 		atomic.AddInt32(&b.initCount, 1)
 		var req sync.InitRequest
-		json.NewDecoder(r.Body).Decode(&req)
+		body, _ := backendtest.ReadRequestBody(r)
+		json.Unmarshal(body, &req)
 		b.initReqs = append(b.initReqs, req)
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(sync.InitResponse{
@@ -74,7 +76,8 @@ func (b *saveTestBackend) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "/api/v1/sync/chunk":
 		atomic.AddInt32(&b.chunkCount, 1)
 		var req sync.ChunkRequest
-		json.NewDecoder(r.Body).Decode(&req)
+		body, _ := backendtest.ReadRequestBody(r)
+		json.Unmarshal(body, &req)
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(sync.ChunkResponse{
 			LastSyncedLine: req.FirstLine + len(req.Lines) - 1,
@@ -314,13 +317,13 @@ func TestSaveCodex_RootUUID_UploadsRootAndAllChildren_RecordsChunksOnBackend(t *
 	childB := uuidStr(t, 0x30)
 
 	fixture.AddRoot(rootID).
-		WithSessionMeta("/work", "gpt-5").
+		WithSessionMeta("/work").
 		WithUserMessage("hello")
 	fixture.AddSubagent(rootID, childA, codextest.SubagentOpts{AgentRole: "a"}).
-		WithSessionMeta("/work", "gpt-5").
+		WithSessionMeta("/work").
 		WithUserMessage("plan a")
 	fixture.AddSubagent(rootID, childB, codextest.SubagentOpts{AgentRole: "b"}).
-		WithSessionMeta("/work", "gpt-5").
+		WithSessionMeta("/work").
 		WithUserMessage("plan b")
 
 	if err := saveViaDefault(t, provider.Codex{}, []string{rootID}); err != nil {
@@ -350,9 +353,9 @@ func TestSaveCodex_SubagentUUID_ResolvesToRoot_StillUploadsWholeTree(t *testing.
 	rootID := uuidStr(t, 0x11)
 	childID := uuidStr(t, 0x22)
 
-	fixture.AddRoot(rootID).WithSessionMeta("/work", "gpt-5").WithUserMessage("hi root")
+	fixture.AddRoot(rootID).WithSessionMeta("/work").WithUserMessage("hi root")
 	fixture.AddSubagent(rootID, childID, codextest.SubagentOpts{AgentRole: "reviewer"}).
-		WithSessionMeta("/work", "gpt-5").WithUserMessage("hi child")
+		WithSessionMeta("/work").WithUserMessage("hi child")
 
 	if err := saveViaDefault(t, provider.Codex{}, []string{childID}); err != nil {
 		t.Fatalf("save: %v", err)
@@ -375,8 +378,8 @@ func TestSaveCodex_MultipleSessionsArgs_Independent(t *testing.T) {
 
 	root1 := uuidStr(t, 0x40)
 	root2 := uuidStr(t, 0x50)
-	fixture.AddRoot(root1).WithSessionMeta("/a", "gpt-5").WithUserMessage("a")
-	fixture.AddRoot(root2).WithSessionMeta("/b", "gpt-5").WithUserMessage("b")
+	fixture.AddRoot(root1).WithSessionMeta("/a").WithUserMessage("a")
+	fixture.AddRoot(root2).WithSessionMeta("/b").WithUserMessage("b")
 
 	if err := saveViaDefault(t, provider.Codex{}, []string{root1, root2}); err != nil {
 		t.Fatalf("save: %v", err)
@@ -405,7 +408,7 @@ func TestSaveCodex_OneSessionFails_OthersContinue(t *testing.T) {
 
 	// Only one valid session; the other arg is an unknown UUID.
 	rootID := uuidStr(t, 0x60)
-	fixture.AddRoot(rootID).WithSessionMeta("/work", "gpt-5").WithUserMessage("ok")
+	fixture.AddRoot(rootID).WithSessionMeta("/work").WithUserMessage("ok")
 
 	unknown := "ffffffff-ffff-ffff-ffff-ffffffffffff"
 	if err := saveViaDefault(t, provider.Codex{}, []string{unknown, rootID}); err != nil {
@@ -423,7 +426,7 @@ func TestSaveCodex_StateDBMissing_FallsBackToSingleRolloutSync_NoCrash(t *testin
 
 	fixture := setupCodexSaveEnv(t, server.URL)
 	rootID := uuidStr(t, 0x70)
-	fixture.AddRoot(rootID).WithSessionMeta("/work", "gpt-5").WithUserMessage("lonely root")
+	fixture.AddRoot(rootID).WithSessionMeta("/work").WithUserMessage("lonely root")
 
 	// Remove the state DB to simulate a brand-new install / no Codex DB.
 	if err := os.Remove(fixture.StateDBPath); err != nil {

@@ -69,9 +69,9 @@ func TestCodexFindSessionByIDWalksUpToRoot(t *testing.T) {
 		rootID  = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
 		childID = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
 	)
-	root := f.AddRoot(rootID).WithSessionMeta("/work/root", "model-x")
+	root := f.AddRoot(rootID).WithSessionMeta("/work/root")
 	child := f.AddSubagent(root.ThreadUUID(), childID, codextest.SubagentOpts{AgentRole: "reviewer"}).
-		WithSessionMeta("/work/root", "model-x")
+		WithSessionMeta("/work/root")
 
 	// Caller passes the subagent's UUID prefix. The interface contract says
 	// FindSessionByID must return the ROOT — not the subagent — so the

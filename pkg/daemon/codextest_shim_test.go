@@ -29,7 +29,7 @@ func newCodexFixtureShim(t *testing.T) *codextestFixtureShim {
 // addRoot inserts a root thread with a user message and returns its
 // thread UUID + rollout path.
 func (s *codextestFixtureShim) addRoot(uuid, firstUserMsg string) codexShimEntry {
-	b := s.AddRoot(uuid).WithSessionMeta("/work", "gpt-5")
+	b := s.AddRoot(uuid).WithSessionMeta("/work")
 	if firstUserMsg != "" {
 		b.WithUserMessage(firstUserMsg)
 	}
@@ -42,7 +42,7 @@ func (s *codextestFixtureShim) addRoot(uuid, firstUserMsg string) codexShimEntry
 // validates the path.
 func (s *codextestFixtureShim) addChild(parentUUID, uuid, firstUserMsg, agentRole string) codexShimEntry {
 	b := s.AddSubagent(parentUUID, uuid, codextest.SubagentOpts{AgentRole: agentRole}).
-		WithSessionMeta("/work", "gpt-5")
+		WithSessionMeta("/work")
 	if firstUserMsg != "" {
 		b.WithUserMessage(firstUserMsg)
 	}

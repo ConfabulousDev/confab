@@ -16,28 +16,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ConfabulousDev/confab/pkg/backendtest"
 	"github.com/ConfabulousDev/confab/pkg/provider"
 	"github.com/ConfabulousDev/confab/pkg/sync"
-	"github.com/klauspost/compress/zstd"
 )
-
-// zstd decoder for decompressing request bodies in tests
-var zstdDecoder, _ = zstd.NewReader(nil)
-
-// readRequestBody reads and decompresses the request body if needed
-func readRequestBody(r *http.Request) ([]byte, error) {
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		return nil, err
-	}
-
-	// Decompress if zstd encoded
-	if r.Header.Get("Content-Encoding") == "zstd" {
-		return zstdDecoder.DecodeAll(body, nil)
-	}
-
-	return body, nil
-}
 
 // mockBackend tracks requests and provides configurable responses
 type mockBackend struct {
@@ -96,7 +78,7 @@ func (m *mockBackend) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	// Read and decompress request body
-	body, err := readRequestBody(r)
+	body, err := backendtest.ReadRequestBody(r)
 	if err != nil {
 		m.t.Errorf("Failed to read request body: %v", err)
 		w.WriteHeader(http.StatusBadRequest)
@@ -1212,13 +1194,7 @@ func TestDaemonLargeFile(t *testing.T) {
 		rawBody, _ := io.ReadAll(r.Body)
 		atomic.AddInt64(&totalBytesReceived, int64(len(rawBody)))
 
-		// Decompress if needed
-		var body []byte
-		if r.Header.Get("Content-Encoding") == "zstd" {
-			body, _ = zstdDecoder.DecodeAll(rawBody, nil)
-		} else {
-			body = rawBody
-		}
+		body := backendtest.Decompress(r.Header.Get("Content-Encoding"), rawBody)
 
 		switch r.URL.Path {
 		case "/api/v1/sync/init":
@@ -1324,7 +1300,7 @@ func TestDaemonChunkSizeLimit(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
-		body, _ := readRequestBody(r)
+		body, _ := backendtest.ReadRequestBody(r)
 
 		switch r.URL.Path {
 		case "/api/v1/sync/init":
@@ -1442,7 +1418,7 @@ func TestDaemonLineTooLarge(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
-		body, _ := readRequestBody(r)
+		body, _ := backendtest.ReadRequestBody(r)
 
 		switch r.URL.Path {
 		case "/api/v1/sync/init":
@@ -1551,7 +1527,7 @@ func TestDaemonBadRequestRecovery(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
-		body, _ := readRequestBody(r)
+		body, _ := backendtest.ReadRequestBody(r)
 
 		switch r.URL.Path {
 		case "/api/v1/sync/init":
@@ -1847,7 +1823,7 @@ func TestDaemonBackendRollback(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
-		body, _ := readRequestBody(r)
+		body, _ := backendtest.ReadRequestBody(r)
 
 		switch r.URL.Path {
 		case "/api/v1/sync/init":
@@ -2003,7 +1979,7 @@ func TestDaemonSessionDeleted(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
-		body, _ := readRequestBody(r)
+		body, _ := backendtest.ReadRequestBody(r)
 
 		switch r.URL.Path {
 		case "/api/v1/sync/init":
@@ -2090,7 +2066,7 @@ func TestDaemonSessionDeletedRecovery(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
-		body, _ := readRequestBody(r)
+		body, _ := backendtest.ReadRequestBody(r)
 
 		switch r.URL.Path {
 		case "/api/v1/sync/init":

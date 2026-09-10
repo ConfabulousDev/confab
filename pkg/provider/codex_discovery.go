@@ -52,11 +52,68 @@ type codexSessionMeta struct {
 	AgentPath     string          `json:"agent_path"`
 	AgentRole     string          `json:"agent_role"`
 	AgentNickname string          `json:"agent_nickname"`
+	// AgentType mirrors Codex's `#[serde(alias = "agent_type")]` on
+	// SessionMeta.agent_role: a rollout may carry either key. Read it via
+	// agentRole() so a subagent tagged with the alias can't slip past
+	// IsUserSession and spawn a stray daemon. Never read directly.
+	AgentType string `json:"agent_type"`
 }
 
+// agentRole returns the rollout's agent role, honoring Codex's
+// `agent_type` alias. The canonical field wins when both are present.
+func (m codexSessionMeta) agentRole() string {
+	if m.AgentRole != "" {
+		return m.AgentRole
+	}
+	return m.AgentType
+}
+
+// codexUserMessagePayload decodes both event_msg payload shapes that can
+// carry the human prompt. Codex changed the shape around 0.149.1:
+//
+//	pre-0.149  {"type":"user_message","message":"hi"}
+//	0.149+     {"type":"item_completed","item":{"type":"UserMessage",
+//	            "content":[{"type":"text","text":"hi"},...]}}
+//
+// Both are decoded from one struct because the discriminating `type` and
+// the two payload bodies never collide. Old rollouts are still on disk and
+// their shape is frozen, so this does not grow over time.
 type codexUserMessagePayload struct {
-	Type    string `json:"type"`
+	Type string `json:"type"`
+	// Message carries the prompt in the pre-0.149 shape.
 	Message string `json:"message"`
+	// Item carries it in the 0.149+ shape.
+	Item codexRolloutItem `json:"item"`
+}
+
+// codexRolloutItem is the `item` object of an item_completed event. Only
+// the UserMessage variant is modeled; every other item type (AgentMessage,
+// Reasoning, CommandExecution, FileChange, Extension, ...) decodes with an
+// unmatched Type and is skipped.
+type codexRolloutItem struct {
+	Type    string                    `json:"type"`
+	Content []codexUserMessageContent `json:"content"`
+}
+
+// codexUserMessageContent is one typed part of a UserMessage's content
+// array. Only `type == "text"` carries prompt text — real rollouts also
+// contain e.g. {"type":"skill","name":...,"path":...} parts, which must
+// not leak into the session title.
+type codexUserMessageContent struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
+}
+
+// text returns the prompt text of a UserMessage item: its text parts
+// joined by newlines, in wire order. Non-text parts are dropped.
+func (i codexRolloutItem) text() string {
+	parts := make([]string, 0, len(i.Content))
+	for _, c := range i.Content {
+		if c.Type == "text" && c.Text != "" {
+			parts = append(parts, c.Text)
+		}
+	}
+	return strings.Join(parts, "\n")
 }
 
 var codexRolloutPattern = regexp.MustCompile(`^rollout-.+-([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\.jsonl$`)
@@ -136,8 +193,9 @@ func (p Codex) ScanCodexSessions() ([]CodexSessionInfo, error) {
 
 // ScanSessions projects ScanCodexSessions to the cross-provider
 // SessionInfo shape. FirstUserMessage is extracted from each rollout's
-// first event_msg.user_message line (capped to maxLinesForExtraction).
-// Sessions are returned oldest first to match Claude's ordering.
+// first user-message event_msg line, in either shape Codex emits (capped
+// to maxLinesForExtraction). Sessions are returned oldest first to match
+// Claude's ordering.
 func (p Codex) ScanSessions() ([]SessionInfo, error) {
 	codex, err := p.ScanCodexSessions()
 	if err != nil {
@@ -158,7 +216,7 @@ func (p Codex) ScanSessions() ([]SessionInfo, error) {
 }
 
 // firstUserMessageForScan reads the head of a rollout file and extracts
-// the first event_msg.user_message. Errors degrade silently to "" — the
+// the first user message from it. Errors degrade silently to "" — the
 // list command tolerates missing titles.
 func (p Codex) firstUserMessageForScan(path string) string {
 	lines, _ := readHeadLines(path)
@@ -299,7 +357,7 @@ func (p Codex) ReadSessionInfo(path string) (CodexSessionInfo, error) {
 		info.Source = flattenCodexSource(meta.Source)
 		info.ThreadSource = meta.ThreadSource
 		info.AgentPath = meta.AgentPath
-		info.AgentRole = meta.AgentRole
+		info.AgentRole = meta.agentRole()
 		info.AgentNickname = meta.AgentNickname
 		return info, nil
 	}
@@ -312,6 +370,16 @@ func (p Codex) ReadSessionInfo(path string) (CodexSessionInfo, error) {
 // ExtractFirstUserMessageFromLines returns the first non-empty user message
 // found in the given rollout lines, truncated to MaxMetadataFieldLength/2
 // bytes on a UTF-8 boundary. Returns "" when no user message is present.
+//
+// Both `event_msg` shapes Codex has emitted are recognized (see
+// codexUserMessagePayload); whichever appears first in line order wins. The
+// shape is sniffed from the payload rather than gated on `cli_version`,
+// which degrades better against versions we have not sampled. A modern
+// message spanning several text parts is joined with newlines.
+//
+// `response_item` lines are deliberately NOT consulted as a fallback: they
+// are contaminated by injected context (<environment_context>, AGENTS.md),
+// so a miss here is better than an injected string becoming the title.
 func (Codex) ExtractFirstUserMessageFromLines(lines []string) string {
 	for _, raw := range lines {
 		var line codexRolloutLine
@@ -325,10 +393,16 @@ func (Codex) ExtractFirstUserMessageFromLines(lines []string) string {
 		if err := json.Unmarshal(line.Payload, &payload); err != nil {
 			continue
 		}
-		if payload.Type != "user_message" {
+		var message string
+		switch {
+		case payload.Type == "user_message":
+			message = payload.Message
+		case payload.Type == "item_completed" && payload.Item.Type == "UserMessage":
+			message = payload.Item.text()
+		default:
 			continue
 		}
-		message := strings.TrimSpace(payload.Message)
+		message = strings.TrimSpace(message)
 		if message == "" {
 			continue
 		}

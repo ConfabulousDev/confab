@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -14,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ConfabulousDev/confab/pkg/backendtest"
 	"github.com/ConfabulousDev/confab/pkg/codextest"
 	"github.com/ConfabulousDev/confab/pkg/config"
 	"github.com/ConfabulousDev/confab/pkg/opencodetest"
@@ -21,26 +21,7 @@ import (
 	"github.com/ConfabulousDev/confab/pkg/provider"
 	"github.com/ConfabulousDev/confab/pkg/redactor"
 	"github.com/ConfabulousDev/confab/pkg/types"
-	"github.com/klauspost/compress/zstd"
 )
-
-// zstd decoder for decompressing request bodies in tests
-var zstdDecoder, _ = zstd.NewReader(nil)
-
-// readRequestBody reads and decompresses the request body if needed
-func readRequestBody(r *http.Request) ([]byte, error) {
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		return nil, err
-	}
-
-	// Decompress if zstd encoded
-	if r.Header.Get("Content-Encoding") == "zstd" {
-		return zstdDecoder.DecodeAll(body, nil)
-	}
-
-	return body, nil
-}
 
 // mockBackend tracks requests and provides configurable responses
 type mockBackend struct {
@@ -92,7 +73,7 @@ func (m *mockBackend) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	// Read and decompress request body
-	body, err := readRequestBody(r)
+	body, err := backendtest.ReadRequestBody(r)
 	if err != nil {
 		m.t.Errorf("Failed to read request body: %v", err)
 		w.WriteHeader(http.StatusBadRequest)
@@ -1120,7 +1101,7 @@ func TestEngine_SyncAll_RefreshStateAfterUploadFailure(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
-		body, _ := readRequestBody(r)
+		body, _ := backendtest.ReadRequestBody(r)
 
 		switch r.URL.Path {
 		case "/api/v1/sync/init":
@@ -1235,7 +1216,7 @@ func TestEngine_SyncAll_RefreshStateOnContiguityError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
-		body, _ := readRequestBody(r)
+		body, _ := backendtest.ReadRequestBody(r)
 
 		switch r.URL.Path {
 		case "/api/v1/sync/init":
@@ -1677,7 +1658,7 @@ func codexEngineSetup(t *testing.T, mock *mockBackend) (*codextest.Fixture, *Eng
 	fixture := codextest.NewFixture(t)
 
 	root := fixture.AddRoot("root-thread").
-		WithSessionMeta("/workdir", "gpt-5").
+		WithSessionMeta("/workdir").
 		WithUserMessage("hello codex")
 
 	engine := newEngineWithBackend(t, mustNewClient(t, server.URL, tmpDir), nil, EngineConfig{
@@ -1719,8 +1700,11 @@ func TestEngine_SyncAll_CodexRoot_FirstChunk_EmitsCodexRolloutMeta(t *testing.T)
 	if cr.RolloutPath != root.Path() {
 		t.Errorf("RolloutPath = %q, want %q", cr.RolloutPath, root.Path())
 	}
-	if cr.Model != "gpt-5" {
-		t.Errorf("Model = %q, want gpt-5", cr.Model)
+	// Model stays empty for a root: Codex's session_meta carries no `model`
+	// field in any released version (only `model_provider`). Descendants read
+	// theirs from the SQLite `threads` row. Follow-up covers roots.
+	if cr.Model != "" {
+		t.Errorf("Model = %q, want \"\" (session_meta has no model field)", cr.Model)
 	}
 	if cr.ThreadSource != "user" {
 		t.Errorf("ThreadSource = %q, want user", cr.ThreadSource)
@@ -1767,7 +1751,7 @@ func TestEngine_SyncAll_CodexChild_FirstChunk_EmitsCodexRolloutMeta_WithParentSe
 			AgentRole:     "planner",
 			AgentNickname: "Planny",
 		},
-	).WithSessionMeta("/childdir", "gpt-5").
+	).WithSessionMeta("/childdir").
 		WithUserMessage("plan the work")
 
 	if _, err := engine.SyncAll(); err != nil {
@@ -1807,10 +1791,10 @@ func TestEngine_SyncAll_CodexGrandchild_FirstChunk_EmitsCodexRolloutMeta_WithImm
 	fixture, engine, root := codexEngineSetup(t, mock)
 	child := fixture.AddSubagent(root.ThreadUUID(), "child",
 		codextest.SubagentOpts{AgentRole: "planner", AgentNickname: "P"}).
-		WithSessionMeta("/", "m").WithUserMessage("plan")
+		WithSessionMeta("/").WithUserMessage("plan")
 	grand := fixture.AddSubagent(child.ThreadUUID(), "grand",
 		codextest.SubagentOpts{AgentRole: "sub-planner", AgentNickname: "SP"}).
-		WithSessionMeta("/", "m").WithUserMessage("sub-plan")
+		WithSessionMeta("/").WithUserMessage("sub-plan")
 
 	if _, err := engine.SyncAll(); err != nil {
 		t.Fatalf("SyncAll: %v", err)
@@ -1835,7 +1819,7 @@ func TestEngine_SyncAll_Codex_AllChildrenUploadAsAgentFileType_AndAllTargetRootS
 	fixture, engine, root := codexEngineSetup(t, mock)
 	for _, id := range []string{"a", "b", "c"} {
 		fixture.AddSubagent(root.ThreadUUID(), id, codextest.SubagentOpts{AgentRole: id}).
-			WithSessionMeta("/", "m").WithUserMessage("task " + id)
+			WithSessionMeta("/").WithUserMessage("task " + id)
 	}
 
 	if _, err := engine.SyncAll(); err != nil {
@@ -1871,7 +1855,7 @@ func TestEngine_SyncAll_Codex_NewDescendantAppearsBetweenCycles_PickedUpNextCycl
 	// Subagent appears between cycles (simulating Codex spawning one mid-session).
 	late := fixture.AddSubagent(root.ThreadUUID(), "late",
 		codextest.SubagentOpts{AgentRole: "late-arrival"}).
-		WithSessionMeta("/", "m").WithUserMessage("plan late")
+		WithSessionMeta("/").WithUserMessage("plan late")
 
 	if _, err := engine.SyncAll(); err != nil {
 		t.Fatalf("SyncAll #2: %v", err)
