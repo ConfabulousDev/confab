@@ -139,7 +139,7 @@ func TestStateDBPath_Cached_LaterEnvChangeIgnored(t *testing.T) {
 
 func TestWalkUpToRoot_RootReturnsItself_NoEdge(t *testing.T) {
 	f := codextest.NewFixture(t)
-	root := f.AddRoot("root-uuid").WithSessionMeta("/work", "model")
+	root := f.AddRoot("root-uuid").WithSessionMeta("/work")
 
 	got, gotPath, err := provider.Codex{}.WalkUpToRoot(root.ThreadUUID())
 	if err != nil {
@@ -155,9 +155,9 @@ func TestWalkUpToRoot_RootReturnsItself_NoEdge(t *testing.T) {
 
 func TestWalkUpToRoot_DirectChild_ReturnsParent(t *testing.T) {
 	f := codextest.NewFixture(t)
-	root := f.AddRoot("root").WithSessionMeta("/work", "m")
+	root := f.AddRoot("root").WithSessionMeta("/work")
 	child := f.AddSubagent(root.ThreadUUID(), "child", codextest.SubagentOpts{AgentRole: "planner"}).
-		WithSessionMeta("/work", "m")
+		WithSessionMeta("/work")
 
 	got, gotPath, err := provider.Codex{}.WalkUpToRoot(child.ThreadUUID())
 	if err != nil {
@@ -173,11 +173,11 @@ func TestWalkUpToRoot_DirectChild_ReturnsParent(t *testing.T) {
 
 func TestWalkUpToRoot_Grandchild_WalksToRoot(t *testing.T) {
 	f := codextest.NewFixture(t)
-	root := f.AddRoot("root").WithSessionMeta("/", "m")
+	root := f.AddRoot("root").WithSessionMeta("/")
 	child := f.AddSubagent(root.ThreadUUID(), "child", codextest.SubagentOpts{AgentRole: "planner"}).
-		WithSessionMeta("/", "m")
+		WithSessionMeta("/")
 	grand := f.AddSubagent(child.ThreadUUID(), "grand", codextest.SubagentOpts{AgentRole: "subplanner"}).
-		WithSessionMeta("/", "m")
+		WithSessionMeta("/")
 
 	got, gotPath, err := provider.Codex{}.WalkUpToRoot(grand.ThreadUUID())
 	if err != nil {
@@ -193,12 +193,12 @@ func TestWalkUpToRoot_Grandchild_WalksToRoot(t *testing.T) {
 
 func TestWalkUpToRoot_DeepTree_5Levels(t *testing.T) {
 	f := codextest.NewFixture(t)
-	root := f.AddRoot("L0").WithSessionMeta("/", "m")
+	root := f.AddRoot("L0").WithSessionMeta("/")
 	parent := root.ThreadUUID()
 	var leaf string
 	for i := 1; i <= 5; i++ {
 		id := "L" + itoa(i)
-		f.AddSubagent(parent, id, codextest.SubagentOpts{AgentRole: "r"}).WithSessionMeta("/", "m")
+		f.AddSubagent(parent, id, codextest.SubagentOpts{AgentRole: "r"}).WithSessionMeta("/")
 		parent = id
 		leaf = id
 	}
@@ -216,8 +216,8 @@ func TestWalkUpToRoot_Cycle_ReturnsError(t *testing.T) {
 	f := codextest.NewFixture(t)
 	// Cycle: A → B → A. Manually insert via DB() so the fixture builder
 	// doesn't reject the redundant edge.
-	f.AddRoot("A").WithSessionMeta("/", "m")
-	f.AddSubagent("A", "B", codextest.SubagentOpts{AgentRole: "r"}).WithSessionMeta("/", "m")
+	f.AddRoot("A").WithSessionMeta("/")
+	f.AddSubagent("A", "B", codextest.SubagentOpts{AgentRole: "r"}).WithSessionMeta("/")
 	// Add the cycling edge B → A. (B is now both child of A and parent of A.)
 	if _, err := f.DB().Exec(
 		`INSERT INTO thread_spawn_edges (parent_thread_id, child_thread_id, status) VALUES (?, ?, 'completed')`,
@@ -254,7 +254,7 @@ func TestWalkUpToRoot_EdgeAppearsAfterRetry_Succeeds(t *testing.T) {
 	tightenRetry(t, 8, 25*time.Millisecond)
 
 	f := codextest.NewFixture(t)
-	root := f.AddRoot("root").WithSessionMeta("/", "m")
+	root := f.AddRoot("root").WithSessionMeta("/")
 	// Insert the threads row for the child immediately (Codex normally
 	// writes this before firing the SessionStart hook), but delay the
 	// thread_spawn_edges insert by ~60ms (covers ~3 retry attempts).
@@ -340,7 +340,7 @@ func TestListSubtree_EmptyDB_ReturnsNil(t *testing.T) {
 
 func TestListSubtree_RootWithNoChildren_ReturnsEmpty(t *testing.T) {
 	f := codextest.NewFixture(t)
-	root := f.AddRoot("root").WithSessionMeta("/", "m")
+	root := f.AddRoot("root").WithSessionMeta("/")
 
 	got, err := provider.Codex{}.ListSubtree(root.ThreadUUID())
 	if err != nil {
@@ -353,10 +353,10 @@ func TestListSubtree_RootWithNoChildren_ReturnsEmpty(t *testing.T) {
 
 func TestListSubtree_SingleChild_ReturnsOneRow_WithImmediateParent(t *testing.T) {
 	f := codextest.NewFixture(t)
-	root := f.AddRoot("root").WithSessionMeta("/", "m")
+	root := f.AddRoot("root").WithSessionMeta("/")
 	child := f.AddSubagent(root.ThreadUUID(), "child",
 		codextest.SubagentOpts{AgentPath: "~/agent.md", AgentRole: "planner", AgentNickname: "Planny"},
-	).WithSessionMeta("/work", "gpt-5")
+	).WithSessionMeta("/work")
 
 	got, err := provider.Codex{}.ListSubtree(root.ThreadUUID())
 	if err != nil {
@@ -388,9 +388,9 @@ func TestListSubtree_SingleChild_ReturnsOneRow_WithImmediateParent(t *testing.T)
 
 func TestListSubtree_TwoSiblings_ReturnsBothWithSameParent(t *testing.T) {
 	f := codextest.NewFixture(t)
-	root := f.AddRoot("root").WithSessionMeta("/", "m")
-	f.AddSubagent(root.ThreadUUID(), "child-A", codextest.SubagentOpts{AgentRole: "a"}).WithSessionMeta("/", "m")
-	f.AddSubagent(root.ThreadUUID(), "child-B", codextest.SubagentOpts{AgentRole: "b"}).WithSessionMeta("/", "m")
+	root := f.AddRoot("root").WithSessionMeta("/")
+	f.AddSubagent(root.ThreadUUID(), "child-A", codextest.SubagentOpts{AgentRole: "a"}).WithSessionMeta("/")
+	f.AddSubagent(root.ThreadUUID(), "child-B", codextest.SubagentOpts{AgentRole: "b"}).WithSessionMeta("/")
 
 	got, err := provider.Codex{}.ListSubtree(root.ThreadUUID())
 	if err != nil {
@@ -408,9 +408,9 @@ func TestListSubtree_TwoSiblings_ReturnsBothWithSameParent(t *testing.T) {
 
 func TestListSubtree_3LevelTree_PreservesImmediateParents(t *testing.T) {
 	f := codextest.NewFixture(t)
-	root := f.AddRoot("R").WithSessionMeta("/", "m")
-	f.AddSubagent("R", "B", codextest.SubagentOpts{AgentRole: "b"}).WithSessionMeta("/", "m")
-	f.AddSubagent("B", "C", codextest.SubagentOpts{AgentRole: "c"}).WithSessionMeta("/", "m")
+	root := f.AddRoot("R").WithSessionMeta("/")
+	f.AddSubagent("R", "B", codextest.SubagentOpts{AgentRole: "b"}).WithSessionMeta("/")
+	f.AddSubagent("B", "C", codextest.SubagentOpts{AgentRole: "c"}).WithSessionMeta("/")
 
 	got, err := provider.Codex{}.ListSubtree(root.ThreadUUID())
 	if err != nil {
@@ -430,12 +430,12 @@ func TestListSubtree_3LevelTree_PreservesImmediateParents(t *testing.T) {
 
 func TestListSubtree_BushyTree_AllDescendants(t *testing.T) {
 	f := codextest.NewFixture(t)
-	f.AddRoot("R").WithSessionMeta("/", "m")
-	f.AddSubagent("R", "A", codextest.SubagentOpts{AgentRole: "a"}).WithSessionMeta("/", "m")
-	f.AddSubagent("R", "B", codextest.SubagentOpts{AgentRole: "b"}).WithSessionMeta("/", "m")
-	f.AddSubagent("R", "C", codextest.SubagentOpts{AgentRole: "c"}).WithSessionMeta("/", "m")
-	f.AddSubagent("A", "A1", codextest.SubagentOpts{AgentRole: "a1"}).WithSessionMeta("/", "m")
-	f.AddSubagent("B", "B1", codextest.SubagentOpts{AgentRole: "b1"}).WithSessionMeta("/", "m")
+	f.AddRoot("R").WithSessionMeta("/")
+	f.AddSubagent("R", "A", codextest.SubagentOpts{AgentRole: "a"}).WithSessionMeta("/")
+	f.AddSubagent("R", "B", codextest.SubagentOpts{AgentRole: "b"}).WithSessionMeta("/")
+	f.AddSubagent("R", "C", codextest.SubagentOpts{AgentRole: "c"}).WithSessionMeta("/")
+	f.AddSubagent("A", "A1", codextest.SubagentOpts{AgentRole: "a1"}).WithSessionMeta("/")
+	f.AddSubagent("B", "B1", codextest.SubagentOpts{AgentRole: "b1"}).WithSessionMeta("/")
 
 	got, err := provider.Codex{}.ListSubtree("R")
 	if err != nil {

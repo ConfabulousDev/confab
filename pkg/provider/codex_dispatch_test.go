@@ -55,11 +55,11 @@ func codextestOpts(role, nickname string) codextest.SubagentOpts {
 
 func TestCodex_DiscoverDescendants_HappyPath_TwoChildren(t *testing.T) {
 	f := codextest.NewFixture(t)
-	root := f.AddRoot("root-uuid").WithSessionMeta("/work", "model")
+	root := f.AddRoot("root-uuid").WithSessionMeta("/work")
 	childA := f.AddSubagent(root.ThreadUUID(), "child-a", codextestOpts("planner-a", "Planny-A")).
-		WithSessionMeta("/work", "model")
+		WithSessionMeta("/work")
 	childB := f.AddSubagent(root.ThreadUUID(), "child-b", codextestOpts("planner-b", "Planny-B")).
-		WithSessionMeta("/work", "model")
+		WithSessionMeta("/work")
 
 	reg := newStubRegistrar()
 	if err := (provider.Codex{}).DiscoverDescendants(reg, root.ThreadUUID()); err != nil {
@@ -85,9 +85,9 @@ func TestCodex_DiscoverDescendants_HappyPath_TwoChildren(t *testing.T) {
 
 func TestCodex_DiscoverDescendants_DeepTree_AllAddedAsAgents(t *testing.T) {
 	f := codextest.NewFixture(t)
-	root := f.AddRoot("R").WithSessionMeta("/", "m")
-	f.AddSubagent("R", "B", codextestOpts("r-b", "B")).WithSessionMeta("/", "m")
-	f.AddSubagent("B", "C", codextestOpts("r-c", "C")).WithSessionMeta("/", "m")
+	root := f.AddRoot("R").WithSessionMeta("/")
+	f.AddSubagent("R", "B", codextestOpts("r-b", "B")).WithSessionMeta("/")
+	f.AddSubagent("B", "C", codextestOpts("r-c", "C")).WithSessionMeta("/")
 
 	reg := newStubRegistrar()
 	if err := (provider.Codex{}).DiscoverDescendants(reg, root.ThreadUUID()); err != nil {
@@ -115,8 +115,8 @@ func TestCodex_DiscoverDescendants_DeepTree_AllAddedAsAgents(t *testing.T) {
 
 func TestCodex_DiscoverDescendants_IdempotentAcrossCalls(t *testing.T) {
 	f := codextest.NewFixture(t)
-	root := f.AddRoot("R").WithSessionMeta("/", "m")
-	f.AddSubagent("R", "A", codextestOpts("a", "A")).WithSessionMeta("/", "m")
+	root := f.AddRoot("R").WithSessionMeta("/")
+	f.AddSubagent("R", "A", codextestOpts("a", "A")).WithSessionMeta("/")
 
 	reg := newStubRegistrar()
 	if err := (provider.Codex{}).DiscoverDescendants(reg, root.ThreadUUID()); err != nil {
@@ -138,9 +138,9 @@ func TestCodex_DiscoverDescendants_IdempotentAcrossCalls(t *testing.T) {
 
 func TestCodex_DiscoverDescendants_FiltersMissingFiles(t *testing.T) {
 	f := codextest.NewFixture(t)
-	root := f.AddRoot("R").WithSessionMeta("/", "m")
-	gone := f.AddSubagent("R", "gone", codextestOpts("g", "G")).WithSessionMeta("/", "m")
-	f.AddSubagent("R", "kept", codextestOpts("k", "K")).WithSessionMeta("/", "m")
+	root := f.AddRoot("R").WithSessionMeta("/")
+	gone := f.AddSubagent("R", "gone", codextestOpts("g", "G")).WithSessionMeta("/")
+	f.AddSubagent("R", "kept", codextestOpts("k", "K")).WithSessionMeta("/")
 	f.DeleteRolloutFile(gone.ThreadUUID())
 
 	reg := newStubRegistrar()
@@ -157,7 +157,7 @@ func TestCodex_DiscoverDescendants_FiltersMissingFiles(t *testing.T) {
 
 func TestCodex_DiscoverDescendants_FiltersNonAgentRollouts(t *testing.T) {
 	f := codextest.NewFixture(t)
-	root := f.AddRoot("R").WithSessionMeta("/", "m")
+	root := f.AddRoot("R").WithSessionMeta("/")
 	// DB edge says R→suspect is a subagent, but suspect's session_meta
 	// declares thread_source=user with no agent_* fields. The rollout
 	// itself isn't really a subagent — DiscoverDescendants must refuse.
@@ -175,7 +175,7 @@ func TestCodex_DiscoverDescendants_FiltersNonAgentRollouts(t *testing.T) {
 
 func TestCodex_DiscoverDescendants_NewDescendantPickedUpOnNextCall(t *testing.T) {
 	f := codextest.NewFixture(t)
-	root := f.AddRoot("R").WithSessionMeta("/", "m")
+	root := f.AddRoot("R").WithSessionMeta("/")
 
 	reg := newStubRegistrar()
 	if err := (provider.Codex{}).DiscoverDescendants(reg, root.ThreadUUID()); err != nil {
@@ -185,7 +185,7 @@ func TestCodex_DiscoverDescendants_NewDescendantPickedUpOnNextCall(t *testing.T)
 		t.Fatalf("first call registered = %d, want 0", got)
 	}
 	// Add a child after the first call and call again — it should appear.
-	f.AddSubagent("R", "child-late", codextestOpts("l", "L")).WithSessionMeta("/", "m")
+	f.AddSubagent("R", "child-late", codextestOpts("l", "L")).WithSessionMeta("/")
 	if err := (provider.Codex{}).DiscoverDescendants(reg, root.ThreadUUID()); err != nil {
 		t.Fatalf("second call: %v", err)
 	}
@@ -198,7 +198,7 @@ func TestCodex_DiscoverDescendants_NewDescendantPickedUpOnNextCall(t *testing.T)
 
 func TestCodex_InitTranscript_SetsRolloutMetadataFromSessionMeta(t *testing.T) {
 	f := codextest.NewFixture(t)
-	root := f.AddRoot("root-init").WithSessionMeta("/work/dir", "claude-opus-4")
+	root := f.AddRoot("root-init").WithSessionMeta("/work/dir")
 
 	att := &stubAttacher{}
 	if err := (provider.Codex{}).InitTranscript(att, root.Path(), root.ThreadUUID()); err != nil {
@@ -216,8 +216,12 @@ func TestCodex_InitTranscript_SetsRolloutMetadataFromSessionMeta(t *testing.T) {
 	if att.attached.CWD != "/work/dir" {
 		t.Errorf("CWD = %q, want /work/dir", att.attached.CWD)
 	}
-	if att.attached.Model != "claude-opus-4" {
-		t.Errorf("Model = %q, want claude-opus-4", att.attached.Model)
+	// Model stays empty: Codex's session_meta has no `model` field in any
+	// released version (only `model_provider`), so the session_meta path can
+	// never populate it. Descendants get a real model from the SQLite
+	// `threads` row instead. Populating it for roots too is a follow-up.
+	if att.attached.Model != "" {
+		t.Errorf("Model = %q, want \"\" (session_meta has no model field)", att.attached.Model)
 	}
 	if att.attached.ParentThreadUUID != "" {
 		t.Errorf("ParentThreadUUID = %q, want \"\" (root)", att.attached.ParentThreadUUID)

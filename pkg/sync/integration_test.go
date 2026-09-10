@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/ConfabulousDev/confab/pkg/backendtest"
 	"github.com/ConfabulousDev/confab/pkg/config"
 )
 
@@ -214,7 +215,7 @@ func TestEngine_BackendRollback(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
-		body, _ := readRequestBody(r)
+		body, _ := backendtest.ReadRequestBody(r)
 
 		switch r.URL.Path {
 		case "/api/v1/sync/init":
@@ -435,7 +436,7 @@ func TestEngine_LargeFile(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
-		body, _ := readRequestBody(r)
+		body, _ := backendtest.ReadRequestBody(r)
 
 		switch r.URL.Path {
 		case "/api/v1/sync/init":

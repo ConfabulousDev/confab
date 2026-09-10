@@ -286,12 +286,15 @@ func (b *RolloutBuilder) Path() string { return b.rolloutPath }
 // WithSessionMeta writes a `session_meta` JSONL line at the start of the
 // rollout. The CLI's IsUserSession / agent-rollout filtering reads this
 // line to verify the rollout's role.
-func (b *RolloutBuilder) WithSessionMeta(cwd, model string) *RolloutBuilder {
+//
+// No `model` key is written: Codex's SessionMeta has no model field in any
+// version (only `model_provider`), so a fixture that emitted one would let
+// tests assert a value production can never see.
+func (b *RolloutBuilder) WithSessionMeta(cwd string) *RolloutBuilder {
 	b.f.t.Helper()
 	meta := map[string]any{
 		"id":             b.threadUUID,
 		"cwd":            cwd,
-		"model":          model,
 		"source":         "cli",
 		"thread_source":  b.opts.ThreadSource,
 		"agent_path":     b.opts.AgentPath,
@@ -304,11 +307,43 @@ func (b *RolloutBuilder) WithSessionMeta(cwd, model string) *RolloutBuilder {
 	return b
 }
 
-// WithUserMessage appends an event_msg/user_message line. Used to set up
-// rollouts whose first_user_message extraction is being tested.
+// WithUserMessage appends the user-message line in the shape Codex emits
+// today (>= 0.149.1): event_msg / payload.type "item_completed" carrying an
+// item of type "UserMessage" whose prompt text lives in typed content
+// parts. Transcribed from a real 0.154.0 rollout.
+//
+// Use WithLegacyUserMessage for the retired pre-0.149 shape.
 func (b *RolloutBuilder) WithUserMessage(msg string) *RolloutBuilder {
 	b.f.t.Helper()
-	payload := map[string]any{"type": "user_message", "message": msg}
+	payload := map[string]any{
+		"type":      "item_completed",
+		"thread_id": b.threadUUID,
+		"item": map[string]any{
+			"type":    "UserMessage",
+			"id":      uuid.New().String(),
+			"content": []any{map[string]any{"type": "text", "text": msg, "text_elements": []any{}}},
+		},
+	}
+	line := jsonLine("event_msg", payload)
+	b.lines = append(b.lines, line)
+	b.flush()
+	return b
+}
+
+// WithLegacyUserMessage appends the user-message line in the shape Codex
+// emitted before ~0.149.1: event_msg / payload.type "user_message" with a
+// flat `message` string. Transcribed from a real 0.130.0 rollout.
+//
+// Rollouts in this shape are still on disk on user machines, so the CLI
+// must keep parsing them; this builder keeps that path covered.
+func (b *RolloutBuilder) WithLegacyUserMessage(msg string) *RolloutBuilder {
+	b.f.t.Helper()
+	payload := map[string]any{
+		"type":         "user_message",
+		"message":      msg,
+		"images":       []any{},
+		"local_images": []any{},
+	}
 	line := jsonLine("event_msg", payload)
 	b.lines = append(b.lines, line)
 	b.flush()
