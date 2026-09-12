@@ -43,23 +43,22 @@ Use --check to only check for updates without installing.`,
 func runUpdate(cmd *cobra.Command, args []string) error {
 	logger.Info("Running update command (check=%v)", checkOnly)
 
-	// Fetch latest version
-	latest, err := fetchLatestVersion()
+	result, err := checkForUpdate()
 	if err != nil {
 		logger.Error("Failed to fetch latest version: %v", err)
 		return fmt.Errorf("failed to check for updates: %w", err)
 	}
 
-	logger.Info("Current version: %s, Latest version: %s", version, latest)
+	logger.Info("Current version: %s, Latest version: %s", version, result.latest)
 
-	if !isNewerVersion(cleanVersion(version), cleanVersion(latest)) {
-		fmt.Printf("confab is up to date (v%s)\n", cleanVersion(latest))
+	if !result.needsUpdate {
+		fmt.Printf("confab is up to date (v%s)\n", result.cleanLatest)
 		return nil
 	}
 
 	// Show version info
 	fmt.Printf("Current version: %s\n", version)
-	fmt.Printf("Latest version:  %s\n", latest)
+	fmt.Printf("Latest version:  %s\n", result.latest)
 	fmt.Println()
 
 	if checkOnly {
@@ -133,6 +132,29 @@ func cleanVersion(v string) string {
 	return strings.TrimPrefix(v, "v")
 }
 
+// updateCheckResult is the outcome of comparing the running version against
+// the latest GitHub release.
+type updateCheckResult struct {
+	latest      string // raw latest version string, e.g. "v1.2.3"
+	cleanLatest string // latest with any "v" prefix stripped
+	needsUpdate bool
+}
+
+// checkForUpdate fetches the latest release version and reports whether it's
+// newer than the running binary.
+func checkForUpdate() (updateCheckResult, error) {
+	latest, err := fetchLatestVersion()
+	if err != nil {
+		return updateCheckResult{}, err
+	}
+	cleanLatest := cleanVersion(latest)
+	return updateCheckResult{
+		latest:      latest,
+		cleanLatest: cleanLatest,
+		needsUpdate: isNewerVersion(cleanVersion(version), cleanLatest),
+	}, nil
+}
+
 // isNewerVersion returns true if latest is newer than current
 func isNewerVersion(current, latest string) bool {
 	// Dev builds always need update
@@ -143,7 +165,7 @@ func isNewerVersion(current, latest string) bool {
 	currentParts := parseVersion(current)
 	latestParts := parseVersion(latest)
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if latestParts[i] > currentParts[i] {
 			return true
 		}
@@ -162,7 +184,7 @@ func parseVersion(v string) [3]int {
 
 	for i := 0; i < len(segments) && i < 3; i++ {
 		// Strip any suffix (e.g., "1.0.0-beta" -> "1.0.0")
-		numStr := strings.Split(segments[i], "-")[0]
+		numStr, _, _ := strings.Cut(segments[i], "-")
 		num, _ := strconv.Atoi(numStr)
 		parts[i] = num
 	}
@@ -319,20 +341,20 @@ func AutoUpdateIfNeeded() {
 		return
 	}
 
-	latest, err := fetchLatestVersion()
+	result, err := checkForUpdate()
 	if err != nil {
 		logger.Debug("Auto-update check failed: %v", err)
 		return
 	}
 
-	if !isNewerVersion(cleanVersion(version), cleanVersion(latest)) {
-		logger.Debug("No update needed (current=%s, latest=%s)", version, latest)
+	if !result.needsUpdate {
+		logger.Debug("No update needed (current=%s, latest=%s)", version, result.latest)
 		writeLastCheckTime()
 		return
 	}
 
-	logger.Info("Update available: %s -> %s", version, latest)
-	fmt.Fprintf(os.Stderr, "Updating confab (%s -> %s)...\n", version, latest)
+	logger.Info("Update available: %s -> %s", version, result.latest)
+	fmt.Fprintf(os.Stderr, "Updating confab (%s -> %s)...\n", version, result.latest)
 
 	// Download and install new version
 	newBinary, err := installLatestRelease()
@@ -428,7 +450,7 @@ func NotifyIfUpdateAvailable() {
 		return
 	}
 
-	latest, err := fetchLatestVersion()
+	result, err := checkForUpdate()
 	if err != nil {
 		logger.Debug("Update check failed: %v", err)
 		return
@@ -436,10 +458,10 @@ func NotifyIfUpdateAvailable() {
 
 	writeLastCheckTime()
 
-	if !isNewerVersion(cleanVersion(version), cleanVersion(latest)) {
+	if !result.needsUpdate {
 		return
 	}
 
 	fmt.Fprintln(os.Stderr)
-	fmt.Fprintf(os.Stderr, "Update available: %s -> %s (run 'confab update' to install)\n", version, latest)
+	fmt.Fprintf(os.Stderr, "Update available: %s -> %s (run 'confab update' to install)\n", version, result.latest)
 }

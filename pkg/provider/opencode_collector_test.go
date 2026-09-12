@@ -58,6 +58,9 @@ func readLines(t *testing.T, path string) []string {
 	for sc.Scan() {
 		lines = append(lines, sc.Text())
 	}
+	if err := sc.Err(); err != nil {
+		t.Fatal(err)
+	}
 	return lines
 }
 

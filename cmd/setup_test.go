@@ -94,7 +94,7 @@ func (b *setupTestBackend) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // setupSetupTestEnv creates temp directories and sets env vars for setup tests.
 // Returns the temp directory and config path.
-func setupSetupTestEnv(t *testing.T, serverURL string) (tmpDir string, configPath string) {
+func setupSetupTestEnv(t *testing.T) (tmpDir string, configPath string) {
 	t.Helper()
 	tmpDir = t.TempDir()
 
@@ -204,7 +204,7 @@ func TestRunSetup_AlreadyAuthenticated(t *testing.T) {
 	server := httptest.NewServer(backend)
 	defer server.Close()
 
-	_, configPath := setupSetupTestEnv(t, server.URL)
+	_, configPath := setupSetupTestEnv(t)
 
 	// Pre-create valid config
 	cfg := config.UploadConfig{
@@ -258,7 +258,7 @@ func TestRunSetup_InvalidExistingKey(t *testing.T) {
 	server := httptest.NewServer(backend)
 	defer server.Close()
 
-	_, configPath := setupSetupTestEnv(t, server.URL)
+	_, configPath := setupSetupTestEnv(t)
 
 	// Pre-create config with invalid key
 	cfg := config.UploadConfig{
@@ -308,7 +308,7 @@ func TestRunSetup_BackendURLChanged(t *testing.T) {
 	newServer := httptest.NewServer(newBackend)
 	defer newServer.Close()
 
-	_, configPath := setupSetupTestEnv(t, newServer.URL)
+	_, configPath := setupSetupTestEnv(t)
 
 	// Pre-create config with OLD backend URL
 	cfg := config.UploadConfig{
@@ -356,7 +356,7 @@ func TestRunSetup_NeedsLogin(t *testing.T) {
 	server := httptest.NewServer(backend)
 	defer server.Close()
 
-	setupSetupTestEnv(t, server.URL)
+	setupSetupTestEnv(t)
 	// Don't create any config - simulates fresh install
 
 	var loginCalled bool
@@ -411,7 +411,7 @@ func TestRunSetupCodexProviderOutput(t *testing.T) {
 	server := httptest.NewServer(backend)
 	defer server.Close()
 
-	tmpDir, _ := setupSetupTestEnv(t, server.URL)
+	tmpDir, _ := setupSetupTestEnv(t)
 	codexDir := filepath.Join(tmpDir, ".codex")
 	t.Setenv(provider.CodexStateDirEnv, codexDir)
 
@@ -470,7 +470,7 @@ func TestRunSetupCursorProviderOutput(t *testing.T) {
 	server := httptest.NewServer(backend)
 	defer server.Close()
 
-	tmpDir, _ := setupSetupTestEnv(t, server.URL)
+	tmpDir, _ := setupSetupTestEnv(t)
 	cursorDir := filepath.Join(tmpDir, ".cursor")
 	t.Setenv(provider.CursorStateDirEnv, cursorDir)
 
@@ -616,7 +616,7 @@ func TestRunSetup_WithAPIKeyFlag(t *testing.T) {
 	server := httptest.NewServer(backend)
 	defer server.Close()
 
-	_, configPath := setupSetupTestEnv(t, server.URL)
+	_, configPath := setupSetupTestEnv(t)
 
 	// Track if login was called
 	var loginCalled bool
@@ -672,7 +672,7 @@ func TestRunSetup_WithAPIKeyFlag_InvalidKey(t *testing.T) {
 	server := httptest.NewServer(backend)
 	defer server.Close()
 
-	setupSetupTestEnv(t, server.URL)
+	setupSetupTestEnv(t)
 
 	var loginCalled bool
 	doDeviceLoginFunc = func(backendURL, keyName string, _ config.Binding) error {
@@ -708,7 +708,7 @@ func TestRunSetup_WithAPIKeyFlag_SavesBackendURL(t *testing.T) {
 	server := httptest.NewServer(backend)
 	defer server.Close()
 
-	_, configPath := setupSetupTestEnv(t, server.URL)
+	_, configPath := setupSetupTestEnv(t)
 
 	doDeviceLoginFunc = func(backendURL, keyName string, _ config.Binding) error {
 		t.Error("login should not be called")
@@ -777,7 +777,7 @@ func TestSetupWithAPIKey_PreservesCustomRedactionPatterns(t *testing.T) {
 	server := httptest.NewServer(backend)
 	defer server.Close()
 
-	_, configPath := setupSetupTestEnv(t, server.URL)
+	_, configPath := setupSetupTestEnv(t)
 
 	// Pre-create config with custom redaction patterns
 	useDefaults := true
@@ -860,7 +860,7 @@ func TestSetupDeviceFlow_PreservesCustomRedactionPatterns(t *testing.T) {
 	server := httptest.NewServer(backend)
 	defer server.Close()
 
-	_, configPath := setupSetupTestEnv(t, server.URL)
+	_, configPath := setupSetupTestEnv(t)
 
 	// Pre-create config with custom redaction patterns but invalid API key
 	useDefaults := false
@@ -945,7 +945,7 @@ func TestSetupFreshInstall_AddsDefaultRedaction(t *testing.T) {
 	server := httptest.NewServer(backend)
 	defer server.Close()
 
-	_, configPath := setupSetupTestEnv(t, server.URL)
+	_, configPath := setupSetupTestEnv(t)
 	// Don't create any config - simulates fresh install
 	os.Remove(configPath)
 
@@ -1046,7 +1046,7 @@ func TestRunSetup_AutoDetect_Both(t *testing.T) {
 	server := httptest.NewServer(backend)
 	defer server.Close()
 
-	tmpDir, _ := setupSetupTestEnv(t, server.URL)
+	tmpDir, _ := setupSetupTestEnv(t)
 	codexDir := filepath.Join(tmpDir, ".codex")
 	t.Setenv(provider.CodexStateDirEnv, codexDir)
 
@@ -1112,7 +1112,7 @@ func TestRunSetup_AutoDetect_DesktopOnly(t *testing.T) {
 	server := httptest.NewServer(backend)
 	defer server.Close()
 
-	tmpDir, _ := setupSetupTestEnv(t, server.URL)
+	tmpDir, _ := setupSetupTestEnv(t)
 	codexDir := filepath.Join(tmpDir, ".codex")
 	t.Setenv(provider.CodexStateDirEnv, codexDir)
 
@@ -1159,7 +1159,7 @@ func TestRunSetup_AutoDetect_ClaudeOnly(t *testing.T) {
 	server := httptest.NewServer(backend)
 	defer server.Close()
 
-	tmpDir, _ := setupSetupTestEnv(t, server.URL)
+	tmpDir, _ := setupSetupTestEnv(t)
 	codexDir := filepath.Join(tmpDir, ".codex")
 	t.Setenv(provider.CodexStateDirEnv, codexDir)
 
@@ -1197,7 +1197,7 @@ func TestRunSetup_AutoDetect_CodexOnly(t *testing.T) {
 	server := httptest.NewServer(backend)
 	defer server.Close()
 
-	tmpDir, _ := setupSetupTestEnv(t, server.URL)
+	tmpDir, _ := setupSetupTestEnv(t)
 	codexDir := filepath.Join(tmpDir, ".codex")
 	t.Setenv(provider.CodexStateDirEnv, codexDir)
 
@@ -1252,7 +1252,7 @@ func TestRunSetup_AutoDetect_None(t *testing.T) {
 	server := httptest.NewServer(backend)
 	defer server.Close()
 
-	tmpDir, configPath := setupSetupTestEnv(t, server.URL)
+	tmpDir, configPath := setupSetupTestEnv(t)
 	codexDir := filepath.Join(tmpDir, ".codex")
 	t.Setenv(provider.CodexStateDirEnv, codexDir)
 
@@ -1302,7 +1302,7 @@ func TestRunSetup_AutoDetect_PartialFailure(t *testing.T) {
 	server := httptest.NewServer(backend)
 	defer server.Close()
 
-	tmpDir, _ := setupSetupTestEnv(t, server.URL)
+	tmpDir, _ := setupSetupTestEnv(t)
 
 	// Force Codex install to fail by pointing CONFAB_CODEX_DIR at a file
 	codexFile := filepath.Join(tmpDir, "codex-blocker")
@@ -1348,7 +1348,7 @@ func TestRunSetup_Idempotent_AlreadyInstalled(t *testing.T) {
 	server := httptest.NewServer(backend)
 	defer server.Close()
 
-	tmpDir, _ := setupSetupTestEnv(t, server.URL)
+	tmpDir, _ := setupSetupTestEnv(t)
 	codexDir := filepath.Join(tmpDir, ".codex")
 	t.Setenv(provider.CodexStateDirEnv, codexDir)
 

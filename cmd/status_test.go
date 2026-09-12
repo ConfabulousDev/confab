@@ -23,7 +23,7 @@ func runStatusCapture(t *testing.T, backendValid bool) string {
 	server := httptest.NewServer(backend)
 	t.Cleanup(server.Close)
 
-	tmpDir, configPath := setupSetupTestEnv(t, server.URL)
+	tmpDir, configPath := setupSetupTestEnv(t)
 	t.Setenv(provider.CodexStateDirEnv, filepath.Join(tmpDir, ".codex"))
 
 	cfg := config.UploadConfig{BackendURL: server.URL, APIKey: "cfb_status-test-key-12345678"}
@@ -148,7 +148,7 @@ func TestStatus_CodexHooksNotOrphanedWithStateDir(t *testing.T) {
 	server := httptest.NewServer(backend)
 	defer server.Close()
 
-	tmpDir, configPath := setupSetupTestEnv(t, server.URL)
+	tmpDir, configPath := setupSetupTestEnv(t)
 	codexDir := filepath.Join(tmpDir, ".codex")
 	t.Setenv(provider.CodexStateDirEnv, codexDir)
 

@@ -80,6 +80,17 @@ type SessionInfo struct {
 	FirstUserMessage string
 }
 
+// hasDotDotComponent reports whether cleaned (a filepath.Clean'd path)
+// contains a ".." path component.
+func hasDotDotComponent(cleaned string) bool {
+	for part := range strings.SplitSeq(cleaned, string(filepath.Separator)) {
+		if part == ".." {
+			return true
+		}
+	}
+	return false
+}
+
 // pathIsUnderAnyRoot reports whether cleaned (an absolute, cleaned path)
 // lies under any of the allowedRoots after resolving parent-directory
 // symlinks. Falls back to lexical containment if symlink resolution fails.

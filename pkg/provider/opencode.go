@@ -2,7 +2,6 @@ package provider
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -294,21 +293,7 @@ func (p Opencode) PluginDir() (string, error) {
 }
 
 func (p Opencode) ReadSessionHookInput(r io.Reader) (*types.OpenCodeHookInput, error) {
-	data, err := io.ReadAll(io.LimitReader(r, types.MaxJSONLLineSize))
-	if err != nil {
-		return nil, fmt.Errorf("failed to read input: %w", err)
-	}
-	var input types.OpenCodeHookInput
-	if err := json.Unmarshal(data, &input); err != nil {
-		return nil, fmt.Errorf("failed to parse OpenCode hook input: %w", err)
-	}
-	if input.SessionID == "" {
-		return nil, fmt.Errorf("session_id is required")
-	}
-	if err := types.ValidateSessionID(input.SessionID); err != nil {
-		return nil, err
-	}
-	return &input, nil
+	return types.ReadHookInput(r, "OpenCode hook input", func(i *types.OpenCodeHookInput) string { return i.SessionID })
 }
 
 // opencodeScanTimeout bounds the SQLite reads ScanSessions/FindSessionByID

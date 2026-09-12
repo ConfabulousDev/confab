@@ -145,10 +145,8 @@ func (p Cursor) ValidateTranscriptPath(path string) error {
 		return fmt.Errorf("must be an absolute path")
 	}
 	cleaned := filepath.Clean(path)
-	for _, part := range strings.Split(cleaned, string(filepath.Separator)) {
-		if part == ".." {
-			return fmt.Errorf("must not contain '..' components")
-		}
+	if hasDotDotComponent(cleaned) {
+		return fmt.Errorf("must not contain '..' components")
 	}
 	projectsDir, err := p.ProjectsDir()
 	if err != nil {
@@ -555,15 +553,7 @@ func (p Cursor) IsSkillInstalled(name string) bool {
 // grandparent of the hook (the hook is spawned by a "Cursor Helper (Plugin)"
 // child of /Applications/Cursor.app), so the parent+grandparent walk suffices.
 func (p Cursor) FindParentPID() int {
-	parentPID := os.Getppid()
-	if p.IsProcess(parentPID) {
-		return parentPID
-	}
-	grandparentPID := getParentPID(parentPID)
-	if grandparentPID > 0 && p.IsProcess(grandparentPID) {
-		return grandparentPID
-	}
-	return 0
+	return findParentOrGrandparent(p.IsProcess, "")
 }
 
 // IsProcess reports whether pid is a Cursor process (CLI or IDE).
