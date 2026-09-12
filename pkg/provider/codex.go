@@ -240,18 +240,7 @@ func (p Codex) IsHooksInstalled() (bool, error) {
 // FindParentPID walks up the process tree to find the Codex process.
 // Mirrors ClaudeCode.FindParentPID for daemon parent-liveness monitoring.
 func (p Codex) FindParentPID() int {
-	parentPID := os.Getppid()
-	if p.IsProcess(parentPID) {
-		return parentPID
-	}
-
-	grandparentPID := getParentPID(parentPID)
-	if grandparentPID > 0 && p.IsProcess(grandparentPID) {
-		return grandparentPID
-	}
-
-	logger.Warn("Could not find Codex in process tree, disabling parent PID monitoring")
-	return 0
+	return findParentOrGrandparent(p.IsProcess, "Codex")
 }
 
 // IsProcess checks if the given PID is a Codex process.
@@ -317,21 +306,7 @@ func (p Codex) ValidateRolloutPath(path string) error {
 }
 
 func (p Codex) ReadHookInput(r io.Reader) (*types.CodexHookInput, error) {
-	data, err := io.ReadAll(io.LimitReader(r, types.MaxJSONLLineSize))
-	if err != nil {
-		return nil, fmt.Errorf("failed to read input: %w", err)
-	}
-	var input types.CodexHookInput
-	if err := json.Unmarshal(data, &input); err != nil {
-		return nil, fmt.Errorf("failed to parse hook input: %w", err)
-	}
-	if input.SessionID == "" {
-		return nil, fmt.Errorf("session_id is required")
-	}
-	if err := types.ValidateSessionID(input.SessionID); err != nil {
-		return nil, err
-	}
-	return &input, nil
+	return types.ReadHookInput(r, "hook input", func(i *types.CodexHookInput) string { return i.SessionID })
 }
 
 func (p Codex) ReadSessionHookInput(r io.Reader) (*types.CodexHookInput, error) {

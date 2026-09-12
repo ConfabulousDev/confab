@@ -297,7 +297,7 @@ func TestRunLogin_WithAPIKeyFlag(t *testing.T) {
 	server := httptest.NewServer(backend)
 	defer server.Close()
 
-	_, configPath := setupSetupTestEnv(t, server.URL)
+	_, configPath := setupSetupTestEnv(t)
 
 	// Track if device login was called
 	var loginCalled bool
@@ -351,7 +351,7 @@ func TestRunLogin_WithAPIKeyFlag_InvalidKey(t *testing.T) {
 	server := httptest.NewServer(backend)
 	defer server.Close()
 
-	_, configPath := setupSetupTestEnv(t, server.URL)
+	_, configPath := setupSetupTestEnv(t)
 
 	var loginCalled bool
 	doDeviceLoginFunc = func(backendURL, keyName string, _ config.Binding) error {
@@ -415,7 +415,7 @@ func TestRunLogin_WithoutAPIKeyFlag(t *testing.T) {
 	server := httptest.NewServer(backend)
 	defer server.Close()
 
-	setupSetupTestEnv(t, server.URL)
+	setupSetupTestEnv(t)
 
 	var loginCalled bool
 	var loginBackendURL string
@@ -458,7 +458,7 @@ func TestLoginWithAPIKey_PreservesRedactionConfig(t *testing.T) {
 	server := httptest.NewServer(backend)
 	defer server.Close()
 
-	_, configPath := setupSetupTestEnv(t, server.URL)
+	_, configPath := setupSetupTestEnv(t)
 
 	// Pre-create config with redaction settings
 	useDefaults := true
@@ -540,7 +540,7 @@ func TestLoginDeviceFlow_PreservesRedactionConfig(t *testing.T) {
 	server := httptest.NewServer(backend)
 	defer server.Close()
 
-	_, configPath := setupSetupTestEnv(t, server.URL)
+	_, configPath := setupSetupTestEnv(t)
 
 	// Pre-create config with redaction settings
 	useDefaults := false
@@ -627,7 +627,7 @@ func TestLoginWithAPIKey_NoExistingConfig(t *testing.T) {
 	server := httptest.NewServer(backend)
 	defer server.Close()
 
-	_, configPath := setupSetupTestEnv(t, server.URL)
+	_, configPath := setupSetupTestEnv(t)
 	// Don't create any config - simulates fresh install
 	os.Remove(configPath)
 

@@ -145,7 +145,7 @@ func verifyAPIKey(cfg *config.UploadConfig) error {
 		return fmt.Errorf("failed to create http client: %w", err)
 	}
 
-	var result map[string]interface{}
+	var result map[string]any
 	if err := client.Get("/api/v1/auth/validate", &result); err != nil {
 		return err
 	}
@@ -221,10 +221,7 @@ func doDeviceLoginImpl(backendURL, keyName string, b config.Binding) error {
 
 // pollForToken polls the backend until authorization completes or times out
 func pollForToken(backendURL string, deviceCode *DeviceCodeResponse) (string, error) {
-	pollInterval := time.Duration(deviceCode.Interval) * time.Second
-	if pollInterval < 5*time.Second {
-		pollInterval = 5 * time.Second
-	}
+	pollInterval := max(time.Duration(deviceCode.Interval)*time.Second, 5*time.Second)
 
 	expiresAt := time.Now().Add(time.Duration(deviceCode.ExpiresIn) * time.Second)
 
@@ -259,26 +256,36 @@ func pollForToken(backendURL string, deviceCode *DeviceCodeResponse) (string, er
 	}
 }
 
-// requestDeviceCode initiates the device code flow
-func requestDeviceCode(backendURL, keyName string) (*DeviceCodeResponse, error) {
-	reqBody := map[string]string{"key_name": keyName}
+// postDeviceJSON POSTs reqBody as JSON to backendURL+path via loginHTTPClient
+// and returns the size-limited response body along with the HTTP status code.
+func postDeviceJSON(backendURL, path string, reqBody any) ([]byte, int, error) {
 	jsonBody, err := json.Marshal(reqBody)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
-	resp, err := loginHTTPClient.Post(backendURL+"/auth/device/code", "application/json", bytes.NewReader(jsonBody))
+	resp, err := loginHTTPClient.Post(backendURL+path, "application/json", bytes.NewReader(jsonBody))
 	if err != nil {
-		return nil, fmt.Errorf("failed to contact server: %w", err)
+		return nil, 0, fmt.Errorf("failed to contact server: %w", err)
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxLoginResponseSize))
 	if err != nil {
+		return nil, resp.StatusCode, err
+	}
+
+	return body, resp.StatusCode, nil
+}
+
+// requestDeviceCode initiates the device code flow
+func requestDeviceCode(backendURL, keyName string) (*DeviceCodeResponse, error) {
+	body, status, err := postDeviceJSON(backendURL, "/auth/device/code", map[string]string{"key_name": keyName})
+	if err != nil {
 		return nil, err
 	}
 
-	if resp.StatusCode != http.StatusOK {
+	if status != http.StatusOK {
 		return nil, fmt.Errorf("server error: %s", string(body))
 	}
 
@@ -292,19 +299,7 @@ func requestDeviceCode(backendURL, keyName string) (*DeviceCodeResponse, error) 
 
 // pollDeviceToken polls the backend for the token
 func pollDeviceToken(backendURL, deviceCode string) (*DeviceTokenResponse, error) {
-	reqBody := map[string]string{"device_code": deviceCode}
-	jsonBody, err := json.Marshal(reqBody)
-	if err != nil {
-		return nil, err
-	}
-
-	resp, err := loginHTTPClient.Post(backendURL+"/auth/device/token", "application/json", bytes.NewReader(jsonBody))
-	if err != nil {
-		return nil, fmt.Errorf("failed to contact server: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxLoginResponseSize))
+	body, _, err := postDeviceJSON(backendURL, "/auth/device/token", map[string]string{"device_code": deviceCode})
 	if err != nil {
 		return nil, err
 	}

@@ -23,7 +23,7 @@ func TestRunSetup_ConfigDir_WritesBindingNotTopLevel(t *testing.T) {
 	server := httptest.NewServer(backend)
 	t.Cleanup(server.Close)
 
-	tmpDir, configPath := setupSetupTestEnv(t, server.URL)
+	tmpDir, configPath := setupSetupTestEnv(t)
 
 	// Seed a default (top-level) binding for a DIFFERENT backend; the
 	// custom-dir setup must not clobber it.
@@ -80,7 +80,7 @@ func TestRunSetup_ConfigDir_SymlinkedDirKeyMatchesRuntime(t *testing.T) {
 	server := httptest.NewServer(backend)
 	t.Cleanup(server.Close)
 
-	tmpDir, _ := setupSetupTestEnv(t, server.URL)
+	tmpDir, _ := setupSetupTestEnv(t)
 
 	// realParent/<dir> is reached via a symlink (linkParent -> realParent).
 	realParent := filepath.Join(tmpDir, "real")
@@ -138,7 +138,7 @@ func TestRunSetup_ConfigDir_DefaultCollapse(t *testing.T) {
 	server := httptest.NewServer(backend)
 	t.Cleanup(server.Close)
 
-	_, configPath := setupSetupTestEnv(t, server.URL)
+	_, configPath := setupSetupTestEnv(t)
 	defaultDir := os.Getenv("CONFAB_CLAUDE_DIR")
 
 	setupProviderName = provider.NameClaudeCode

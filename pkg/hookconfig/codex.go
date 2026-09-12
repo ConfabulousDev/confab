@@ -34,9 +34,8 @@ func InstallCodexHooks(configPath string) (string, error) {
 	var existing []byte
 	if data, err := os.ReadFile(configPath); err == nil {
 		existing = data
-		backupPath := fmt.Sprintf("%s.confab-backup-%s", configPath, time.Now().Format("20060102-150405"))
-		if err := os.WriteFile(backupPath, data, 0600); err != nil {
-			return "", fmt.Errorf("failed to create backup: %w", err)
+		if err := backupFile(configPath, data); err != nil {
+			return "", err
 		}
 	} else if !os.IsNotExist(err) {
 		return "", fmt.Errorf("failed to read Codex config: %w", err)
@@ -65,9 +64,8 @@ func UninstallCodexHooks(configPath string) (string, error) {
 		}
 		return "", fmt.Errorf("failed to read Codex config: %w", err)
 	}
-	backupPath := fmt.Sprintf("%s.confab-backup-%s", configPath, time.Now().Format("20060102-150405"))
-	if err := os.WriteFile(backupPath, data, 0600); err != nil {
-		return "", fmt.Errorf("failed to create backup: %w", err)
+	if err := backupFile(configPath, data); err != nil {
+		return "", err
 	}
 	updated := removeManagedBlock(string(data), confabCodexHooksStart, confabCodexHooksEnd)
 	if err := writeFileAtomic(configPath, []byte(strings.TrimRight(updated, "\n")+"\n"), 0600); err != nil {
@@ -324,6 +322,16 @@ func codexTrustedHookHash(eventName, matcher, command, statusMessage string) str
 func tomlQuoteString(s string) string {
 	b, _ := json.Marshal(s)
 	return string(b)
+}
+
+// backupFile writes data to a timestamped "<path>.confab-backup-<ts>" sibling
+// file, preserving prior config content before an in-place rewrite.
+func backupFile(path string, data []byte) error {
+	backupPath := fmt.Sprintf("%s.confab-backup-%s", path, time.Now().Format("20060102-150405"))
+	if err := os.WriteFile(backupPath, data, 0600); err != nil {
+		return fmt.Errorf("failed to create backup: %w", err)
+	}
+	return nil
 }
 
 func writeFileAtomic(path string, data []byte, perm os.FileMode) error {

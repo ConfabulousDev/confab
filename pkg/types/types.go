@@ -169,30 +169,41 @@ type CursorHookInput struct {
 	ParentPID int `json:"parent_pid,omitempty"` // Cursor process ID (set by confab, not Cursor)
 }
 
+// ReadHookInput reads and parses hook input JSON of type T from r, then
+// validates that the session ID (extracted via getSessionID) is present and
+// safe — it is used in derived filesystem paths across every provider.
+// parseErrLabel names T in the wrapped unmarshal error. Shared by every
+// provider's hook-input reader (Claude/Cursor here, Codex/OpenCode in
+// pkg/provider).
+func ReadHookInput[T any](r io.Reader, parseErrLabel string, getSessionID func(*T) string) (*T, error) {
+	data, err := io.ReadAll(io.LimitReader(r, MaxJSONLLineSize))
+	if err != nil {
+		return nil, fmt.Errorf("failed to read input: %w", err)
+	}
+
+	var input T
+	if err := json.Unmarshal(data, &input); err != nil {
+		return nil, fmt.Errorf("failed to parse %s: %w", parseErrLabel, err)
+	}
+
+	sessionID := getSessionID(&input)
+	if sessionID == "" {
+		return nil, fmt.Errorf("session_id is required")
+	}
+	if err := ValidateSessionID(sessionID); err != nil {
+		return nil, err
+	}
+
+	return &input, nil
+}
+
 // ReadCursorHookInput reads and validates a Cursor hook payload. Validation
 // mirrors ReadClaudeHookInput: session_id is required and must pass
 // ValidateSessionID (it is used in derived filesystem paths). transcript_path
 // is intentionally NOT required — it is null at sessionStart and derived by the
 // provider.
 func ReadCursorHookInput(r io.Reader) (*CursorHookInput, error) {
-	data, err := io.ReadAll(io.LimitReader(r, MaxJSONLLineSize))
-	if err != nil {
-		return nil, fmt.Errorf("failed to read input: %w", err)
-	}
-
-	var input CursorHookInput
-	if err := json.Unmarshal(data, &input); err != nil {
-		return nil, fmt.Errorf("failed to parse cursor hook input: %w", err)
-	}
-
-	if input.SessionID == "" {
-		return nil, fmt.Errorf("session_id is required")
-	}
-	if err := ValidateSessionID(input.SessionID); err != nil {
-		return nil, err
-	}
-
-	return &input, nil
+	return ReadHookInput(r, "cursor hook input", func(i *CursorHookInput) string { return i.SessionID })
 }
 
 // CursorToolUseHookInput represents a Cursor preToolUse / postToolUse hook
@@ -288,25 +299,7 @@ func ValidateSessionID(id string) error {
 // ReadClaudeHookInput reads and parses hook input JSON from a reader.
 // Used by PreToolUse, PostToolUse, and other hook handlers.
 func ReadClaudeHookInput(r io.Reader) (*ClaudeHookInput, error) {
-	data, err := io.ReadAll(io.LimitReader(r, MaxJSONLLineSize))
-	if err != nil {
-		return nil, fmt.Errorf("failed to read input: %w", err)
-	}
-
-	var input ClaudeHookInput
-	if err := json.Unmarshal(data, &input); err != nil {
-		return nil, fmt.Errorf("failed to parse hook input: %w", err)
-	}
-
-	if input.SessionID == "" {
-		return nil, fmt.Errorf("session_id is required")
-	}
-
-	if err := ValidateSessionID(input.SessionID); err != nil {
-		return nil, err
-	}
-
-	return &input, nil
+	return ReadHookInput(r, "hook input", func(i *ClaudeHookInput) string { return i.SessionID })
 }
 
 // ClaudeHookResponse is the JSON response sent back to Claude Code

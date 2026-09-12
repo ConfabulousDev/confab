@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
-	"time"
 
 	"github.com/ConfabulousDev/confab/pkg/config"
 )
@@ -229,10 +229,8 @@ func (r *cursorHooksRaw) ensureVersion() {
 // ensureEntry appends the confab entry to the event array iff no confab
 // command is already present for that event (idempotent re-install).
 func (r *cursorHooksRaw) ensureEntry(event string, entry cursorHookEntry) error {
-	for _, raw := range r.hooks[event] {
-		if rawIsConfabEntry(raw) {
-			return nil
-		}
+	if slices.ContainsFunc(r.hooks[event], rawIsConfabEntry) {
+		return nil
 	}
 	encoded, err := json.Marshal(entry)
 	if err != nil {
@@ -300,9 +298,5 @@ func backupCursorHooks(hooksPath string) error {
 		}
 		return fmt.Errorf("failed to read Cursor hooks for backup: %w", err)
 	}
-	backupPath := fmt.Sprintf("%s.confab-backup-%s", hooksPath, time.Now().Format("20060102-150405"))
-	if err := os.WriteFile(backupPath, data, 0600); err != nil {
-		return fmt.Errorf("failed to create backup: %w", err)
-	}
-	return nil
+	return backupFile(hooksPath, data)
 }

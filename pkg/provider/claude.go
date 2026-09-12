@@ -307,10 +307,8 @@ func (p ClaudeCode) ValidateTranscriptPath(path string) error {
 	}
 
 	cleaned := filepath.Clean(path)
-	for _, part := range strings.Split(cleaned, string(filepath.Separator)) {
-		if part == ".." {
-			return fmt.Errorf("must not contain '..' components")
-		}
+	if hasDotDotComponent(cleaned) {
+		return fmt.Errorf("must not contain '..' components")
 	}
 
 	projectsDir, err := p.ProjectsDir()
@@ -333,18 +331,7 @@ func (p ClaudeCode) ValidateTranscriptPath(path string) error {
 
 // FindParentPID walks up the process tree to find the Claude Code process.
 func (p ClaudeCode) FindParentPID() int {
-	parentPID := os.Getppid()
-	if p.IsProcess(parentPID) {
-		return parentPID
-	}
-
-	grandparentPID := getParentPID(parentPID)
-	if grandparentPID > 0 && p.IsProcess(grandparentPID) {
-		return grandparentPID
-	}
-
-	logger.Warn("Could not find Claude in process tree, disabling parent PID monitoring")
-	return 0
+	return findParentOrGrandparent(p.IsProcess, "Claude")
 }
 
 // IsProcess checks if the given PID is a Claude Code process.
@@ -390,4 +377,25 @@ func getParentPID(pid int) int {
 	}
 	ppid, _ := strconv.Atoi(strings.TrimSpace(string(out)))
 	return ppid
+}
+
+// findParentOrGrandparent walks up to two levels of the process tree looking
+// for a process satisfying isProcess. Shared by each provider's FindParentPID
+// for daemon parent-liveness monitoring. If label is non-empty, a Warn is
+// logged when neither the parent nor grandparent matches.
+func findParentOrGrandparent(isProcess func(int) bool, label string) int {
+	parentPID := os.Getppid()
+	if isProcess(parentPID) {
+		return parentPID
+	}
+
+	grandparentPID := getParentPID(parentPID)
+	if grandparentPID > 0 && isProcess(grandparentPID) {
+		return grandparentPID
+	}
+
+	if label != "" {
+		logger.Warn("Could not find %s in process tree, disabling parent PID monitoring", label)
+	}
+	return 0
 }

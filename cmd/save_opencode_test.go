@@ -14,7 +14,7 @@ import (
 // setupOpencodeSaveEnv writes a config pointing at backendURL, sets HOME so
 // materialized files land in a temp dir, and points CONFAB_OPENCODE_DB at the
 // fixture. The returned builder seeds sessions.
-func setupOpencodeSaveEnv(t *testing.T, backendURL string, caps capsResponder) *opencodetest.Builder {
+func setupOpencodeSaveEnv(t *testing.T, backendURL string) *opencodetest.Builder {
 	t.Helper()
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
@@ -70,7 +70,7 @@ func TestSaveOpencode_RootOnly_Uploads(t *testing.T) {
 	server := httptest.NewServer(backend)
 	defer server.Close()
 
-	b := setupOpencodeSaveEnv(t, server.URL, backend.caps)
+	b := setupOpencodeSaveEnv(t, server.URL)
 	const root = "ses_save_root_only"
 	b.AddSessionWithDir(root, "", "/work")
 	b.AddMessage(root, "msg_00000000000000000000a1", opencodetest.UserTextMessage("hello"))
@@ -100,7 +100,7 @@ func TestSaveOpencode_RootWithChildren_UploadsTree(t *testing.T) {
 	server := httptest.NewServer(backend)
 	defer server.Close()
 
-	b := setupOpencodeSaveEnv(t, server.URL, backend.caps)
+	b := setupOpencodeSaveEnv(t, server.URL)
 	const root = "ses_save_tree_root"
 	const childA = "ses_save_tree_a"
 	const childB = "ses_save_tree_b"
@@ -133,7 +133,7 @@ func TestSaveOpencode_ChildID_ResolvesToRoot(t *testing.T) {
 	server := httptest.NewServer(backend)
 	defer server.Close()
 
-	b := setupOpencodeSaveEnv(t, server.URL, backend.caps)
+	b := setupOpencodeSaveEnv(t, server.URL)
 	const root = "ses_child_resolve_root"
 	const child = "ses_child_resolve_child"
 	b.AddSessionWithDir(root, "", "/work")
@@ -163,7 +163,7 @@ func TestSaveOpencode_CapabilityOff_RootOnly(t *testing.T) {
 	server := httptest.NewServer(backend)
 	defer server.Close()
 
-	b := setupOpencodeSaveEnv(t, server.URL, backend.caps)
+	b := setupOpencodeSaveEnv(t, server.URL)
 	const root = "ses_capoff_root"
 	const child = "ses_capoff_child"
 	b.AddSessionWithDir(root, "", "/work")
