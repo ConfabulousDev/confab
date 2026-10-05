@@ -42,7 +42,7 @@ func (Opencode) WalkUpToRoot(sessionID string) (string, string, error) {
 }
 
 // ShouldSpawnForInput refuses subagent (non-root) OpenCode sessions so only the
-// user-initiated root session spawns a daemon; CF-538 will capture subagents as
+// user-initiated root session spawns a daemon; CF-538 captures subagents as
 // sidechain files under the root. A session is a subagent when the plugin
 // forwarded a parent session id (surfaced via an optional SessionParentID()
 // accessor on the input — kept off the shared HookInput interface so Claude/

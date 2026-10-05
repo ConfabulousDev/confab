@@ -1,5 +1,6 @@
 // Package hookconfig owns the install/uninstall/check logic for
-// Confab hooks in Claude Code's settings.json and Codex's config.toml.
+// Confab hooks in Claude Code's settings.json, Codex's config.toml, and
+// Cursor's hooks.json.
 // Provider methods delegate here so pkg/provider doesn't carry the
 // configuration-file detail.
 package hookconfig

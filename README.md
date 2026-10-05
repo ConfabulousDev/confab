@@ -60,12 +60,12 @@ The sync daemon uploads transcript chunks while you work, reducing data loss if 
 ### List Sessions
 
 ```bash
-# List all local sessions
-confab list
+# List local sessions (--provider is required: claude-code, codex, opencode, or cursor)
+confab list --provider claude-code
 
 # Filter by duration
-confab list -d 5d    # Sessions from last 5 days
-confab list -d 12h   # Sessions from last 12 hours
+confab list --provider claude-code -d 5d    # Sessions from last 5 days
+confab list --provider claude-code -d 12h   # Sessions from last 12 hours
 ```
 
 Use a listed session ID with `confab save`.
@@ -74,10 +74,10 @@ Use a listed session ID with `confab save`.
 
 ```bash
 # Upload specific sessions by ID (use IDs from 'confab list')
-confab save abc123de
+confab save --provider claude-code abc123de
 
 # Upload multiple sessions
-confab save abc123de f9e8d7c6
+confab save --provider claude-code abc123de f9e8d7c6
 ```
 
 ### Redaction
@@ -110,8 +110,8 @@ Codex stores rollouts under `~/.codex/sessions/<yyyy>/<mm>/<dd>/rollout-*.jsonl`
 
 ### Caveats
 
-- Bundled skills (`/retro`) install for Claude Code, Codex, and OpenCode.
-- GitHub commit/PR linking is wired for Claude Code and Codex. Claude also supports the GitHub MCP PR matcher; Codex uses Bash hooks.
+- Bundled skills (`/retro`) install for Claude Code, Codex, OpenCode, and Cursor.
+- GitHub commit/PR linking is wired for Claude Code, Codex, and Cursor. Claude also supports the GitHub MCP PR matcher; Codex uses Bash hooks.
 - Codex sync daemons shut down via parent-process liveness, not a `SessionEnd`/`Stop` hook.
 
 ## OpenCode
@@ -130,9 +130,8 @@ OpenCode has no on-disk transcript file — session data lives in a local SQLite
 
 ### Caveats
 
-- **Live sync only.** OpenCode sessions are captured while you work. Offline commands (`confab list --provider opencode`, `confab save --provider opencode`) are not supported.
-- **No GitHub commit/PR linking.** The bidirectional GitHub linking wired for Claude Code and Codex is not available for OpenCode.
-- **Root sessions only.** OpenCode subagent sessions are suppressed; only the user-initiated root session is captured.
+- **No GitHub commit/PR linking.** The bidirectional GitHub linking wired for Claude Code, Codex, and Cursor is not available for OpenCode.
+- **One daemon per root session.** OpenCode subagent sessions don't spawn their own daemon; the root session's daemon syncs them as sidechain files under the root session.
 - **Plugin-based install.** Lifecycle is driven by the installed plugin (not an OpenCode-native hook system). The daemon also monitors the parent OpenCode process and exits if it dies.
 - Bundled skills (`/retro`) install under `~/.config/opencode/skills/`.
 
@@ -148,20 +147,19 @@ confab setup --backend-url https://confab.yourcompany.com
 confab setup --provider cursor --backend-url https://confab.yourcompany.com
 ```
 
-Cursor writes per-session transcripts to disk at `~/.cursor/projects/<workspace>/agent-transcripts/<id>/<id>.jsonl`. `confab setup` installs `sessionStart` + `sessionEnd` hooks into `~/.cursor/hooks.json` (merging into any user-authored hooks). Subagent transcripts live beside the root under `subagents/<id>.jsonl` and sync as `file_type=agent` sidechain files under the root session, through the same incremental, redacted pipeline as the other providers.
+Cursor writes per-session transcripts to disk at `~/.cursor/projects/<workspace>/agent-transcripts/<id>/<id>.jsonl`. `confab setup` installs `sessionStart`, `sessionEnd`, `preToolUse`, and `postToolUse` hooks into `~/.cursor/hooks.json` (merging into any user-authored hooks). Subagent transcripts live beside the root under `subagents/<id>.jsonl` and sync as `file_type=agent` sidechain files under the root session, through the same incremental, redacted pipeline as the other providers.
 
 ### Caveats
 
 - **No tool results.** Cursor's transcript records prompts, assistant text, and tool *calls* but not tool *results*, so synced Cursor sessions show no tool outputs.
 - **Hybrid shutdown.** The CLI fires `sessionEnd` reliably, but the IDE only fires it on window/app close (not per chat-tab). The daemon's parent-PID liveness on the shared `Cursor.app` process is the primary IDE shutdown — a long IDE session with several chats keeps per-session daemons alive (still syncing incrementally) until the window closes.
-- **No GitHub commit/PR linking.** The bidirectional GitHub linking wired for Claude Code and Codex is not available for Cursor.
 - Bundled skills (`/retro`) install under `~/.cursor/skills/`.
 
 ## Configuration
 
 | File | Purpose |
 |------|---------|
-| `~/.confab/config.json` | Backend URL, API key, and redaction settings |
+| `~/.confab/config.json` | Backend URL, API key, per-config-dir backend bindings, redaction, log level, and auto-update settings |
 | `~/.confab/logs/confab.log` | Operation logs (auto-rotated, 14 day retention) |
 
 ## Environment Variables
@@ -170,11 +168,15 @@ Cursor writes per-session transcripts to disk at `~/.cursor/projects/<workspace>
 |----------|---------|---------|
 | `CONFAB_CLAUDE_DIR` | `~/.claude` | Override the Claude Code state directory |
 | `CONFAB_CODEX_DIR` | `~/.codex` | Override the Codex state directory |
+| `CONFAB_CODEX_STATE_DB` | highest-numbered `~/.codex/state_*.sqlite` | Override the Codex SQLite state database location |
 | `CONFAB_OPENCODE_CONFIG_DIR` | `~/.config/opencode` | Override the OpenCode config directory (plugin + skills) |
 | `CONFAB_OPENCODE_DB` | `~/.local/share/opencode/opencode.db` | Override the OpenCode SQLite database location |
 | `CONFAB_CURSOR_DIR` | `~/.cursor` | Override the Cursor state directory (hooks + skills + transcripts) |
 | `CONFAB_CONFIG_PATH` | `~/.confab/config.json` | Config file location |
 | `CONFAB_LOG_DIR` | `~/.confab/logs` | Log directory |
+| `CONFAB_SYNC_INTERVAL_MS` | `30000` | Daemon sync interval (also the OpenCode collector poll interval) |
+| `CONFAB_SYNC_JITTER_MS` | `0` | Maximum random jitter added to each sync interval |
+| `CONFAB_DISABLE_LINK_FROM_GITHUB` | unset | Any non-empty value disables GitHub commit/PR linking |
 
 ## Developer Docs
 
@@ -182,7 +184,7 @@ Each package has a README with extension guides, invariants, and design decision
 
 - [`cmd/`](cmd/README.md) — CLI commands and hook handlers
 - [`pkg/`](pkg/README.md) — Package index and dependency map
-  - [`config`](pkg/config/README.md), [`daemon`](pkg/daemon/README.md), [`git`](pkg/git/README.md), [`hookconfig`](pkg/hookconfig/README.md), [`http`](pkg/http/README.md), [`logger`](pkg/logger/README.md), [`provider`](pkg/provider/README.md), [`redactor`](pkg/redactor/README.md), [`sync`](pkg/sync/README.md), [`types`](pkg/types/README.md), [`utils`](pkg/utils/README.md)
+  - [`confabpath`](pkg/confabpath/README.md), [`config`](pkg/config/README.md), [`daemon`](pkg/daemon/README.md), [`git`](pkg/git/README.md), [`hookconfig`](pkg/hookconfig/README.md), [`http`](pkg/http/README.md), [`logger`](pkg/logger/README.md), [`loginit`](pkg/loginit/README.md), [`pathcanon`](pkg/pathcanon/README.md), [`provider`](pkg/provider/README.md), [`redactor`](pkg/redactor/README.md), [`sync`](pkg/sync/README.md), [`types`](pkg/types/README.md), [`utils`](pkg/utils/README.md)
 
 See also [`CLAUDE.md`](CLAUDE.md) for AI-oriented architecture notes and development practices.
 

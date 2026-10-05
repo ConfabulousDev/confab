@@ -1,6 +1,6 @@
 # pkg/daemon
 
-Background sync daemon for provider transcripts: Claude Code transcript JSONL, Codex rollout JSONL, or an OpenCode session materialized from its local SQLite DB. One daemon runs per active Claude session, Codex root tree, or OpenCode root session.
+Background sync daemon for provider transcripts: Claude Code transcript JSONL, Codex rollout JSONL, Cursor transcript JSONL, or an OpenCode session materialized from its local SQLite DB. One daemon runs per active Claude session, Codex root tree, Cursor session, or OpenCode root session.
 
 ## Files
 
@@ -24,10 +24,9 @@ spawn ──> waitForTranscript (poll 2s, timeout 60s)
            │                          │
            ├── tryInit (lazy auth)    │
            ├── SyncAll (engine)       │
-           ├── check parent alive     │
-           └── sleep(30s ± 5s jitter)─┘
+           └── sleep(interval+jitter)─┘
               │
-              ▼ (stop signal / parent dead / context cancel)
+              ▼ (stop signal / parent dead via monitorParent / context cancel)
          shutdown
            ├── read inbox events (SessionEnd payload)
            ├── final sync (with 30s timeout)
@@ -71,7 +70,7 @@ spawn ──> waitForTranscript (poll 2s, timeout 60s)
 
 **Lazy authentication.** The daemon starts immediately when the provider launches a session, but the user may not have authenticated yet. `tryInit()` defers backend communication until the first sync cycle, and handles auth failures gracefully.
 
-**Jittered sync interval.** The base interval is 30s with ±5s random jitter. This prevents thundering herd when multiple sessions start simultaneously. The jitter is applied per-cycle, not just at startup.
+**Jittered sync interval.** The base interval is 30s plus 0–5s random jitter when no interval is configured (hook-spawned daemons pass an explicit interval, so their jitter comes from `CONFAB_SYNC_JITTER_MS`, default 0). This prevents thundering herd when multiple sessions start simultaneously. The jitter is applied per-cycle, not just at startup.
 
 **State files with PID-based liveness check.** The state file stores the daemon PID. `IsDaemonRunning()` sends signal 0 to check if the process is still alive. This is more reliable than lock files (which can be orphaned) and simpler than IPC.
 
@@ -108,6 +107,6 @@ Override `shutdownTimeout` (package var) in tests for fast execution. Use `CONFA
 
 ## Dependencies
 
-**Uses:** `pkg/sync`, `pkg/config`, `pkg/confabpath`, `pkg/http`, `pkg/types`, `pkg/logger`
+**Uses:** `pkg/sync`, `pkg/provider`, `pkg/config`, `pkg/confabpath`, `pkg/http`, `pkg/types`, `pkg/logger`
 
 **Used by:** `cmd/` (spawn, sync start/stop, status)

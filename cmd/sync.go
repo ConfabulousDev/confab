@@ -13,7 +13,7 @@ var syncCmd = &cobra.Command{
 	Use:   "sync",
 	Short: "Incremental session sync daemon",
 	Long: `Manage the incremental sync daemon that uploads session data
-during active provider sessions (Claude Code and Codex).
+during active provider sessions (Claude Code, Codex, OpenCode, and Cursor).
 
 The daemon watches transcript files and uploads new content
 to the backend every 30 seconds.

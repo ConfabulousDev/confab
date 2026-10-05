@@ -130,7 +130,7 @@ This is a cross-cutting change spanning multiple packages:
 
 **SessionStart routes every firing through `p.WalkUpToRoot`.** Identity for Claude; thread-edge walk for Codex. For Codex, every subagent SessionStart that lands in an already-running root tree becomes a no-op via state-file dedup. `confab save --provider codex <subagent-uuid>` performs the same walk-up so manual saves of any UUID in a tree always sync the whole tree.
 
-**SessionStart keeps bundled skills aligned with hooks.** Claude runs announcements, which install missing skills and return a visible system message. Codex silently ensures bundled skills under `~/.codex/skills/` so users who installed hooks get the same Confab skills without extra setup.
+**SessionStart keeps bundled skills aligned with hooks.** Claude runs announcements, which install missing skills and return a visible system message. Every other provider (Codex, OpenCode, Cursor) silently ensures bundled skills via `p.InstallSkills()` so users who installed hooks get the same Confab skills without extra setup.
 
 **`list`, `save` route discovery through the `Provider` interface (CF-398).** Adding a new provider requires only `pkg/provider/<name>.go` + `<name>_discovery.go` — no changes in `cmd/`. `list`/`save` now **require** an explicit `--provider` (kata m9mb — no claude-code flag default). The remaining `provider.NameClaudeCode` references in `cmd/` are the machine-invoked `hook` command's back-compat default (`cmd/hook.go`) plus `cmd/list.go`'s `providerSaveHint`/no-sessions message, both of which gate only on "is this the default (claude-code) provider?" — no per-provider special-casing (kata z0rt generalized the former codex-only "save" hint).
 

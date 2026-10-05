@@ -26,13 +26,13 @@ Before CF-396 (Phase 2), hook install logic lived in `pkg/config` (Claude side) 
 
 | Function | Purpose |
 |---|---|
-| `InstallSyncHooks() error` | Install `SessionStart` (spawn daemon) + `SessionEnd` (signal shutdown) in `settings.json`. The command strings carry an explicit `--provider claude-code` (kata m9mb), matching codex/cursor. |
-| `UninstallSyncHooks() error` | Remove the two sync hooks. The matcher uses `Contains "hook session-start"/"session-end"`, so it removes both the `--provider claude-code` shape and old no-flag installs. |
-| `IsSyncHooksInstalled() (bool, error)` | True iff both sync hooks are present. |
-| `InstallPreToolUseHooks() error` | Install bash + GitHub MCP `PreToolUse` interceptors for git commit / PR tracking. |
-| `UninstallPreToolUseHooks() error` / `IsPreToolUseHooksInstalled() (bool, error)` | symmetric |
+| `InstallSyncHooks(settingsPath string) error` | Install `SessionStart` (spawn daemon) + `SessionEnd` (signal shutdown) in `settings.json`. The command strings carry an explicit `--provider claude-code` (kata m9mb), matching codex/cursor. |
+| `UninstallSyncHooks(settingsPath string) error` | Remove the two sync hooks. The matcher uses `Contains "hook session-start"/"session-end"`, so it removes both the `--provider claude-code` shape and old no-flag installs. |
+| `IsSyncHooksInstalled(settingsPath string) (bool, error)` | True iff both sync hooks are present. |
+| `InstallPreToolUseHooks(settingsPath string) error` | Install bash + GitHub MCP `PreToolUse` interceptors for git commit / PR tracking. |
+| `UninstallPreToolUseHooks(settingsPath string) error` / `IsPreToolUseHooksInstalled(settingsPath string) (bool, error)` | symmetric |
 | `InstallPostToolUseHooks` / `Uninstall…` / `Is…Installed` | `PostToolUse` interceptors. |
-| `InstallUserPromptSubmitHook` / `Uninstall…` / `Is…Installed` | Capture user prompts. |
+| `InstallUserPromptSubmitHook` / `Uninstall…` / `Is…Installed` | Re-spawn the sync daemon if it died between turns. |
 
 `provider.ClaudeCode.InstallHooks()` calls all four install functions in sequence; `UninstallHooks()` mirrors that.
 
@@ -66,9 +66,9 @@ Cursor's `hooks.json` is plain JSON (`{"version":1,"hooks":{"<event>":[{"command
 
 ## Invariants
 
-- **Atomic writes.** All providers use `config.AtomicUpdateSettings` (Claude) or a `.confab-backup-*` + atomic rename (Codex, Cursor) so a crashed install never leaves a half-edited config.
+- **Atomic writes.** All providers use `config.AtomicUpdateSettingsAt` (Claude) or a `.confab-backup-*` + atomic rename (Codex, Cursor) so a crashed install never leaves a half-edited config.
 - **Idempotent.** Calling `Install...` twice produces the same file as calling it once. Tests pin this for all three providers.
-- **Preserves user config.** No provider rewrites unmanaged config. Codex only touches `[features]` and the managed Confab hook block; Cursor only touches its two event arrays and leaves every other hook / top-level key untouched.
+- **Preserves user config.** No provider rewrites unmanaged config. Codex only touches `[features]` and the managed Confab hook block; Cursor only touches its four event arrays and leaves every other hook / top-level key untouched.
 - **No `[[hooks.Stop]]` / `[[hooks.UserPromptSubmit]]` for Codex.** Codex fires `Stop` at every agent/turn boundary (Stop-driven shutdown would kill the root daemon prematurely), and parent-PID monitoring already covers the Claude `UserPromptSubmit` teleport case.
 - **Trusted-hash positional keys.** Codex's `[hooks.state."<configPath>:<event>:<group_idx>:<hook_idx>"]` key uses the hook's actual position in the existing `[[hooks.<Event>]]` list. `countCodexHookMatcherGroups` runs **per event** and on the post-strip config so re-installs interleave correctly with any unmanaged user-authored blocks at any of the three event types.
 
