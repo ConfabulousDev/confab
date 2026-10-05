@@ -24,7 +24,7 @@ Managed by `upload.go`. Contains backend URL, API key, log level, auto-update fl
 Managed by `config.go`. Contains hooks that Claude Code reads to fire events. We install/uninstall hooks here, but Claude Code owns the file and other tools may write to it concurrently.
 
 ### Bundled provider skills
-Managed by `bundled_skills.go` and `skill_retro.go` (and future `skill_*.go` files). Skills are standalone `SKILL.md` files installed by provider clients into their local skill layouts: Claude uses `~/.claude/skills/<name>/SKILL.md`; Codex uses `~/.codex/skills/<name>/SKILL.md`; OpenCode uses `~/.config/opencode/skills/<name>/SKILL.md`. If an existing `SKILL.md` has been customized by the user, install backs it up to `SKILL.md.bak` before overwriting; if the backup write fails, the install aborts rather than silently overwrite.
+Managed by `bundled_skills.go` and `skill_retro.go` (and future `skill_*.go` files). Skills are standalone `SKILL.md` files installed by provider clients into their local skill layouts: Claude uses `~/.claude/skills/<name>/SKILL.md`; Codex uses `~/.codex/skills/<name>/SKILL.md`; OpenCode uses `~/.config/opencode/skills/<name>/SKILL.md`; Cursor uses `~/.cursor/skills/<name>/SKILL.md`. If an existing `SKILL.md` has been customized by the user, install backs it up to `SKILL.md.bak` before overwriting; if the backup write fails, the install aborts rather than silently overwrite.
 
 ## Key Types
 
@@ -47,7 +47,7 @@ Hook install/uninstall lives in `pkg/hookconfig` — see that package's README. 
 
 ### Adding a new bundled skill
 1. Add the provider-rendered template content in `skill_<name>.go`.
-2. Add the skill name to `bundledSkillNames` and route it in `bundledSkillTemplate` (keyed by `SkillProviderClaude` / `SkillProviderCodex` / `SkillProviderOpencode`; providers without a distinct template fall through to the generic one, as OpenCode does for `/retro`).
+2. Add the skill name to `bundledSkillNames` and route it in `bundledSkillTemplate` (keyed by `SkillProviderClaude` / `SkillProviderCodex` / `SkillProviderOpencode` / `SkillProviderCursor`; providers without a distinct template fall through to the generic one, as OpenCode and Cursor do for `/retro`).
 3. Keep path/layout decisions in `pkg/provider`; `pkg/config` only receives a state directory and provider name.
 4. Add/update tests for Claude, Codex, and OpenCode installs so all provider paths stay covered.
 
@@ -77,6 +77,6 @@ Tests cover atomic settings updates under concurrency, field preservation across
 
 ## Dependencies
 
-**Uses:** `pkg/confabpath` (`~/.confab` path-builder for `getConfigPath`), `pkg/logger` (logging from `config.go`, `skill_*.go`). `paths.go` deliberately does not import `pkg/provider` even though it owns parallel constants — `pkg/provider` imports `pkg/hookconfig`, which imports `pkg/config`. The duplicated `ClaudeStateDirEnv` constant must stay in sync between the two packages.
+**Uses:** `pkg/confabpath` (`~/.confab` path-builder for `getConfigPath`), `pkg/pathcanon` (binding keys), `pkg/logger` (logging from `config.go`, `skill_*.go`). `paths.go` deliberately does not import `pkg/provider` even though it owns parallel constants — `pkg/provider` imports `pkg/hookconfig`, which imports `pkg/config`. The duplicated `ClaudeStateDirEnv` constant must stay in sync between the two packages.
 
 **Used by:** `cmd/` (setup, login, hooks, status), `pkg/daemon/` (state dir), `pkg/hookconfig/` (settings struct, atomic update, tool-name constants), `pkg/http/` (upload config), `pkg/loginit/` (`GetUploadConfig`, `ParseLogLevel`), `pkg/provider/` (provider paths, skills install), `pkg/redactor/` (redaction patterns), `pkg/sync/` (upload config)

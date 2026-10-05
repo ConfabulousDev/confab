@@ -18,12 +18,12 @@ var listCmd = &cobra.Command{
 	Long: `List local sessions for the selected provider.
 
 Shows session ID (truncated), title/summary, and last activity time.
-Copy the session ID to use with 'confab save <session-id>'.
+Copy the session ID to use with 'confab save --provider <name> <session-id>'.
 
 Examples:
-  confab list                     # List sessions for the default provider
-  confab list --provider codex    # List Codex sessions
-  confab list -d 5d               # Sessions from last 5 days`,
+  confab list --provider claude-code        # List Claude Code sessions
+  confab list --provider codex              # List Codex sessions
+  confab list --provider claude-code -d 5d  # Sessions from last 5 days`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		defer NotifyIfUpdateAvailable()
 		p, err := provider.Get(listProviderName)

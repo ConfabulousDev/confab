@@ -15,11 +15,11 @@ var saveCmd = &cobra.Command{
 	Short: "Save session data to the backend",
 	Long: `Upload session(s) by ID.
 
-Use 'confab list' to see available sessions and their IDs.
+Use 'confab list --provider <name>' to see available sessions and their IDs.
 
 Examples:
-  confab save abc123de           # Upload specific session
-  confab save abc123de f9e8d7c6  # Upload multiple sessions`,
+  confab save --provider claude-code abc123de           # Upload specific session
+  confab save --provider claude-code abc123de f9e8d7c6  # Upload multiple sessions`,
 	Args: cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		defer NotifyIfUpdateAvailable()

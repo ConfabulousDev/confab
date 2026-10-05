@@ -2,7 +2,7 @@
 
 Sync engine that orchestrates incremental transcript uploads to the backend. Handles file tracking, chunking, agent discovery, and chunk upload. Provider-specific behavior (metadata extraction, descendant discovery, root metadata attachment) lives entirely in `pkg/provider`; the engine dispatches through the `provider.Provider` interface (see CF-397).
 
-The engine is fully **file-based** and provider-agnostic about its source: it reads whatever local file the daemon points `transcriptPath` at. For Claude/Codex that is the tool's own JSONL; for OpenCode the daemon **materializes** the session from OpenCode's local SQLite DB into `~/.confab/opencode/<id>/messages.jsonl` and points `transcriptPath` there, so the materialized file is tracked, redacted (`ReadChunk`), chunked, and uploaded exactly like any transcript — no OpenCode-specific code in this package. Because `TrackedFile` separates local `Path` from backend `Name`, the backend `file_name` is just the base (`messages.jsonl`).
+The engine is fully **file-based** and provider-agnostic about its source: it reads whatever local file the daemon points `transcriptPath` at. For Claude/Codex/Cursor that is the tool's own JSONL; for OpenCode the daemon **materializes** the session from OpenCode's local SQLite DB into `~/.confab/opencode/<id>/messages.jsonl` and points `transcriptPath` there, so the materialized file is tracked, redacted (`ReadChunk`), chunked, and uploaded exactly like any transcript — no OpenCode-specific code in this package. Because `TrackedFile` separates local `Path` from backend `Name`, the backend `file_name` is just the base (`messages.jsonl`).
 
 ## Files
 
@@ -112,7 +112,7 @@ SyncAll() loop:
 
 **Adding a new API endpoint:** Add request/response types in `client.go`, add a method on `Client`, call it from the engine or command layer.
 
-**Adding new metadata extraction:** Modify the appropriate provider's `AnnotateChunk` in `pkg/provider/{claude,codex,opencode}.go`. Metadata is extracted from **raw lines before redaction**, then the extracted values are redacted via the closure passed to `AnnotateChunk` before being attached to the chunk via the `ChunkView` setters.
+**Adding new metadata extraction:** Modify the appropriate provider's `AnnotateChunk` in `pkg/provider/{claude,codex,opencode,cursor}.go`. Metadata is extracted from **raw lines before redaction**, then the extracted values are redacted via the closure passed to `AnnotateChunk` before being attached to the chunk via the `ChunkView` setters.
 
 **Tracking a new file type:** Add discovery logic in `DiscoverNewFiles()` (for content-driven discovery), the provider's `DiscoverDescendants` (for external-state discovery), or `DiscoverWorkflowFiles` (for directory-scanned, capability-gated workflow files). Set the file type in `TrackedFile.Type`. The rest of the pipeline (read, chunk, upload) is file-type agnostic.
 

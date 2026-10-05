@@ -31,5 +31,5 @@
 
 - `confab update` checks GitHub releases API for the latest version
 - The SessionStart hook auto-updates and re-execs if a new version is available
-- User-facing commands (`list`, `save`, `status`) show an update notice but don't auto-install
+- User-facing commands (`list`, `save`, `status`, `retro`, `session ...`) show an update notice but don't auto-install
 - Checks are rate-limited to once per hour per machine

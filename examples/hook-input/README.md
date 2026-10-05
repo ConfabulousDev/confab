@@ -24,8 +24,8 @@ These are reference examples only. In practice, Claude Code invokes confab hooks
 
 ```bash
 # Configured in ~/.claude/settings.json by `confab hooks add`
-confab sync start   # Called on SessionStart (reads JSON from stdin)
-confab sync stop    # Called on SessionEnd (reads JSON from stdin)
+confab hook session-start --provider claude-code   # Called on SessionStart (reads JSON from stdin)
+confab hook session-end --provider claude-code     # Called on SessionEnd (reads JSON from stdin)
 ```
 
 For manual testing of sync commands, you could use:

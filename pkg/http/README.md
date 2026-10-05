@@ -73,4 +73,4 @@ Tests use `httptest.NewServer` to verify compression thresholds, error handling,
 
 **Uses:** `github.com/klauspost/compress/zstd`, `pkg/config` (UploadConfig for backend URL/API key), `pkg/logger`
 
-**Used by:** `pkg/sync/` (via `Client`), `cmd/` (login, status validation)
+**Used by:** `pkg/sync/` (via `Client`), `pkg/daemon/` (`ErrUnauthorized` handling), `cmd/` (login, status validation)

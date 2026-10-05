@@ -6,6 +6,7 @@ Internal packages for the Confab CLI. Each package has its own README with exten
 
 | Package | Purpose | Change this when... |
 |---------|---------|---------------------|
+| [backendtest](backendtest/) | Test helper for mock backends: reads zstd-compressed request bodies | Changing how mock backends decode requests |
 | [codextest](codextest/) | Reusable Codex SQLite + sessions-tree fixture for tests | Adding new fixture builders for cross-package Codex tests |
 | [opencodetest](opencodetest/) | Reusable OpenCode SQLite fixture for tests (real schema, programmatic seeding, no vendored DB) | Adding new fixture shapes for cross-package OpenCode tests |
 | [confabpath](confabpath/) | `~/.confab` path-builder helpers (`Dir`, `Subpath`) | Adding new top-level confab state files |
@@ -13,11 +14,11 @@ Internal packages for the Confab CLI. Each package has its own README with exten
 | [config](config/) | Confab config (API key, redaction, settings.json read/write) + per-(provider, dir) backend bindings | Adding config fields, changing settings.json plumbing, binding storage |
 | [daemon](daemon/) | Background sync daemon lifecycle | Changing sync behavior, shutdown logic |
 | [git](git/) | Git repo info extraction | Adding new git fields to sync |
-| [hookconfig](hookconfig/) | Per-provider hook install/uninstall (Claude settings.json, Codex config.toml) | Adding new hook event types, changing hook command shape |
+| [hookconfig](hookconfig/) | Per-provider hook install/uninstall (Claude settings.json, Codex config.toml, Cursor hooks.json) | Adding new hook event types, changing hook command shape |
 | [http](http/) | HTTP client with compression + retries | Adding error types, changing retry logic |
 | [logger](logger/) | Singleton file logger with rotation | Changing log format, adding levels |
 | [loginit](loginit/) | Startup-time wiring of config → logger level (avoids config↔logger import cycle) | Adding new config-driven logger options |
-| [provider](provider/) | `Provider` interface + Claude Code / Codex / OpenCode implementations: paths, hooks, parent-PID, root walk, hook payloads, session discovery (scan/find), metadata extraction, agent-ID parsing, OpenCode SQLite collector | Adding a new provider or changing tool-specific behavior |
+| [provider](provider/) | `Provider` interface + Claude Code / Codex / OpenCode / Cursor implementations: paths, hooks, parent-PID, root walk, hook payloads, session discovery (scan/find), metadata extraction, agent-ID parsing, OpenCode SQLite collector | Adding a new provider or changing tool-specific behavior |
 | [redactor](redactor/) | JSON-aware sensitive data redaction | Adding pattern types (patterns themselves live in config) |
 | [sync](sync/) | Sync engine, API client, file tracking | Adding API endpoints, changing chunking |
 | [types](types/) | Shared type definitions | Adding cross-package types |
@@ -31,9 +32,9 @@ cmd/  (uses all packages)
  ├── daemon ──── sync ──┬── http ──── config, logger
  │                      ├── redactor ── config
  │                      ├── provider ──┬── hookconfig ── config, logger
- │                      │              └── types, logger
- │                      ├── git
- │                      └── config
+ │                      │              └── config, pathcanon, types, logger
+ │                      ├── git ── types
+ │                      └── config ── pathcanon, logger
  │
  ├── config
  ├── provider
@@ -45,11 +46,13 @@ cmd/  (uses all packages)
  └── logger
 
 Test-only:
+  backendtest  (used by sync, daemon, cmd test files)
   codextest    (used by provider, sync, daemon, cmd test files)
-  opencodetest (used by provider, daemon test files)
+  opencodetest (used by provider, sync, daemon, cmd test files)
 
 Leaf packages (no confab dependencies):
-  types, utils, git, confabpath
+  types, utils, confabpath, pathcanon
+  git (uses types only)
   logger (uses confabpath only)
   loginit (uses config + logger to break a cycle at startup)
 ```
@@ -57,11 +60,12 @@ Leaf packages (no confab dependencies):
 ## Data Flow
 
 ```
-Claude Code / Codex writes transcript; OpenCode writes to its SQLite DB
+Claude Code / Codex / Cursor writes transcript; OpenCode writes to its SQLite DB
         │
         ▼
   ~/.claude/projects/<path>/<session-id>.jsonl   (Claude Code)
   ~/.codex/sessions/<yyyy>/<mm>/<dd>/rollout-*.jsonl   (Codex)
+  ~/.cursor/projects/<workspace>/agent-transcripts/<id>/<id>.jsonl   (Cursor)
   ~/.local/share/opencode/opencode.db → daemon's collector materializes
       ~/.confab/opencode/<id>/messages.jsonl   (OpenCode)
         │
@@ -87,7 +91,7 @@ Claude Code / Codex writes transcript; OpenCode writes to its SQLite DB
 
 ## Layering Rules
 
-- **`types`, `utils`, `git`, `confabpath`** are leaf packages — no confab imports. Any package can depend on them.
+- **`types`, `utils`, `confabpath`, `pathcanon`** are leaf packages — no confab imports; `git` imports only `types`. Any package can depend on them.
 - **`logger`** depends only on `confabpath` (for the default log dir) and is otherwise leaf-like. `pkg/config` already depends on `pkg/logger`, so `pkg/logger` must NOT import `pkg/config` — startup wiring that needs both lives in `pkg/loginit` instead.
 - **`logger`** is accessed as a singleton — no need to pass it around.
 - **Mid-level packages** (`config`, `http`, `redactor`, `provider`) depend on leaves and each other but not on `daemon` or `sync`.

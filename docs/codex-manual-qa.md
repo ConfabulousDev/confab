@@ -112,8 +112,8 @@ Run this checklist after significant provider changes. The goal is to preserve C
   ```
 - [ ] Run:
   ```sh
-  ./confab hooks add
-  ./confab list
+  ./confab hooks add --provider claude-code
+  ./confab list --provider claude-code
   ```
 - [ ] Confirm Confab reads and writes under the temp directory.
 - [ ] Unset the override:
