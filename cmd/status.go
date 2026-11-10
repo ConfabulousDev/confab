@@ -18,7 +18,7 @@ var statusCmd = &cobra.Command{
 		defer NotifyIfUpdateAvailable()
 		logger.Info("Running status command")
 
-		fmt.Println("=== Confab Status ===")
+		fmt.Println("=== Confabulous Code Status ===")
 		fmt.Println()
 
 		printBackendSection()

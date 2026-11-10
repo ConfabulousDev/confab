@@ -12,14 +12,14 @@ var hooksProviderName string
 
 var hooksCmd = &cobra.Command{
 	Use:   "hooks",
-	Short: "Manage Confab hooks for a provider",
-	Long:  `Add or remove confab hooks from the selected provider's settings file.`,
+	Short: "Manage Confabulous Code hooks for a provider",
+	Long:  `Add or remove Confabulous Code hooks from the selected provider's settings file.`,
 }
 
 var hooksAddCmd = &cobra.Command{
 	Use:   "add",
 	Short: "Install hooks",
-	Long: `Installs the full Confab hook set for the selected provider.
+	Long: `Installs the full Confabulous Code hook set for the selected provider.
 
 For Claude Code: SessionStart/End, PreToolUse, PostToolUse, and
 UserPromptSubmit hooks are installed in ~/.claude/settings.json.
@@ -56,7 +56,7 @@ For Cursor: sessionStart and sessionEnd hooks are installed in
 var hooksRemoveCmd = &cobra.Command{
 	Use:   "remove",
 	Short: "Remove hooks",
-	Long:  `Removes the Confab hook set for the selected provider.`,
+	Long:  `Removes the Confabulous Code hook set for the selected provider.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger.Info("Running hooks remove command")
 		targets, err := hooksRemoveTargets()

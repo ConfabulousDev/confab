@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-# Confab CLI Installer
+# Confabulous Code CLI installer
 # Usage: curl -fsSL https://raw.githubusercontent.com/ConfabulousDev/confab/main/install.sh | bash
 # Pin to a specific version:
 #   curl -fsSL https://raw.githubusercontent.com/ConfabulousDev/confab/main/install.sh | CONFAB_VERSION=1.2.3 bash

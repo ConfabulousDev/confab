@@ -475,7 +475,7 @@ matcher = "startup|resume|clear"
 [[hooks.SessionStart.hooks]]
 type = "command"
 command = "` + confabSessionStart + `"
-statusMessage = "Starting Confab sync"
+statusMessage = "Starting Confabulous Code sync"
 
 [[hooks.PreToolUse]]
 matcher = "Bash"
@@ -491,6 +491,12 @@ type = "command"
 command = "` + confabPostToolUse + `"
 statusMessage = ""
 `
+
+	// preRenameHooksTOML is a full install written before the product
+	// rename (kata y7wh): same commands, old status message. Detection keys
+	// on commands, so it must still read as installed.
+	preRenameHooksTOML := strings.Replace(confabHooksTOML,
+		"Starting Confabulous Code sync", "Starting Confab sync", 1)
 
 	// staleConfabHooksTOML is the pre-CF-492 install (SessionStart only).
 	// IsHooksInstalled must report false so confab setup re-emits the
@@ -524,6 +530,7 @@ command = "` + otherCommand + `"
 		{"missing config file", "", false},
 		{"empty config", "# just a comment\n", false},
 		{"all three confab events", confabHooksTOML, true},
+		{"pre-rename install (old status message)", preRenameHooksTOML, true},
 		{"stale install (SessionStart only)", staleConfabHooksTOML, false},
 		{"non-confab SessionStart hook", otherHooksTOML, false},
 	}

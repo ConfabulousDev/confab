@@ -88,7 +88,7 @@ func sessionStartFromReader(r io.Reader, w io.Writer) error {
 
 	defer func() { _ = p.WriteHookResponse(w, false, systemMessage) }()
 
-	fmt.Fprintf(os.Stderr, "=== Confab: Starting %s Sync Daemon ===\n\n", p.Name())
+	fmt.Fprintf(os.Stderr, "=== Confabulous Code: Starting %s Sync Daemon ===\n\n", p.Name())
 
 	// OpenCode is different: the TS plugin pipes JSON via stdin, so
 	// ParseSessionHook reads the JSON payload from r. For Claude/Codex,

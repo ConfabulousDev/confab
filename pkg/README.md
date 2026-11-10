@@ -1,6 +1,6 @@
 # pkg/
 
-Internal packages for the Confab CLI. Each package has its own README with extension guides, invariants, and design decisions.
+Internal packages for the Confabulous Code CLI. Each package has its own README with extension guides, invariants, and design decisions.
 
 ## Package Index
 
@@ -11,7 +11,7 @@ Internal packages for the Confab CLI. Each package has its own README with exten
 | [opencodetest](opencodetest/) | Reusable OpenCode SQLite fixture for tests (real schema, programmatic seeding, no vendored DB) | Adding new fixture shapes for cross-package OpenCode tests |
 | [confabpath](confabpath/) | `~/.confab` path-builder helpers (`Dir`, `Subpath`) | Adding new top-level confab state files |
 | [pathcanon](pathcanon/) | `CanonicalDir` — directory-path canonicalization (the per-(provider, dir) binding match contract) | Changing how config dirs are compared/canonicalized |
-| [config](config/) | Confab config (API key, redaction, settings.json read/write) + per-(provider, dir) backend bindings | Adding config fields, changing settings.json plumbing, binding storage |
+| [config](config/) | Confabulous Code config (API key, redaction, settings.json read/write) + per-(provider, dir) backend bindings | Adding config fields, changing settings.json plumbing, binding storage |
 | [daemon](daemon/) | Background sync daemon lifecycle | Changing sync behavior, shutdown logic |
 | [git](git/) | Git repo info extraction | Adding new git fields to sync |
 | [hookconfig](hookconfig/) | Per-provider hook install/uninstall (Claude settings.json, Codex config.toml, Cursor hooks.json) | Adding new hook event types, changing hook command shape |

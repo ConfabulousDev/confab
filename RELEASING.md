@@ -1,4 +1,4 @@
-# Releasing Confab
+# Releasing the confab CLI
 
 ## Steps
 

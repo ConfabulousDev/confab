@@ -22,6 +22,11 @@ import (
 const (
 	confabCodexHooksStart = "# >>> confab codex hooks >>>"
 	confabCodexHooksEnd   = "# <<< confab codex hooks <<<"
+
+	// codexSessionStartStatusMessage is shown in Codex's UI while the
+	// SessionStart hook runs. It is part of the trusted-hook hash identity,
+	// so the TOML literal and the hash input must both come from here.
+	codexSessionStartStatusMessage = "Starting Confabulous Code sync"
 )
 
 // InstallCodexHooks writes the managed Confab hook block into Codex's
@@ -242,7 +247,7 @@ func codexHooksTOML(configPath, binPath string, idx codexHookGroupIndices) strin
 	preToolUseCommand := binPath + " hook pre-tool-use --provider codex"
 	postToolUseCommand := binPath + " hook post-tool-use --provider codex"
 
-	sessionStartHash := codexTrustedHookHash("session_start", "startup|resume|clear", sessionStartCommand, "Starting Confab sync")
+	sessionStartHash := codexTrustedHookHash("session_start", "startup|resume|clear", sessionStartCommand, codexSessionStartStatusMessage)
 	preToolUseHash := codexTrustedHookHash("pre_tool_use", "Bash", preToolUseCommand, "")
 	postToolUseHash := codexTrustedHookHash("post_tool_use", "Bash", postToolUseCommand, "")
 
@@ -255,7 +260,7 @@ matcher = "startup|resume|clear"
 [[hooks.SessionStart.hooks]]
 type = "command"
 command = "%s hook session-start --provider codex"
-statusMessage = "Starting Confab sync"
+statusMessage = %s
 
 [[hooks.PreToolUse]]
 matcher = "Bash"
@@ -281,6 +286,7 @@ trusted_hash = "%s"
 trusted_hash = "%s"
 `,
 		escapedBinaryPath,
+		tomlQuoteString(codexSessionStartStatusMessage),
 		escapedBinaryPath,
 		escapedBinaryPath,
 		sessionStartKey, sessionStartHash,

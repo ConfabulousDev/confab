@@ -14,14 +14,14 @@ var skillsProviderName string
 
 var skillsCmd = &cobra.Command{
 	Use:   "skills",
-	Short: "Manage Confab skills",
-	Long:  `Add or remove bundled confab skills from supported providers.`,
+	Short: "Manage Confabulous Code skills",
+	Long:  `Add or remove bundled Confabulous Code skills from supported providers.`,
 }
 
 var skillsAddCmd = &cobra.Command{
 	Use:   "add",
 	Short: "Install skills",
-	Long: `Installs bundled confab skills for detected providers by default.
+	Long: `Installs bundled Confabulous Code skills for detected providers by default.
 
 Installs:
 - /retro skill for reviewing and discussing session transcripts`,
@@ -60,7 +60,7 @@ Installs:
 var skillsRemoveCmd = &cobra.Command{
 	Use:   "remove",
 	Short: "Remove skills",
-	Long:  `Removes bundled confab skills from all supported providers by default.`,
+	Long:  `Removes bundled Confabulous Code skills from all supported providers by default.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger.Info("Running skills remove command")
 
