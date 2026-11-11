@@ -82,7 +82,7 @@ func (ClaudeCode) WalkUpToRoot(sessionID string) (string, string, error) {
 // ShouldSpawnForInput is unconditional for Claude Code.
 func (ClaudeCode) ShouldSpawnForInput(HookInput) bool { return true }
 
-// InstallHooks installs all four Confab hook bundles (sync, PreToolUse,
+// InstallHooks installs all four Confabulous Code hook bundles (sync, PreToolUse,
 // PostToolUse, UserPromptSubmit). Returns the settings.json path.
 func (p ClaudeCode) InstallHooks() (string, error) {
 	settingsPath, err := p.SettingsPath()
@@ -103,7 +103,7 @@ func (p ClaudeCode) InstallHooks() (string, error) {
 	return settingsPath, nil
 }
 
-// UninstallHooks removes all four Confab hook bundles. Returns the
+// UninstallHooks removes all four Confabulous Code hook bundles. Returns the
 // settings.json path even if no hooks were present.
 func (p ClaudeCode) UninstallHooks() (string, error) {
 	settingsPath, err := p.SettingsPath()
@@ -211,7 +211,7 @@ func (p ClaudeCode) DefaultCWD(transcriptPath string) string {
 	return filepath.Dir(transcriptPath)
 }
 
-// IsHooksInstalled reports whether all four Confab hook bundles for
+// IsHooksInstalled reports whether all four Confabulous Code hook bundles for
 // Claude Code are installed. Mirrors InstallHooks: true only when every
 // bundle is present.
 func (p ClaudeCode) IsHooksInstalled() (bool, error) {

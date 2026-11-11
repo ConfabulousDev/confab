@@ -283,7 +283,7 @@ func TestHandlePreToolUse_GitCommitWithoutTrailer(t *testing.T) {
 	claudeSessionID := "claude-session-123"
 	confabSessionID := "confab-session-456"
 
-	// Set up test state with Confab session ID
+	// Set up test state with Confabulous Code session ID
 	cleanup := setupTestState(t, claudeSessionID, confabSessionID)
 	defer cleanup()
 
@@ -318,7 +318,7 @@ func TestHandlePreToolUse_GitCommitWithoutTrailer(t *testing.T) {
 	if !strings.Contains(response.HookSpecificOutput.PermissionDecisionReason, "Confab-Link:") {
 		t.Errorf("Expected reason to contain trailer instruction, got %q", response.HookSpecificOutput.PermissionDecisionReason)
 	}
-	// Verify the URL uses the Confab session ID, not Claude session ID
+	// Verify the URL uses the Confabulous Code session ID, not Claude session ID
 	if !strings.Contains(response.HookSpecificOutput.PermissionDecisionReason, confabSessionID) {
 		t.Errorf("Expected reason to contain Confab session ID %q, got %q", confabSessionID, response.HookSpecificOutput.PermissionDecisionReason)
 	}
@@ -328,7 +328,8 @@ func TestHandlePreToolUse_GitCommitWithTrailer(t *testing.T) {
 	claudeSessionID := "claude-session-123"
 	confabSessionID := "confab-session-456"
 
-	// Set up test state with Confab session ID (must be before formatSessionURL)
+	// Set up test state with Confabulous Code session ID (must be before
+	// formatSessionURL)
 	cleanup := setupTestState(t, claudeSessionID, confabSessionID)
 	defer cleanup()
 
@@ -544,7 +545,7 @@ func TestHandlePreToolUse_PRCreateWithoutLink(t *testing.T) {
 	claudeSessionID := "claude-session-123"
 	confabSessionID := "confab-session-456"
 
-	// Set up test state with Confab session ID
+	// Set up test state with Confabulous Code session ID
 	cleanup := setupTestState(t, claudeSessionID, confabSessionID)
 	defer cleanup()
 
@@ -579,7 +580,7 @@ func TestHandlePreToolUse_PRCreateWithoutLink(t *testing.T) {
 	if !strings.Contains(response.HookSpecificOutput.PermissionDecisionReason, "Confab link") {
 		t.Errorf("Expected reason to contain PR link instruction, got %q", response.HookSpecificOutput.PermissionDecisionReason)
 	}
-	// Verify the URL uses the Confab session ID
+	// Verify the URL uses the Confabulous Code session ID
 	if !strings.Contains(response.HookSpecificOutput.PermissionDecisionReason, confabSessionID) {
 		t.Errorf("Expected reason to contain Confab session ID %q, got %q", confabSessionID, response.HookSpecificOutput.PermissionDecisionReason)
 	}
@@ -589,7 +590,8 @@ func TestHandlePreToolUse_PRCreateWithLink(t *testing.T) {
 	claudeSessionID := "claude-session-123"
 	confabSessionID := "confab-session-456"
 
-	// Set up test state with Confab session ID (must be before formatSessionURL)
+	// Set up test state with Confabulous Code session ID (must be before
+	// formatSessionURL)
 	cleanup := setupTestState(t, claudeSessionID, confabSessionID)
 	defer cleanup()
 
@@ -660,7 +662,7 @@ func TestHandlePreToolUse_MCPGitHubPRWithoutLink(t *testing.T) {
 	claudeSessionID := "claude-session-123"
 	confabSessionID := "confab-session-456"
 
-	// Set up test state with Confab session ID
+	// Set up test state with Confabulous Code session ID
 	cleanup := setupTestState(t, claudeSessionID, confabSessionID)
 	defer cleanup()
 
@@ -711,7 +713,8 @@ func TestHandlePreToolUse_MCPGitHubPRWithLink(t *testing.T) {
 	claudeSessionID := "claude-session-123"
 	confabSessionID := "confab-session-456"
 
-	// Set up test state with Confab session ID (must be before formatSessionURL)
+	// Set up test state with Confabulous Code session ID (must be before
+	// formatSessionURL)
 	cleanup := setupTestState(t, claudeSessionID, confabSessionID)
 	defer cleanup()
 
@@ -790,7 +793,7 @@ func TestHandlePreToolUse_MCPGitHubPRNoBody(t *testing.T) {
 	claudeSessionID := "claude-session-123"
 	confabSessionID := "confab-session-456"
 
-	// Set up test state with Confab session ID
+	// Set up test state with Confabulous Code session ID
 	cleanup := setupTestState(t, claudeSessionID, confabSessionID)
 	defer cleanup()
 

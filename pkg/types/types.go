@@ -57,7 +57,7 @@ type ClaudeHookInput struct {
 	ToolResponse map[string]any `json:"tool_response,omitempty"` // PostToolUse only
 }
 
-// CodexHookInput contains the shared fields Confab needs from Codex command
+// CodexHookInput contains the shared fields Confabulous Code needs from Codex command
 // hooks. The fields follow the current official Codex hook schemas, while
 // provider-specific parsing owns validation. Like ClaudeHookInput, this is
 // a union type carrying fields from all Codex hook events (SessionStart,
@@ -275,7 +275,7 @@ func ReadCursorToolUseHookInput(r io.Reader) (*CursorToolUseHookInput, error) {
 
 // CursorToolUseResponse is the JSON response Cursor expects from a preToolUse
 // hook: a permission decision ("allow"/"deny"/"ask") and an optional
-// updated_input object that rewrites the tool input before execution. Confab
+// updated_input object that rewrites the tool input before execution. Confabulous Code
 // uses updated_input to inject the Confab-Link trailer / PR-body line into a
 // Shell command in place (65aq), rather than Claude's deny+instruct round-trip.
 type CursorToolUseResponse struct {

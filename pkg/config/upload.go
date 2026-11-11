@@ -163,7 +163,7 @@ func validateBackendURL(backendURL string) error {
 }
 
 // validateAPIKey checks if the API key format is valid.
-// Confab API keys have the format: cfb_<40 alphanumeric chars>
+// Confabulous Code API keys have the format: cfb_<40 alphanumeric chars>
 // Returns nil for empty string (not configured), but empty is not a valid key.
 func validateAPIKey(apiKey string) error {
 	// Empty means not configured - skip validation but callers should

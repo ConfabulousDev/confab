@@ -17,7 +17,7 @@ go test -run TestName ./pkg/daemon/...  # Run a single test
 `confab` is the CLI for Confabulous Code. It captures Claude Code session transcripts, Codex session rollouts, OpenCode sessions, and Cursor session transcripts and uploads them to a backend. It operates in two modes:
 
 ### Sync Mode (Primary)
-- **Daemon-based incremental sync**: When a Claude Code or Codex session starts, the `SessionStart` hook spawns a background daemon (`confab sync start`)
+- **Daemon-based incremental sync**: When a Claude Code, Codex, or Cursor session starts, its `SessionStart`/`sessionStart` hook (OpenCode: the plugin's `session.created`) spawns a background daemon (`confab sync start`)
 - The daemon (`pkg/daemon/`) monitors the transcript file and uploads chunks periodically (30s intervals with jitter)
 - On session end, the `SessionEnd` hook signals the daemon to do a final sync and shut down
 - The daemon is resilient to backend unavailability and will retry on each sync interval

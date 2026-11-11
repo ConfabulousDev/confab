@@ -116,7 +116,7 @@ func linkPRFromResponse(p provider.Provider, hookInput *toolUseHookInput) error 
 	return linkGitHubURL(p, hookInput.SessionID, prURL, hookInput.TranscriptPath)
 }
 
-// linkGitHubURL links a GitHub URL (PR or commit) to the current Confab
+// linkGitHubURL links a GitHub URL (PR or commit) to the current Confabulous Code
 // session. Walks up to the root session for providers with a thread tree
 // (Codex) so subagent-initiated commits/PRs link to the user-facing root.
 func linkGitHubURL(p provider.Provider, sessionID, githubURL, transcriptPath string) error {

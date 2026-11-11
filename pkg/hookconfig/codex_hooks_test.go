@@ -127,7 +127,7 @@ command = "/usr/bin/other post"
 }
 
 // TestCodexTrustedHookHashMatchesKnownCodexHashes pins the session-start
-// trusted hash for the canonical Confab install. The expected value is the
+// trusted hash for the canonical Confabulous Code install. The expected value is the
 // sha256 of the canonical-JSON identity blob, computed outside Go (a Python
 // json.dumps(separators=(",",":")) reproduction that also reproduces the
 // pre-rename pin d1f33ff… for "Starting Confab sync").
@@ -203,7 +203,7 @@ func TestCodexEnsureHooksConfigUpgradesPreRenameBlock(t *testing.T) {
 }
 
 // TestCodexTrustedHookHashMatchesKnownCodexHashes_PreToolUse pins the
-// pre-tool-use trusted hash for the canonical Confab install. Computed by
+// pre-tool-use trusted hash for the canonical Confabulous Code install. Computed by
 // the same hash algorithm Codex applies (canonical-JSON sha256 of the
 // identity blob — verified against codex-rs/hooks/src/engine/discovery.rs
 // + config/src/fingerprint.rs on main 2026-05-23). StatusMessage MUST be
