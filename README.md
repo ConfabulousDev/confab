@@ -4,6 +4,8 @@
 
 Your `claude`, `codex`, `opencode`, and `cursor` workflows stay unchanged.
 
+User guides and the full command reference are at [code-docs.confabulous.dev](https://code-docs.confabulous.dev/cli/overview/).
+
 ![How Confabulous Code works](docs/how-it-works.svg)
 
 ## Install
@@ -36,7 +38,7 @@ confab logout
 
 ## Self-Hosting the Backend
 
-To deploy your own Confabulous Code backend, see [confab-web](https://github.com/ConfabulousDev/confab-web).
+To deploy your own Confabulous Code backend, see the [deployment guide](https://code-docs.confabulous.dev/self-hosting/deploy/) and [confab-web](https://github.com/ConfabulousDev/confab-web).
 
 ## Usage
 
