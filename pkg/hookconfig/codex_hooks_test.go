@@ -126,15 +126,79 @@ command = "/usr/bin/other post"
 	}
 }
 
+// TestCodexTrustedHookHashMatchesKnownCodexHashes pins the session-start
+// trusted hash for the canonical Confab install. The expected value is the
+// sha256 of the canonical-JSON identity blob, computed outside Go (a Python
+// json.dumps(separators=(",",":")) reproduction that also reproduces the
+// pre-rename pin d1f33ff… for "Starting Confab sync").
 func TestCodexTrustedHookHashMatchesKnownCodexHashes(t *testing.T) {
 	startHash := codexTrustedHookHash(
 		"session_start",
 		"startup|resume|clear",
 		"/Users/jackie/.local/bin/confab hook session-start --provider codex",
-		"Starting Confab sync",
+		"Starting Confabulous Code sync",
 	)
-	if want := "sha256:d1f33ff2cf043a857782a0bb0661ae66a4d05446ae116f0774b7b5629af0a987"; startHash != want {
+	if want := "sha256:c86955493ec0f808ff5373cc5bfb06bf85a1390ab3c9a9d4f3b5772f19a087f8"; startHash != want {
 		t.Fatalf("session-start trusted hash = %q, want %q", startHash, want)
+	}
+}
+
+// TestCodexSessionStartStatusMessageNamesConfabulousCode asserts the
+// SessionStart status shown in Codex's UI names the product, and that the
+// emitted trusted_hash is the one computed over that same message (so Codex
+// does not raise a first-run trust prompt).
+func TestCodexSessionStartStatusMessageNamesConfabulousCode(t *testing.T) {
+	const bin = "/usr/local/bin/confab"
+	got := ensureCodexHooksConfig("", "/Users/test/.codex/config.toml", bin)
+	if want := `statusMessage = "Starting Confabulous Code sync"`; !strings.Contains(got, want) {
+		t.Fatalf("expected generated config to contain %q\n%s", want, got)
+	}
+	if strings.Contains(got, "Starting Confab sync") {
+		t.Fatalf("generated config still contains the old status message\n%s", got)
+	}
+	wantHash := codexTrustedHookHash("session_start", "startup|resume|clear",
+		bin+" hook session-start --provider codex", "Starting Confabulous Code sync")
+	if !strings.Contains(got, `trusted_hash = "`+wantHash+`"`) {
+		t.Fatalf("expected session-start trusted_hash %q over the new message\n%s", wantHash, got)
+	}
+}
+
+// TestCodexEnsureHooksConfigUpgradesPreRenameBlock covers the upgrade path
+// for installs written before the rename: re-running setup must replace the
+// whole managed block, rewriting the status message and its trusted hash
+// together, and leave exactly one managed block.
+func TestCodexEnsureHooksConfigUpgradesPreRenameBlock(t *testing.T) {
+	const (
+		configPath = "/Users/test/.codex/config.toml"
+		bin        = "/usr/local/bin/confab"
+		cmd        = bin + " hook session-start --provider codex"
+		oldMsg     = "Starting Confab sync"
+		newMsg     = "Starting Confabulous Code sync"
+	)
+	oldHash := codexTrustedHookHash("session_start", "startup|resume|clear", cmd, oldMsg)
+	newHash := codexTrustedHookHash("session_start", "startup|resume|clear", cmd, newMsg)
+
+	// Build a pre-rename install: the current block with the old message
+	// and the old (self-consistent) hash substituted back in.
+	current := ensureCodexHooksConfig("[projects.\"/repo\"]\ntrust_level = \"trusted\"\n", configPath, bin)
+	preRename := strings.ReplaceAll(current, `statusMessage = "`+newMsg+`"`, `statusMessage = "`+oldMsg+`"`)
+	preRename = strings.ReplaceAll(preRename, newHash, oldHash)
+	if !strings.Contains(preRename, oldMsg) || !strings.Contains(preRename, oldHash) {
+		t.Fatalf("fixture did not produce a pre-rename block\n%s", preRename)
+	}
+
+	got := ensureCodexHooksConfig(preRename, configPath, bin)
+	if n := strings.Count(got, confabCodexHooksStart); n != 1 {
+		t.Fatalf("expected exactly one managed block, got %d\n%s", n, got)
+	}
+	if strings.Contains(got, oldMsg) || strings.Contains(got, oldHash) {
+		t.Fatalf("upgraded config still carries the pre-rename message or hash\n%s", got)
+	}
+	if !strings.Contains(got, `statusMessage = "`+newMsg+`"`) || !strings.Contains(got, `trusted_hash = "`+newHash+`"`) {
+		t.Fatalf("upgraded config missing new message %q with matching hash %q\n%s", newMsg, newHash, got)
+	}
+	if !strings.Contains(got, "trust_level = \"trusted\"") {
+		t.Fatalf("upgrade dropped unmanaged user config\n%s", got)
 	}
 }
 

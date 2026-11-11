@@ -55,7 +55,7 @@ Open rollout TODOs:
 ## Later Checkpoints
 
 - [ ] Transcript normalization: add backend and frontend normalization keyed by provider before enabling analytics/Smart Recap for Codex.
-- [x] Codex subagents: discover descendant rollouts from Codex SQLite state and upload them as sidechain files under the root Confab session.
+- [x] Codex subagents: discover descendant rollouts from Codex SQLite state and upload them as sidechain files under the root Confabulous Code session.
 - [x] Skills: bundled `/retro` installs into both Claude Code and Codex provider skill dirs.
 - [ ] Post-rollout backend cleanup in `../confab-web`: backfill legacy `sessions.session_type='Claude Code'` to `claude-code`, then remove temporary dual-value lookup/normalization code.
 

@@ -14,7 +14,7 @@ go test -run TestName ./pkg/daemon/...  # Run a single test
 
 ## Architecture Overview
 
-Confab is a CLI tool that captures Claude Code session transcripts, Codex session rollouts, OpenCode sessions, and Cursor session transcripts and uploads them to a backend. It operates in two modes:
+`confab` is the CLI for Confabulous Code. It captures Claude Code session transcripts, Codex session rollouts, OpenCode sessions, and Cursor session transcripts and uploads them to a backend. It operates in two modes:
 
 ### Sync Mode (Primary)
 - **Daemon-based incremental sync**: When a Claude Code or Codex session starts, the `SessionStart` hook spawns a background daemon (`confab sync start`)
@@ -36,7 +36,7 @@ Confab is a CLI tool that captures Claude Code session transcripts, Codex sessio
 - **pkg/daemon/**: Background sync daemon with state management and parent process monitoring
 - **pkg/sync/**: Sync engine with client, tracker, and file management (handles incremental uploads)
 - **pkg/redactor/**: JSON-aware redaction of sensitive data before upload
-- **pkg/config/**: Configuration (Confab + Claude `settings.json` plumbing) and bundled skill templates installed into provider-local skill dirs (`~/.claude/skills/`, `~/.codex/skills/`, `~/.config/opencode/skills/`, `~/.cursor/skills/`)
+- **pkg/config/**: Configuration (Confabulous Code + Claude `settings.json` plumbing) and bundled skill templates installed into provider-local skill dirs (`~/.claude/skills/`, `~/.codex/skills/`, `~/.config/opencode/skills/`, `~/.cursor/skills/`)
 - **pkg/hookconfig/**: Per-provider hook install/uninstall for the settings-file providers — edits Claude `~/.claude/settings.json`, Codex `~/.codex/config.toml`, and Cursor `~/.cursor/hooks.json`. Claude's, Codex's, and Cursor's `InstallHooks` / `UninstallHooks` (in `pkg/provider`) delegate here. OpenCode does **not** use this package: it has no settings/config hooks, so `Opencode.InstallHooks` writes a TS plugin to `~/.config/opencode/plugins/` directly (see `pkg/provider/opencode.go`).
 - **pkg/http/**: HTTP client with zstd compression, auth, and retry logic
 - **pkg/provider/**: `Provider` interface + Claude Code / Codex / OpenCode / Cursor implementations. Owns session discovery (`ScanSessions`, `FindSessionByID`, `ExtractMetadata`, `DefaultCWD`), metadata extraction, Claude agent-ID parsing, hooks, paths, and Codex tree-walking. `claude_discovery.go` walks `~/.claude/projects/`; `codex_discovery.go` scans `~/.codex/sessions/`; `codex_state.go` reads Codex's local SQLite DB to walk subagent rollouts up to their root. OpenCode has no on-disk transcript file: `opencode_db.go` reads its local SQLite DB at `~/.local/share/opencode/opencode.db`, `opencode_collector.go` materializes complete `{info, parts}` messages into a local JSONL file, and `opencode_session.go` does the assembly + completeness gating (see OpenCode provider differences below). Cursor is file-first like Claude: `cursor.go` derives transcripts at `~/.cursor/projects/<workspace>/agent-transcripts/<id>/<id>.jsonl` and `cursor_subagents.go` captures subagent sidechains (see Cursor provider differences below). Cursor is auto-detected (`provider.DetectInstalled`) via `cursor-agent` on PATH or a present `~/.cursor` state dir. All `cmd/` discovery dispatch routes through this interface.
@@ -105,10 +105,10 @@ OpenCode has **no on-disk transcript file** — session data lives in a local SQ
 
 ## Hook System
 
-Confab installs four hook bundles in `~/.claude/settings.json` (see `pkg/hookconfig/claude.go`):
+Confabulous Code installs four hook bundles in `~/.claude/settings.json` (see `pkg/hookconfig/claude.go`):
 - `SessionStart` + `SessionEnd`: spawn / signal-shutdown the sync daemon
 - `PreToolUse` (matchers: `Bash`, `mcp__github__create_pull_request`): injects Confab links into git commits and PR creation
-- `PostToolUse` (same matchers): links resulting GitHub artifacts back to the Confab session
+- `PostToolUse` (same matchers): links resulting GitHub artifacts back to the Confabulous Code session
 - `UserPromptSubmit`: re-spawns the daemon if it died between turns
 
 The installed Claude `session-start`/`session-end` command strings now carry an explicit `--provider claude-code` (kata m9mb), matching codex/cursor. The idempotency/uninstall matchers gate on `Contains "hook session-start"/"session-end"`, so they still match both the new shape and old no-flag installs. The machine-invoked `confab hook` command keeps a `claude-code` default (`cmd/hook.go`) as a back-compat safety net for installs predating the migration; the user-facing `confab list`/`save` commands instead **require** an explicit `--provider` (no claude-code default).
@@ -118,7 +118,7 @@ The daemon also monitors its parent PID and shuts down if Claude Code exits unex
 For Codex, three hook events are installed in `~/.codex/config.toml` (see `pkg/hookconfig/codex.go`):
 - `SessionStart`: spawns the sync daemon, with subagent → root walk-up
 - `PreToolUse` (matcher: `Bash`): injects the `Confab-Link:` commit trailer and `📝 [Confab link]` PR body line
-- `PostToolUse` (matcher: `Bash`): links the resulting commit / PR URL back to the root Confab session
+- `PostToolUse` (matcher: `Bash`): links the resulting commit / PR URL back to the root Confabulous Code session
 
 Daemon shutdown stays parent-PID driven (see Codex provider differences above for why `Stop` / `SessionEnd` and `UserPromptSubmit` are not installed).
 
@@ -140,7 +140,7 @@ OpenCode has no settings/config hook system. Instead, `confab setup` installs a 
 
 ## Skills
 
-Confab installs bundled skills for every configured provider: Claude Code uses `~/.claude/skills/`, Codex uses `~/.codex/skills/`, OpenCode uses `~/.config/opencode/skills/`, and Cursor uses `~/.cursor/skills/`.
+Confabulous Code installs bundled skills for every configured provider: Claude Code uses `~/.claude/skills/`, Codex uses `~/.codex/skills/`, OpenCode uses `~/.config/opencode/skills/`, and Cursor uses `~/.cursor/skills/`.
 - `/retro`: Review and discuss session transcripts — user types `/retro <session-id> [question]`, the harness fetches the condensed transcript via `confab retro`, optionally reads local raw JSONL for richer data, and engages in discussion about the session.
 
 Skills are managed separately from hooks: `confab skills add/remove` (vs `confab hooks add/remove`).
@@ -188,6 +188,7 @@ Before adding or changing a struct that decodes Claude Code / Codex payloads (ho
   ~/go/bin/deadcode -test ./...   # Find unused code (including test files)
   ```
 - **Clean migrations**: When moving or refactoring code, complete the migration fully. Do not leave duplicate code with deprecation comments "for backwards compatibility." Update all callers (including tests) to use the new location immediately. Stale duplicates cause maintenance burden and inevitably diverge.
+- **Product name**: user-facing prose (help text, banners, hook messages shown to the agent, docs) calls the product "Confabulous Code". Keep `confab` for the binary, command names, paths, env vars and config keys, and keep the `Confab-Link:` commit trailer, the `📝 [Confab link](…)` PR body label, and the `# >>> confab codex hooks >>>` markers unchanged (kata y7wh). `cmd/branding_test.go` guards the cobra help text.
 - **Keep documentation up to date**: When changing code, update the corresponding package README (`cmd/README.md`, `pkg/<package>/README.md`). Key things to keep current: file lists, exported API descriptions, invariants, dependency lists, and extension checklists. If a change spans multiple packages, also check `pkg/README.md` (dependency map) and `CLAUDE.md` (architecture overview). Documentation that contradicts the code is worse than no documentation.
 
 <!-- BEGIN KATA (managed by `kata init --with-agents`) -->

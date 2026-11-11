@@ -35,7 +35,7 @@ Union type for Cursor hook events (`sessionStart`, `sessionEnd`), ground-truthed
 
 ### `CursorToolUseHookInput` / `CursorToolUseResponse`
 
-Cursor's `preToolUse`/`postToolUse` hook payload + response (65aq), ground-truthed from real captured payloads. `CursorToolUseHookInput` carries the firing tool's identity (`ToolName`, `ToolInput`, `ToolUseID`) plus `SessionID`/`TranscriptPath`/`CWD`; `tool_output` is kept as raw JSON (`ToolOutputRaw`) and decoded on demand via `ToolOutput()` into `CursorToolOutput{Output, ExitCode}` (absent on preToolUse, present on postToolUse). `ReadCursorToolUseHookInput` validates `session_id` like `ReadCursorHookInput`. `CursorToolUseResponse{Permission, UpdatedInput}` is the preToolUse response: Confab returns `updated_input` to rewrite the Shell command in place (inject the Confab-Link trailer / PR-body line) rather than Claude's deny+instruct.
+Cursor's `preToolUse`/`postToolUse` hook payload + response (65aq), ground-truthed from real captured payloads. `CursorToolUseHookInput` carries the firing tool's identity (`ToolName`, `ToolInput`, `ToolUseID`) plus `SessionID`/`TranscriptPath`/`CWD`; `tool_output` is kept as raw JSON (`ToolOutputRaw`) and decoded on demand via `ToolOutput()` into `CursorToolOutput{Output, ExitCode}` (absent on preToolUse, present on postToolUse). `ReadCursorToolUseHookInput` validates `session_id` like `ReadCursorHookInput`. `CursorToolUseResponse{Permission, UpdatedInput}` is the preToolUse response: Confabulous Code returns `updated_input` to rewrite the Shell command in place (inject the Confab-Link trailer / PR-body line) rather than Claude's deny+instruct.
 
 ### `InboxEvent`
 

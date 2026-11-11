@@ -33,8 +33,8 @@ var doDeviceLoginFunc = doDeviceLoginImpl
 
 var loginCmd = &cobra.Command{
 	Use:   "login",
-	Short: "Authenticate with the Confab backend",
-	Long: `Authenticates with the confab backend using device code flow.
+	Short: "Authenticate with the Confabulous Code backend",
+	Long: `Authenticates with the Confabulous Code backend using device code flow.
 
 You'll receive a code to enter at a URL. This works on any machine, including
 remote/headless servers - authenticate from any device with a browser.
@@ -92,7 +92,7 @@ func runLogin(cmd *cobra.Command, args []string) error {
 		keyName = defaultKeyName()
 	}
 
-	fmt.Println("=== Confab Login ===")
+	fmt.Println("=== Confabulous Code Login ===")
 	fmt.Println()
 
 	// `confab login` always targets the default binding (top-level config).
@@ -161,9 +161,9 @@ func verifyAPIKey(cfg *config.UploadConfig) error {
 func defaultKeyName() string {
 	hostname, err := os.Hostname()
 	if err != nil || hostname == "" {
-		return "Confab CLI"
+		return "Confabulous Code CLI"
 	}
-	return fmt.Sprintf("%s (Confab CLI)", hostname)
+	return fmt.Sprintf("%s (Confabulous Code CLI)", hostname)
 }
 
 // doDeviceLogin performs the device code login flow and saves credentials

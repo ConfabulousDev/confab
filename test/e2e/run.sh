@@ -76,7 +76,7 @@ run_scenario() {
 # Main
 main() {
     echo "========================================"
-    echo "  Confab Install Command E2E Tests"
+    echo "  Confabulous Code Install Command E2E Tests"
     echo "========================================"
     echo
 

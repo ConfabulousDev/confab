@@ -82,7 +82,7 @@ func sessionEndFromReader(r io.Reader) error {
 	// Always output valid hook response, even on error
 	defer func() { writeClaudeHookResponse(os.Stdout, false) }()
 
-	fmt.Fprintln(os.Stderr, "=== Confab: Stopping Sync Daemon ===")
+	fmt.Fprintln(os.Stderr, "=== Confabulous Code: Stopping Sync Daemon ===")
 	fmt.Fprintln(os.Stderr)
 
 	// Read hook input from reader
@@ -107,7 +107,7 @@ func sessionEndFromReader(r io.Reader) error {
 // sessionEndOpencode handles session-end for OpenCode. Reads the JSON payload
 // piped from the TS plugin and stops the daemon by session ID.
 func sessionEndOpencode(r io.Reader) error {
-	fmt.Fprintln(os.Stderr, "=== Confab: Stopping Sync Daemon ===")
+	fmt.Fprintln(os.Stderr, "=== Confabulous Code: Stopping Sync Daemon ===")
 	fmt.Fprintln(os.Stderr)
 
 	p := provider.Opencode{}
@@ -140,7 +140,7 @@ func sessionEndCursor(r io.Reader) error {
 	// Cursor's WriteHookResponse writes {}).
 	defer func() { _ = p.WriteHookResponse(os.Stdout, false, "") }()
 
-	fmt.Fprintln(os.Stderr, "=== Confab: Stopping Sync Daemon ===")
+	fmt.Fprintln(os.Stderr, "=== Confabulous Code: Stopping Sync Daemon ===")
 	fmt.Fprintln(os.Stderr)
 
 	in, err := p.ReadSessionHookInput(r)

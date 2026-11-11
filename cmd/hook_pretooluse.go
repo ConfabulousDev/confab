@@ -68,11 +68,11 @@ var hookPreToolUseCmd = &cobra.Command{
 	Short: "Handle PreToolUse hook events",
 	Long: `Handler for PreToolUse hook events.
 
-For git commit commands, ensures the commit message includes a
-Confab session URL trailer (Confab-Link: {backend_url}/sessions/{session_id}).
+For git commit commands, ensures the commit message includes a Confabulous
+Code session URL trailer (Confab-Link: {backend_url}/sessions/{session_id}).
 
 For PR creation (gh pr create, GitHub MCP tool), ensures the PR body includes a
-Confab session link (📝 [Confab link]({backend_url}/sessions/{session_id})).
+Confabulous Code session link (📝 [Confab link]({backend_url}/sessions/{session_id})).
 
 When the link lives in a file the hook can't see (e.g. via 'git commit -F',
 'gh pr create --body-file', or $(cat …)), the agent can certify its presence
@@ -306,7 +306,7 @@ func formatPRLink(sessionURL string) string {
 // structured body field, so no shell-comment marker advice is included.
 func formatPRDenyReason(sessionURL string) string {
 	return fmt.Sprintf(
-		"✓ Confab is linking this PR to your session. "+
+		"✓ Confabulous Code is linking this PR to your session. "+
 			"Add this line at the bottom of the PR body:\n\n    %s\n\n"+
 			"IMPORTANT: Copy this line verbatim. The value is a URL, NOT a ticket ID like CF-123.",
 		formatPRLink(sessionURL),
@@ -317,7 +317,7 @@ func formatPRDenyReason(sessionURL string) string {
 // shell-comment marker as an alternative for when the body lives in a file.
 func formatBashPRDenyReason(sessionURL, marker string) string {
 	return fmt.Sprintf(
-		"✓ Confab is linking this PR to your session. "+
+		"✓ Confabulous Code is linking this PR to your session. "+
 			"Add this line at the bottom of the PR body:\n\n    %s\n\n"+
 			"Alternatively, if the Confab link is already in the PR body "+
 			"(e.g. via --body-file or $(cat …)), certify it by appending "+
@@ -331,7 +331,7 @@ func formatBashPRDenyReason(sessionURL, marker string) string {
 
 func formatCommitDenyReason(sessionURL, marker string) string {
 	return fmt.Sprintf(
-		"✓ Confab is linking this commit to your session. "+
+		"✓ Confabulous Code is linking this commit to your session. "+
 			"Add this trailer to the end of your commit message (after any other trailers like Co-Authored-By):\n\n    %s\n\n"+
 			"Alternatively, if the Confab link is already in the commit message "+
 			"(e.g. via `git commit -F <file>`), certify it by appending "+

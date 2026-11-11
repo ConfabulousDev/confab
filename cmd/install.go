@@ -28,7 +28,7 @@ This command is typically invoked by the official installation script.`,
 func runInstall(cmd *cobra.Command, args []string) error {
 	logger.Info("Running install command")
 
-	fmt.Println("=== Confab: Install ===")
+	fmt.Println("=== Confabulous Code: Install ===")
 	fmt.Println()
 
 	// Get current executable path
@@ -74,7 +74,7 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	srcAbs, _ := filepath.Abs(execPath)
 	destAbs, _ := filepath.Abs(destPath)
 	if srcAbs == destAbs {
-		fmt.Printf("Confab is already installed at %s\n", destPath)
+		fmt.Printf("Confabulous Code is already installed at %s\n", destPath)
 		fmt.Println()
 	} else {
 		// Create destination directory if it doesn't exist
@@ -105,7 +105,7 @@ func runInstall(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("failed to set executable permissions: %w", err)
 		}
 
-		fmt.Println("Confab installed successfully")
+		fmt.Println("Confabulous Code installed successfully")
 		fmt.Println()
 	}
 

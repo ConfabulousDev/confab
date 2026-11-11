@@ -49,12 +49,12 @@ Run this checklist after significant provider changes. The goal is to preserve C
 - [ ] Verify Claude `PreToolUse` and `PostToolUse` still include both matchers:
   - `Bash`
   - `mcp__github__create_pull_request`
-- [ ] Verify Codex config includes Confab `SessionStart`, `PreToolUse`, and `PostToolUse` hooks, and does not include Confab `Stop` or `UserPromptSubmit` hooks.
+- [ ] Verify Codex config includes Confabulous Code `SessionStart`, `PreToolUse`, and `PostToolUse` hooks, and does not include Confabulous Code `Stop` or `UserPromptSubmit` hooks.
 - [ ] Diff the settings file against the backup:
   ```sh
   diff -u ~/.claude/settings.json.confab-qa-backup ~/.claude/settings.json
   ```
-  Confirm the only differences are the expected Confab hook additions or updates from this QA run. Existing non-Confab settings and unrelated hooks should be byte-for-byte unchanged.
+  Confirm the only differences are the expected Confabulous Code hook additions or updates from this QA run. Existing settings not managed by Confabulous Code and unrelated hooks should be byte-for-byte unchanged.
 - [ ] Run:
   ```sh
   ./confab status
@@ -65,10 +65,10 @@ Run this checklist after significant provider changes. The goal is to preserve C
 
 - [ ] Start a new Claude Code session in a test repo.
 - [ ] Send one simple prompt.
-- [ ] Confirm the SessionStart hook prints the Confab daemon banner and does not block Claude.
+- [ ] Confirm the SessionStart hook prints the Confabulous Code daemon banner and does not block Claude.
 - [ ] Confirm a sync daemon state file appears under `~/.confab/sync/`.
 - [ ] Wait for one sync interval or trigger enough activity for sync.
-- [ ] Confirm the session appears in Confab.
+- [ ] Confirm the session appears in Confabulous Code.
 - [ ] End the Claude session.
 - [ ] Confirm the daemon exits and removes its state file.
 
@@ -115,7 +115,7 @@ Run this checklist after significant provider changes. The goal is to preserve C
   ./confab hooks add --provider claude-code
   ./confab list --provider claude-code
   ```
-- [ ] Confirm Confab reads and writes under the temp directory.
+- [ ] Confirm Confabulous Code reads and writes under the temp directory.
 - [ ] Unset the override:
   ```sh
   unset CONFAB_CLAUDE_DIR

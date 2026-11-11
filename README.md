@@ -1,10 +1,10 @@
 # confab
 
-Sync and explore Claude Code, Codex, OpenCode, and Cursor sessions. Connect `confab` to your Confab backend to capture transcripts in real time for exploration, sharing, and analysis.
+`confab` is the CLI for Confabulous Code. Sync and explore Claude Code, Codex, OpenCode, and Cursor sessions. Connect `confab` to your Confabulous Code backend to capture transcripts in real time for exploration, sharing, and analysis.
 
 Your `claude`, `codex`, `opencode`, and `cursor` workflows stay unchanged.
 
-![How Confab works](docs/how-it-works.svg)
+![How Confabulous Code works](docs/how-it-works.svg)
 
 ## Install
 
@@ -36,7 +36,7 @@ confab logout
 
 ## Self-Hosting the Backend
 
-To deploy your own Confab backend, see [confab-web](https://github.com/ConfabulousDev/confab-web).
+To deploy your own Confabulous Code backend, see [confab-web](https://github.com/ConfabulousDev/confab-web).
 
 ## Usage
 
@@ -90,7 +90,7 @@ See [Redaction](REDACTION.md) for configuration details.
 
 ## Codex
 
-Confab supports Codex alongside Claude Code. `confab setup` detects `codex` on `PATH` and wires Codex hooks automatically. Use `--provider codex` to configure only Codex.
+Confabulous Code supports Codex alongside Claude Code. `confab setup` detects `codex` on `PATH` and wires Codex hooks automatically. Use `--provider codex` to configure only Codex.
 
 ```bash
 # Auto-detect: installs hooks for every provider CLI on PATH
@@ -106,7 +106,7 @@ confab list --provider codex
 confab save --provider codex <id>
 ```
 
-Codex stores rollouts under `~/.codex/sessions/<yyyy>/<mm>/<dd>/rollout-*.jsonl`. Confab uses Codex's local SQLite state to walk subagent trees and sync descendant rollouts as sidechain files under the root session.
+Codex stores rollouts under `~/.codex/sessions/<yyyy>/<mm>/<dd>/rollout-*.jsonl`. Confabulous Code uses Codex's local SQLite state to walk subagent trees and sync descendant rollouts as sidechain files under the root session.
 
 ### Caveats
 
@@ -116,7 +116,7 @@ Codex stores rollouts under `~/.codex/sessions/<yyyy>/<mm>/<dd>/rollout-*.jsonl`
 
 ## OpenCode
 
-Confab supports OpenCode alongside Claude Code and Codex. `confab setup` detects `opencode` on `PATH` and wires it automatically. Use `--provider opencode` to configure only OpenCode.
+Confabulous Code supports OpenCode alongside Claude Code and Codex. `confab setup` detects `opencode` on `PATH` and wires it automatically. Use `--provider opencode` to configure only OpenCode.
 
 ```bash
 # Auto-detect: wires every provider CLI on PATH
@@ -126,7 +126,7 @@ confab setup --backend-url https://confab.yourcompany.com
 confab setup --provider opencode --backend-url https://confab.yourcompany.com
 ```
 
-OpenCode has no on-disk transcript file — session data lives in a local SQLite database (`~/.local/share/opencode/opencode.db`). Confab does not edit OpenCode's config; instead `setup` installs a small TypeScript plugin into `~/.config/opencode/plugins/` that starts and stops the sync daemon on session lifecycle events. The daemon reads the SQLite database, materializes each session into a local transcript file, and uploads it through the same incremental, redacted pipeline as the other providers.
+OpenCode has no on-disk transcript file — session data lives in a local SQLite database (`~/.local/share/opencode/opencode.db`). Confabulous Code does not edit OpenCode's config; instead `setup` installs a small TypeScript plugin into `~/.config/opencode/plugins/` that starts and stops the sync daemon on session lifecycle events. The daemon reads the SQLite database, materializes each session into a local transcript file, and uploads it through the same incremental, redacted pipeline as the other providers.
 
 ### Caveats
 
@@ -137,7 +137,7 @@ OpenCode has no on-disk transcript file — session data lives in a local SQLite
 
 ## Cursor
 
-Confab supports Cursor — both the `cursor-agent` CLI and the Cursor desktop IDE. `confab setup` detects Cursor when `cursor-agent` is on `PATH` **or** the `~/.cursor` state dir is present (so IDE-only users are detected too) and wires it automatically. Use `--provider cursor` to configure only Cursor.
+Confabulous Code supports Cursor — both the `cursor-agent` CLI and the Cursor desktop IDE. `confab setup` detects Cursor when `cursor-agent` is on `PATH` **or** the `~/.cursor` state dir is present (so IDE-only users are detected too) and wires it automatically. Use `--provider cursor` to configure only Cursor.
 
 ```bash
 # Auto-detect: wires every detected provider
