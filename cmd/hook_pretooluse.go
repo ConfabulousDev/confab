@@ -232,7 +232,7 @@ func resolveCommitLinkingProvider() (provider.Provider, error) {
 	return p, nil
 }
 
-// getConfabSessionID returns the Confab session ID for a firing tool-use
+// getConfabSessionID returns the Confabulous Code session ID for a firing tool-use
 // hook, walking up to the root session when the firing UUID has no daemon
 // state of its own (e.g., a Codex subagent ran the tool but the daemon
 // state is keyed off the root rollout). Identity for Claude; SQLite walk
@@ -276,7 +276,7 @@ func containsSessionURL(command, sessionID, backendURL string) bool {
 }
 
 // commandContainsConfabLink reports whether the command already carries the
-// Confab session link, either as the literal session URL or via a
+// Confabulous Code session link, either as the literal session URL or via a
 // confabLinkedMarkerPattern certification (used when the link lives in a
 // body/commit file the hook can't see).
 func commandContainsConfabLink(command, sessionID, backendURL string) bool {

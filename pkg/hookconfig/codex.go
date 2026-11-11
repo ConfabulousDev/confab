@@ -1,5 +1,5 @@
 // Package hookconfig owns the install/uninstall/check logic for
-// Confab hooks in Claude Code's settings.json, Codex's config.toml, and
+// Confabulous Code hooks in Claude Code's settings.json, Codex's config.toml, and
 // Cursor's hooks.json.
 // Provider methods delegate here so pkg/provider doesn't carry the
 // configuration-file detail.
@@ -29,7 +29,7 @@ const (
 	codexSessionStartStatusMessage = "Starting Confabulous Code sync"
 )
 
-// InstallCodexHooks writes the managed Confab hook block into Codex's
+// InstallCodexHooks writes the managed Confabulous Code hook block into Codex's
 // config.toml at configPath, preserving user content and creating a
 // backup. Returns the configPath that was written.
 func InstallCodexHooks(configPath string) (string, error) {
@@ -59,7 +59,7 @@ func InstallCodexHooks(configPath string) (string, error) {
 	return configPath, nil
 }
 
-// UninstallCodexHooks removes the managed Confab hook block from
+// UninstallCodexHooks removes the managed Confabulous Code hook block from
 // Codex's config.toml, preserving the rest of the file. Returns the
 // configPath even if no block was present.
 func UninstallCodexHooks(configPath string) (string, error) {
@@ -90,7 +90,7 @@ type codexHookGroup struct {
 }
 
 // codexHooksConfig is the minimal TOML schema for IsCodexHooksInstalled.
-// We inspect the three event arrays Confab installs (SessionStart,
+// We inspect the three event arrays Confabulous Code installs (SessionStart,
 // PreToolUse, PostToolUse) and require a confab command in each.
 type codexHooksConfig struct {
 	Hooks struct {
@@ -114,7 +114,7 @@ func hasConfabCommand(groups []codexHookGroup) bool {
 }
 
 // IsCodexHooksInstalled parses configPath and returns true only when all
-// three Confab hook events (SessionStart, PreToolUse, PostToolUse) carry
+// three Confabulous Code hook events (SessionStart, PreToolUse, PostToolUse) carry
 // a confab command. Existing SessionStart-only installs (pre-CF-492) read
 // as "not installed" so `confab setup` re-emits the managed block and
 // transparently upgrades them.

@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
+
+	"github.com/ConfabulousDev/confab/pkg/provider"
 )
 
 // The product is named "Confabulous Code" in user-facing prose (kata y7wh).
@@ -46,6 +48,30 @@ func TestHelpTextNamesConfabulousCode(t *testing.T) {
 					t.Errorf("%q %s names the product in lowercase (%q): %q", c.CommandPath(), field, m[0], text)
 				}
 			}
+		}
+	}
+}
+
+// providerDisplayNames maps every registered provider to the name rootCmd.Long
+// must mention. Adding a provider without updating this map (and Long) fails
+// TestRootLongListsEveryProvider.
+var providerDisplayNames = map[string]string{
+	provider.NameClaudeCode: "Claude Code",
+	provider.NameCodex:      "Codex",
+	provider.NameOpencode:   "OpenCode",
+	provider.NameCursor:     "Cursor",
+}
+
+func TestRootLongListsEveryProvider(t *testing.T) {
+	long := strings.Join(strings.Fields(rootCmd.Long), " ")
+	for _, name := range provider.OrderedNames() {
+		display, ok := providerDisplayNames[name]
+		if !ok {
+			t.Errorf("provider %q has no entry in providerDisplayNames: add a display name and mention it in rootCmd.Long", name)
+			continue
+		}
+		if !strings.Contains(long, display) {
+			t.Errorf("rootCmd.Long does not mention supported provider %q (%s): %q", display, name, rootCmd.Long)
 		}
 	}
 }

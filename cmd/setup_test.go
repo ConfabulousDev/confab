@@ -1369,7 +1369,7 @@ func TestRunSetup_Idempotent_AlreadyInstalled(t *testing.T) {
 		t.Fatalf("write claude settings: %v", err)
 	}
 
-	// Pre-populate Codex config.toml with all three Confab hook events so
+	// Pre-populate Codex config.toml with all three Confabulous Code hook events so
 	// IsCodexHooksInstalled returns true (CF-492 tightened the check).
 	if err := os.MkdirAll(codexDir, 0700); err != nil {
 		t.Fatalf("mkdir codex: %v", err)

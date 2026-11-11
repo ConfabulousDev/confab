@@ -12,7 +12,7 @@ import (
 	"github.com/ConfabulousDev/confab/pkg/config"
 )
 
-// Cursor hook events Confab drives. sessionStart spawns the sync daemon;
+// Cursor hook events Confabulous Code drives. sessionStart spawns the sync daemon;
 // sessionEnd signals a clean shutdown; preToolUse/postToolUse drive
 // bidirectional GitHub commit/PR linking (65aq). We deliberately do NOT
 // install stop (fires per turn — same hazard as Codex's Stop).
@@ -27,7 +27,7 @@ const (
 	// also checks tool_name=="Shell" defensively.
 	cursorShellMatcher = "Shell"
 
-	// cursorProviderFlag is the --provider value Confab passes to its Cursor
+	// cursorProviderFlag is the --provider value Confabulous Code passes to its Cursor
 	// hook subcommands. Kept as a literal here (not imported from pkg/provider)
 	// because pkg/provider imports this package — importing it back would cycle.
 	cursorProviderFlag = "cursor"
@@ -68,7 +68,7 @@ func confabCursorEntry(binPath, subcommand, matcher string) cursorHookEntry {
 	}
 }
 
-// InstallCursorHooks writes Confab's sessionStart + sessionEnd + preToolUse +
+// InstallCursorHooks writes Confabulous Code's sessionStart + sessionEnd + preToolUse +
 // postToolUse command hooks into Cursor's hooks.json at hooksPath, preserving
 // any user-authored hooks (and unknown top-level keys), backing the file up
 // first, and writing atomically. The tool-use events carry matcher "Shell"
@@ -110,7 +110,7 @@ func InstallCursorHooks(hooksPath string) (string, error) {
 	return writeCursorHooks(hooksPath, top)
 }
 
-// UninstallCursorHooks removes Confab's managed hook entries from Cursor's
+// UninstallCursorHooks removes Confabulous Code's managed hook entries from Cursor's
 // hooks.json, preserving every other hook and top-level key. A missing file
 // is a no-op. Returns the hooksPath.
 func UninstallCursorHooks(hooksPath string) (string, error) {
@@ -166,7 +166,7 @@ func cursorEventHasConfab(f cursorHooksFile, event string) bool {
 }
 
 // isConfabCursorCommand reports whether a hooks.json command string is one of
-// Confab's managed Cursor hooks. We key off the command signature (" hook "
+// Confabulous Code's managed Cursor hooks. We key off the command signature (" hook "
 // plus "--provider cursor") rather than the binary basename so detection is
 // independent of where the confab binary lives (and so tests, whose
 // os.Executable() is the test binary, still match). This signature is what
@@ -180,7 +180,7 @@ func isConfabCursorCommand(command string) bool {
 // cursorHooksRaw is the rewrite model: top-level keys are kept as raw JSON so
 // unknown user keys survive byte-faithfully, and each event's hook array is
 // kept as raw entries so user-authored entries (which may carry keys beyond
-// command/type) are never lossily re-encoded. Confab edits only its own
+// command/type) are never lossily re-encoded. Confabulous Code edits only its own
 // entries within the two managed events.
 type cursorHooksRaw struct {
 	fileMissing bool

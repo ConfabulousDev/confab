@@ -196,8 +196,8 @@ func (l *Logger) setSessionContext(ctx string) {
 }
 
 // SetSession sets session IDs that will be included in all log lines.
-// externalID is the Claude Code session ID, sessionID is the Confab backend session ID.
-// Either can be empty if not yet known.
+// externalID is the Claude Code session ID, sessionID is the Confabulous Code
+// backend session ID. Either can be empty if not yet known.
 func (l *Logger) SetSession(externalID, sessionID string) {
 	var ctx string
 	if externalID != "" && sessionID != "" {

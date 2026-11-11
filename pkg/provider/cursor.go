@@ -486,7 +486,7 @@ func (p Cursor) hooksPath() (string, error) {
 	return filepath.Join(stateDir, "hooks.json"), nil
 }
 
-// InstallHooks installs Confab's sessionStart (daemon spawn), sessionEnd
+// InstallHooks installs Confabulous Code's sessionStart (daemon spawn), sessionEnd
 // (signal shutdown), and preToolUse/postToolUse (GitHub commit/PR linking;
 // 65aq) hooks into ~/.cursor/hooks.json, preserving user hooks. Returns the
 // written hooks.json path.
@@ -498,7 +498,7 @@ func (p Cursor) InstallHooks() (string, error) {
 	return hookconfig.InstallCursorHooks(path)
 }
 
-// UninstallHooks removes Confab's managed hook entries from
+// UninstallHooks removes Confabulous Code's managed hook entries from
 // ~/.cursor/hooks.json, preserving any user-authored hooks.
 func (p Cursor) UninstallHooks() (string, error) {
 	path, err := p.hooksPath()

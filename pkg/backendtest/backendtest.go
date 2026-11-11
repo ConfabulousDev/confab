@@ -1,5 +1,5 @@
 // Package backendtest provides shared helpers for tests that stand up a
-// mock Confab backend with net/http/httptest.
+// mock Confabulous Code backend with net/http/httptest.
 //
 // It exists because pkg/http compresses request bodies over 1KB with zstd
 // (see pkg/http/client.go). A mock handler that decodes r.Body as raw JSON

@@ -630,7 +630,7 @@ func TestGoogleAPIKeyPattern(t *testing.T) {
 	}
 }
 
-// TestConfabAPIKeyPattern tests the Confab API key pattern
+// TestConfabAPIKeyPattern tests the Confabulous Code API key pattern
 func TestConfabAPIKeyPattern(t *testing.T) {
 	pattern := `cfb_[A-Za-z0-9]{40}`
 	re := regexp.MustCompile(pattern)

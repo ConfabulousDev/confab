@@ -494,7 +494,8 @@ func (d *Daemon) tryInit() error {
 	// Update session context now that we have the backend session ID
 	logger.SetSession(d.externalID, d.engine.SessionID())
 
-	// Persist the Confab session ID so other hooks (e.g., PreToolUse) can access it
+	// Persist the Confabulous Code session ID so other hooks (e.g., PreToolUse)
+	// can access it
 	if d.state != nil {
 		d.state.ConfabSessionID = d.engine.SessionID()
 		if err := d.state.Save(); err != nil {
