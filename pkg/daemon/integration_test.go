@@ -522,7 +522,9 @@ func TestDaemonTranscriptAppearsLate(t *testing.T) {
 		SyncInterval:   50 * time.Millisecond,
 	})
 
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	// The context must outlive the poll deadline below, or Run is torn down
+	// before the daemon has had its chance to sync.
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
 	errCh := make(chan error, 1)
@@ -542,19 +544,22 @@ func TestDaemonTranscriptAppearsLate(t *testing.T) {
 	os.MkdirAll(filepath.Dir(transcriptPath), 0755)
 	os.WriteFile(transcriptPath, []byte(`{"type":"system","message":"late"}`+"\n"), 0644)
 
-	// Wait for daemon to notice and sync (poll interval is 2s, so wait longer)
-	time.Sleep(2500 * time.Millisecond)
+	// The daemon polls for the transcript every initialWaitPollInterval (2s),
+	// then inits and syncs. Poll for the outcome instead of sleeping a fixed
+	// amount, so a loaded machine can't eat the margin.
+	deadline := time.Now().Add(10 * time.Second)
+	for len(mock.getInitRequests()) == 0 || len(mock.getChunkRequests()) == 0 {
+		if time.Now().After(deadline) {
+			cancel()
+			<-errCh
+			t.Fatalf("timed out waiting for sync after transcript appeared: inits=%d chunks=%d",
+				len(mock.getInitRequests()), len(mock.getChunkRequests()))
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+
 	cancel()
-
 	<-errCh
-
-	// Now init should have happened
-	if len(mock.getInitRequests()) == 0 {
-		t.Error("Expected init request after transcript appeared")
-	}
-	if len(mock.getChunkRequests()) == 0 {
-		t.Error("Expected chunk upload after transcript appeared")
-	}
 }
 
 // TestDaemonAgentFileNotExistYet tests that missing agent files are skipped and picked up later
