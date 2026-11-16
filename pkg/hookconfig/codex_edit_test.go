@@ -879,6 +879,15 @@ func TestCodexHooksOutdated(t *testing.T) {
 		},
 		{"old matcher", func(t *testing.T) string { return mutate(t, `matcher = "Bash"`, `matcher = "Bash|Edit"`) }, testCodexBin, true},
 		{
+			// Installs predating the fork source: confab setup must refresh
+			// them so "branch in new chat" threads start syncing.
+			"session start matcher without fork",
+			func(t *testing.T) string {
+				return mutate(t, `matcher = "`+codexSessionStartMatcher+`"`, `matcher = "startup|resume|clear"`)
+			},
+			testCodexBin, true,
+		},
+		{
 			"old status message",
 			func(t *testing.T) string { return mutate(t, codexSessionStartStatusMessage, "Starting Confab sync") },
 			testCodexBin, true,

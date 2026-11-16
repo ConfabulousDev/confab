@@ -167,10 +167,30 @@ func TestCodexSessionStartStatusMessageNamesConfabulousCode(t *testing.T) {
 	if strings.Contains(got, "Starting Confab sync") {
 		t.Fatalf("generated config still contains the old status message\n%s", got)
 	}
-	wantHash := codexTrustedHookHash("session_start", "startup|resume|clear",
+	wantHash := codexTrustedHookHash("session_start", codexSessionStartMatcher,
 		bin+" hook session-start --provider codex", "Starting Confabulous Code sync")
 	if !strings.Contains(got, `trusted_hash = "`+wantHash+`"`) {
 		t.Fatalf("expected session-start trusted_hash %q over the new message\n%s", wantHash, got)
+	}
+}
+
+// TestCodexSessionStartMatcherIncludesFork guards the "branch in new chat"
+// path: Codex creates the branch via thread/fork and fires SessionStart with
+// source="fork". Without "fork" in the matcher the hook never runs, no daemon
+// spawns, and the branched thread is never uploaded (it is not a spawn edge,
+// so the original daemon's descendant discovery cannot see it either). The
+// trusted hash must be computed over the same matcher, or Codex raises a
+// trust prompt.
+func TestCodexSessionStartMatcherIncludesFork(t *testing.T) {
+	const bin = "/usr/local/bin/confab"
+	got := installCodexHooksInto(t, "", "/Users/test/.codex/config.toml", bin)
+	if want := `matcher = "startup|resume|clear|fork"`; !strings.Contains(got, want) {
+		t.Fatalf("expected generated config to contain %q\n%s", want, got)
+	}
+	wantHash := codexTrustedHookHash("session_start", "startup|resume|clear|fork",
+		bin+" hook session-start --provider codex", codexSessionStartStatusMessage)
+	if !strings.Contains(got, `trusted_hash = "`+wantHash+`"`) {
+		t.Fatalf("expected session-start trusted_hash %q over the fork-inclusive matcher\n%s", wantHash, got)
 	}
 }
 
@@ -186,8 +206,8 @@ func TestCodexEnsureHooksConfigUpgradesPreRenameBlock(t *testing.T) {
 		oldMsg     = "Starting Confab sync"
 		newMsg     = "Starting Confabulous Code sync"
 	)
-	oldHash := codexTrustedHookHash("session_start", "startup|resume|clear", cmd, oldMsg)
-	newHash := codexTrustedHookHash("session_start", "startup|resume|clear", cmd, newMsg)
+	oldHash := codexTrustedHookHash("session_start", codexSessionStartMatcher, cmd, oldMsg)
+	newHash := codexTrustedHookHash("session_start", codexSessionStartMatcher, cmd, newMsg)
 
 	// Build a pre-rename install: the current block with the old message
 	// and the old (self-consistent) hash substituted back in.
