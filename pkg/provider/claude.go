@@ -384,6 +384,7 @@ func getParentPID(pid int) int {
 // for daemon parent-liveness monitoring. If label is non-empty, a Warn is
 // logged when neither the parent nor grandparent matches.
 func findParentOrGrandparent(isProcess func(int) bool, label string) int {
+	isProcess = rejectShells(isProcess) // see parent_shell.go
 	parentPID := os.Getppid()
 	if isProcess(parentPID) {
 		return parentPID
