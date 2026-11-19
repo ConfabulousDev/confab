@@ -177,8 +177,11 @@ func runSetupAutoDetect(backendURL string, needsLogin bool) error {
 }
 
 // installForProvider prints the per-provider sub-header, then installs
-// hooks (skipping if already present) and skills. Returns the first
-// failure encountered.
+// hooks and skills. Hooks already present are left alone, unless the
+// provider can tell they are outdated (provider.HookRefresher), in which
+// case they are refreshed in place. Returns the first failure encountered.
+// Failing to tell whether installed hooks are outdated is not a failure:
+// the hooks are left as they are and the reason is printed.
 func installForProvider(p provider.Provider) error {
 	fmt.Printf("▶ %s\n", p.Name())
 
@@ -187,9 +190,22 @@ func installForProvider(p provider.Provider) error {
 		fmt.Printf("  ✗ failed to check hook status: %v\n", err)
 		return err
 	}
-	if already {
+	outdated, err := hooksOutdated(p, already)
+	if err != nil {
+		logger.Warn("Failed to check whether %s hooks are up to date: %v", p.Name(), err)
+		fmt.Printf("  ! could not check whether hooks are up to date: %v\n", err)
+	}
+	switch {
+	case outdated:
+		// hooksOutdated is only true for a provider.HookRefresher.
+		if _, err := p.(provider.HookRefresher).RefreshHooks(); err != nil {
+			fmt.Printf("  ✗ failed to update hooks: %v\n", err)
+			return err
+		}
+		fmt.Println("  ✓ hooks updated")
+	case already:
 		fmt.Println("  ✓ hooks already installed (no changes)")
-	} else {
+	default:
 		if _, err := p.InstallHooks(); err != nil {
 			fmt.Printf("  ✗ failed: %v\n", err)
 			return err
@@ -203,6 +219,17 @@ func installForProvider(p provider.Provider) error {
 	}
 
 	return nil
+}
+
+// hooksOutdated reports whether p's installed hooks differ from what this
+// binary would write. Only providers implementing provider.HookRefresher
+// can tell; for the others, and when no hooks are installed, it is false.
+func hooksOutdated(p provider.Provider, installed bool) (bool, error) {
+	refresher, ok := p.(provider.HookRefresher)
+	if !installed || !ok {
+		return false, nil
+	}
+	return refresher.HooksOutdated()
 }
 
 func runSetupAuth(cmd *cobra.Command, binding config.Binding) (backendURL string, needsLogin bool, err error) {

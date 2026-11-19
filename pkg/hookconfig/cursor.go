@@ -298,5 +298,6 @@ func backupCursorHooks(hooksPath string) error {
 		}
 		return fmt.Errorf("failed to read Cursor hooks for backup: %w", err)
 	}
-	return backupFile(hooksPath, data)
+	_, err = backupFile(hooksPath, data)
+	return err
 }

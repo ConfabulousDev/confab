@@ -146,6 +146,19 @@ type AnnotationResult struct {
 	SummaryLinks             []SummaryLink
 }
 
+// HookRefresher is an optional capability for providers whose installed
+// hooks can go stale (an older matcher, status message, trust hash or binary
+// path). `confab setup` refreshes outdated hooks through it and
+// `confab status` reports them. Only Codex implements it.
+type HookRefresher interface {
+	// HooksOutdated reports whether a full hook set is installed but
+	// differs from what this binary would write.
+	HooksOutdated() (bool, error)
+	// RefreshHooks rewrites the outdated hooks in place and returns the
+	// path of the file it edited.
+	RefreshHooks() (string, error)
+}
+
 // Provider abstracts per-tool local behavior. Adding a new provider means
 // implementing this interface and registering the instance.
 type Provider interface {

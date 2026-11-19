@@ -122,6 +122,14 @@ For Codex, three hook events are installed in `~/.codex/config.toml` (see `pkg/h
 
 Daemon shutdown stays parent-PID driven (see Codex provider differences above for why `Stop` / `SessionEnd` and `UserPromptSubmit` are not installed).
 
+Codex's `config.toml` is edited **by ownership, not by position** (kata cd4q). Codex's own config writer (`toml_edit`) puts brand-new top-level tables after the last table and before a trailing comment, so nothing "between two marker comments" is safe to delete; an earlier marker-delimited block lost users' Codex settings that way. `pkg/hookconfig` now:
+- locates the byte spans of the tables Confabulous Code owns (via go-toml's `unstable.Parser`): hook handlers whose command is a confab command, groups holding only such handlers, and the `[hooks.state."<configPath>:<event>:<group>:<handler>"]` tables that address them. Every other byte stays as it was.
+- replaces its hook group **in place** (appending only on a first install), because Codex's trust keys are positional and moving confab's group would shift the user's own.
+- verifies before writing: the config is parsed before and after, everything confab owns is removed from both, and the rest must be identical; otherwise nothing is written.
+- writes nothing (and no backup) when the result equals the file.
+
+`confab setup` refreshes an installed-but-outdated Codex hook set through the optional `provider.HookRefresher`, and `confab status` reports it as outdated. When testing by hand, never point the binary at the live `~/.codex/config.toml`: copy it and set `CONFAB_CODEX_DIR`.
+
 For Cursor, four hook events are installed in `~/.cursor/hooks.json` (see `pkg/hookconfig/cursor.go`):
 - `sessionStart`: spawns the sync daemon
 - `sessionEnd`: signals daemon shutdown (clean for CLI / app-quit)
@@ -188,7 +196,7 @@ Before adding or changing a struct that decodes Claude Code / Codex payloads (ho
   ~/go/bin/deadcode -test ./...   # Find unused code (including test files)
   ```
 - **Clean migrations**: When moving or refactoring code, complete the migration fully. Do not leave duplicate code with deprecation comments "for backwards compatibility." Update all callers (including tests) to use the new location immediately. Stale duplicates cause maintenance burden and inevitably diverge.
-- **Product name**: user-facing prose (help text, banners, hook messages shown to the agent, docs) calls the product "Confabulous Code". Keep `confab` for the binary, command names, paths, env vars and config keys, and keep the `Confab-Link:` commit trailer, the `📝 [Confab link](…)` PR body label, and the `# >>> confab codex hooks >>>` markers unchanged (kata y7wh). `cmd/branding_test.go` guards the cobra help text.
+- **Product name**: user-facing prose (help text, banners, hook messages shown to the agent, docs) calls the product "Confabulous Code". Keep `confab` for the binary, command names, paths, env vars and config keys, and keep the `Confab-Link:` commit trailer and the `📝 [Confab link](…)` PR body label unchanged (kata y7wh). The `# >>> confab codex hooks >>>` / `# <<< confab codex hooks <<<` marker comments are no longer written; their exact text is only recognised so old ones can be removed (kata cd4q). `cmd/branding_test.go` guards the cobra help text.
 - **Keep documentation up to date**: When changing code, update the corresponding package README (`cmd/README.md`, `pkg/<package>/README.md`). Key things to keep current: file lists, exported API descriptions, invariants, dependency lists, and extension checklists. If a change spans multiple packages, also check `pkg/README.md` (dependency map) and `CLAUDE.md` (architecture overview). Documentation that contradicts the code is worse than no documentation.
 
 <!-- BEGIN KATA (managed by `kata init --with-agents`) -->

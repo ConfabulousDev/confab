@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/ConfabulousDev/confab/pkg/config"
+	"github.com/ConfabulousDev/confab/pkg/hookconfig"
 	"github.com/ConfabulousDev/confab/pkg/provider"
 )
 
@@ -158,38 +159,16 @@ func TestStatus_CodexHooksNotOrphanedWithStateDir(t *testing.T) {
 		t.Fatalf("config: %v", err)
 	}
 
-	// Pre-populate ~/.codex/config.toml with all three confab-named hooks
-	// so IsHooksInstalled returns true (CF-492 requires SessionStart +
-	// PreToolUse + PostToolUse). Test binaries aren't named `confab`, so
-	// the hookconfig pkg's isConfabCommand wouldn't match hooks installed
-	// by the test binary itself.
+	// Pre-populate ~/.codex/config.toml with an up-to-date install. Test
+	// binaries aren't named `confab`, so the binary path is pinned to one
+	// that is; otherwise isConfabCommand wouldn't match the hooks and
+	// IsHooksInstalled would report false.
 	if err := os.MkdirAll(codexDir, 0700); err != nil {
 		t.Fatalf("mkdir codex: %v", err)
 	}
-	codexCfg := filepath.Join(codexDir, "config.toml")
-	confabCodexCfg := `[features]
-hooks = true
-
-[[hooks.SessionStart]]
-matcher = "startup|resume|clear"
-[[hooks.SessionStart.hooks]]
-type = "command"
-command = "/usr/local/bin/confab hook session-start --provider codex"
-
-[[hooks.PreToolUse]]
-matcher = "Bash"
-[[hooks.PreToolUse.hooks]]
-type = "command"
-command = "/usr/local/bin/confab hook pre-tool-use --provider codex"
-
-[[hooks.PostToolUse]]
-matcher = "Bash"
-[[hooks.PostToolUse.hooks]]
-type = "command"
-command = "/usr/local/bin/confab hook post-tool-use --provider codex"
-`
-	if err := os.WriteFile(codexCfg, []byte(confabCodexCfg), 0600); err != nil {
-		t.Fatalf("write codex config: %v", err)
+	stubCodexBinaryPath(t)
+	if _, err := hookconfig.InstallCodexHooks(filepath.Join(codexDir, "config.toml")); err != nil {
+		t.Fatalf("install codex hooks: %v", err)
 	}
 
 	var out bytes.Buffer
@@ -205,7 +184,7 @@ command = "/usr/local/bin/confab hook post-tool-use --provider codex"
 	wantSnippets := []string{
 		"Provider: codex",
 		"CLI: ✗ not on PATH (state dir present)",
-		"Hooks: ✓ Installed",
+		"Hooks: ✓ Installed\n",
 	}
 	for _, want := range wantSnippets {
 		if !strings.Contains(output, want) {

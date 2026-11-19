@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestInstallCodexHooksWritesManagedBlock(t *testing.T) {
+func TestInstallCodexHooksWritesHookTables(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config.toml")
 
@@ -33,8 +33,6 @@ func TestInstallCodexHooksWritesManagedBlock(t *testing.T) {
 		"hook post-tool-use --provider codex",
 		// Bash matcher used by both tool-use events.
 		`matcher = "Bash"`,
-		"# >>> confab codex hooks >>>",
-		"# <<< confab codex hooks <<<",
 		// Trust-state keys for the three events. Codex uses snake_case
 		// event labels in its positional trust-state key per
 		// codex-rs/hooks/src/lib.rs:84-110.
@@ -46,9 +44,13 @@ func TestInstallCodexHooksWritesManagedBlock(t *testing.T) {
 			t.Errorf("config.toml missing %q after InstallCodexHooks()\n%s", want, out)
 		}
 	}
+	// The marker comments are no longer written (kata cd4q).
+	if strings.Contains(out, "confab codex hooks") {
+		t.Errorf("config.toml must not carry marker comments\n%s", out)
+	}
 }
 
-func TestUninstallCodexHooksRemovesManagedBlock(t *testing.T) {
+func TestUninstallCodexHooksRemovesHookTables(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config.toml")
 
@@ -63,7 +65,7 @@ func TestUninstallCodexHooksRemovesManagedBlock(t *testing.T) {
 		t.Fatalf("config.toml missing after uninstall: %v", err)
 	}
 	for _, notWant := range []string{
-		"# >>> confab codex hooks >>>",
+		"hooks.state",
 		"hook session-start --provider codex",
 		"hook pre-tool-use --provider codex",
 		"hook post-tool-use --provider codex",
@@ -162,9 +164,12 @@ func TestInstallCodexHooksIsIdempotent(t *testing.T) {
 	if _, err := InstallCodexHooks(configPath); err != nil {
 		t.Fatalf("second install: %v", err)
 	}
+	// The test binary is not named confab; it must still recognise the
+	// hooks it wrote itself.
 	data, _ := os.ReadFile(configPath)
-	count := strings.Count(string(data), "# >>> confab codex hooks >>>")
-	if count != 1 {
-		t.Fatalf("expected exactly one managed block after repeated install, got %d\n%s", count, string(data))
+	for _, cmd := range []string{"hook session-start", "hook pre-tool-use", "hook post-tool-use"} {
+		if count := strings.Count(string(data), cmd+" --provider codex"); count != 1 {
+			t.Fatalf("expected exactly one %q hook after repeated install, got %d\n%s", cmd, count, string(data))
+		}
 	}
 }

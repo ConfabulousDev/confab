@@ -43,7 +43,7 @@ The package defines a `Provider` interface and a `HookInput` interface (Phase 1 
 - Discovery: `ScanSessions`, `FindSessionByID` (walks subagent UUIDs up to the root), `ExtractMetadata`, `DefaultCWD` (the four `Provider` interface methods).
 - Additional rollout helpers: `ScanCodexSessions` (rich `CodexSessionInfo` form), `ReadSessionInfo`, `SessionIDFromRolloutPath`, `ExtractFirstUserMessageFromLines`, internal `walkRollouts` helper.
 - Filtering: `CodexSessionInfo.IsUserSession()` excludes subagents/memory rollouts by `thread_source` and `agent_*` metadata.
-- Hooks: `ReadHookInput`, `ReadSessionHookInput`, `InstallHooks`/`UninstallHooks`/`IsHooksInstalled` (delegate to `pkg/hookconfig`, which edits `~/.codex/config.toml`). Installs `SessionStart`, `PreToolUse`, and `PostToolUse`; shutdown remains parent-PID driven.
+- Hooks: `ReadHookInput`, `ReadSessionHookInput`, `InstallHooks`/`UninstallHooks`/`IsHooksInstalled` (delegate to `pkg/hookconfig`, which edits `~/.codex/config.toml`). Installs `SessionStart`, `PreToolUse`, and `PostToolUse`; shutdown remains parent-PID driven. `Codex` also implements the optional `HookRefresher` (`HooksOutdated`/`RefreshHooks`, kata cd4q), delegating to `hookconfig.CodexHooksOutdated`/`RefreshCodexHooks`.
 - Skills: `InstallSkills` installs `/retro` under `~/.codex/skills/` (and prunes retired skills); `UninstallSkills` removes bundled skills; `IsSkillInstalled` reports per-skill state (delegates to `pkg/config`).
 - Hook response: `WriteHookResponse` writes a `types.CodexHookResponse`.
 - Parent detection: `FindParentPID`, `IsProcess`, `MatchesProcess` (regex `(?i)\bcodex\b`) for daemon parent-liveness monitoring, mirroring `ClaudeCode`.
@@ -54,7 +54,7 @@ The package defines a `Provider` interface and a `HookInput` interface (Phase 1 
 
 Codex fires `Stop` at every agent/turn boundary, including root rollout stops while the interactive Codex session is still alive. Wiring `confab hook session-end` to `[[hooks.Stop]]` would therefore kill the root sync daemon prematurely. Instead:
 
-- `Codex.InstallHooks` writes `[[hooks.SessionStart]]`, `[[hooks.PreToolUse]]`, and `[[hooks.PostToolUse]]` into the managed block.
+- `Codex.InstallHooks` writes `[[hooks.SessionStart]]`, `[[hooks.PreToolUse]]`, and `[[hooks.PostToolUse]]` groups plus their `[hooks.state."…"]` trust tables. It edits only the tables Confabulous Code owns (see `pkg/hookconfig/README.md`); there is no marker-delimited managed block any more (kata cd4q).
 - `cmd/spawn.go` stores `Codex.FindParentPID()` on the daemon at spawn time.
 - The daemon's main loop (`pkg/daemon/daemon.go`) monitors that PID and shuts down when the interactive Codex process exits — same mechanism Claude Code uses.
 - `confab hook session-end --provider codex` is rejected with an explicit error pointing users at their `~/.codex/config.toml`.
@@ -83,7 +83,7 @@ Methods every provider must implement:
 - `StateDir() (string, error)` — local state directory.
 - `FindParentPID() int`, `IsProcess(pid int) bool` — parent-process detection.
 - `ParseSessionHook(io.Reader) (HookInput, error)` — read a SessionStart hook payload and return the provider-agnostic view.
-- `InstallHooks() (string, error)` / `UninstallHooks() (string, error)` / `IsHooksInstalled() (bool, error)` — install/check the full hook set the provider requires. Claude installs 4 bundles (sync, PreToolUse, PostToolUse, UserPromptSubmit), Codex installs 3 events (SessionStart, PreToolUse, PostToolUse), and Cursor installs 4 events (sessionStart, sessionEnd, preToolUse, postToolUse), all delegating to `pkg/hookconfig`. OpenCode has no settings/config hooks: it writes a TS plugin to `~/.config/opencode/plugins/` directly (no `pkg/hookconfig` involvement).
+- `InstallHooks() (string, error)` / `UninstallHooks() (string, error)` / `IsHooksInstalled() (bool, error)` — install/check the full hook set the provider requires. Claude installs 4 bundles (sync, PreToolUse, PostToolUse, UserPromptSubmit), Codex installs 3 events (SessionStart, PreToolUse, PostToolUse), and Cursor installs 4 events (sessionStart, sessionEnd, preToolUse, postToolUse), all delegating to `pkg/hookconfig`. OpenCode has no settings/config hooks: it writes a TS plugin to `~/.config/opencode/plugins/` directly (no `pkg/hookconfig` involvement). Hooks that can go stale are handled by the optional `HookRefresher` interface below, not by `IsHooksInstalled`.
 - `SupportsCommitLinking() bool` — true if the provider installs the PreToolUse + PostToolUse events that drive bidirectional GitHub linking. Used by `cmd/hook_pretooluse.go` and `cmd/hook_posttooluse.go` to silently no-op for any provider that doesn't support the flow. Claude Code, Codex, and Cursor return true; OpenCode returns false.
 - `InstallSkills() error` / `UninstallSkills() error` / `IsSkillInstalled(name string) bool` — manage bundled Confabulous Code skills in the provider's local skill layout.
 - `WalkUpToRoot(sessionID string) (rootID, rootPath string, error)` — Codex walks `thread_spawn_edges`; Claude is identity with empty `rootPath`.
@@ -97,6 +97,10 @@ Methods every provider must implement:
 - `FindSessionByID(partialID string) (id, transcriptPath string, error)` — resolves a full or partial ID. Claude is identity walk-up; Codex walks subagent UUIDs up to the root via `WalkUpToRoot` so callers transparently upload the whole tree.
 - `ExtractMetadata(lines []string) SessionMetadata` — in-memory parsing of the first `maxLinesForExtraction` (50) JSONL lines. Claude returns full Summary + FirstUserMessage + SummaryLinks; Codex and Cursor return only FirstUserMessage (Cursor strips the `<user_query>` wrapper from the first `role=="user"` line).
 - `DefaultCWD(transcriptPath string) string` — CWD to record on the upload. Claude returns `filepath.Dir(transcriptPath)`; Codex reads `session_meta.cwd` with the dir fallback.
+
+Optional capability, discovered by type assertion:
+
+- `HookRefresher` — `HooksOutdated() (bool, error)` reports that a full hook set is installed but differs from what this binary would write (matcher, status message, trust hash, binary path, leftover markers or duplicates); `RefreshHooks() (string, error)` rewrites it in place. `confab setup` calls `RefreshHooks` instead of skipping an installed-but-outdated provider, and `confab status` reports the hooks as outdated. Only `Codex` implements it (kata cd4q).
 
 ## `Get(name)` and the registry
 
@@ -112,7 +116,7 @@ Methods every provider must implement:
 - `Codex.ExtractFirstUserMessageFromLines` only considers `event_msg.user_message` — the first `response_item.message[role=user]` line in a Codex rollout contains an `<environment_context>` wrapper, not the user's prompt, and must be skipped.
 - `TruncateUTF8` never returns a string longer than `maxBytes`, even on invalid UTF-8 input, and appends `...` when truncation occurs (unless `maxBytes < 3`).
 - `Codex.IsUserSession` filters out subagents and memory rollouts so `ScanSessions` only surfaces top-level user sessions.
-- `Codex.InstallHooks` is idempotent and never strips unmanaged Codex config sections.
+- `Codex.InstallHooks`, `UninstallHooks` and `RefreshHooks` are idempotent and never change config that Confabulous Code does not own, wherever it sits in `config.toml` (kata cd4q). An edit that would is refused before anything is written.
 - `Codex.WalkUpToRoot` is the single point that converts a firing thread UUID to its top-most root. All Codex daemon spawning and `confab save` invocations route through it, so subagent rollouts always upload under the root's session — never as orphan sessions.
 - `Codex.WalkUpToRoot` never returns the empty string for the root UUID; on any failure mode (no DB, schema mismatch, edge-race exhausted) it returns the input thread UUID so callers can keep moving.
 - Parent PID detection is part of the `Provider` interface (`FindParentPID`, `IsProcess`); each provider's `FindParentPID` delegates to the shared `findParentOrGrandparent` helper (`claude.go`) with its own `IsProcess` matcher and Warn label (Cursor passes `""` to suppress the Warn, matching its pre-existing silent-failure behavior). `IsProcess`/`MatchesProcess` bodies remain provider-specific (different process-name patterns); all providers share the package-level `getProcCmdline` / `getParentPID` helpers in `claude.go`.
