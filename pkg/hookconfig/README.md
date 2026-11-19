@@ -52,7 +52,7 @@ Before CF-396 (Phase 2), hook install logic lived in `pkg/config` (Claude side) 
 
 Three hook events are installed:
 
-- `[[hooks.SessionStart]]` — daemon spawn (`startup|resume|clear` matcher)
+- `[[hooks.SessionStart]]` — daemon spawn (`startup|resume|clear|fork` matcher, `codexSessionStartMatcher`). `fork` is the source Codex sends for "branch in new chat" (`thread/fork`): the fork is a new user thread with no spawn edge, so the original daemon's descendant discovery cannot see it and it needs its own daemon. `compact` is deliberately excluded (it fires for a thread that already has a daemon). The synced fork holds only what its rollout holds: `history_mode: "legacy"` rollouts (the VS Code extension as of 0.169) start with a copy of the parent's turns, while `"paginated"` rollouts (`codex exec fork` as of 0.170) reference the parent via `history_base` and contain only the fork's own turns. The matcher is part of the trusted-hash identity, so installs predating `fork` read as outdated and keep their old self-consistent hash until `confab setup` refreshes the hooks.
 - `[[hooks.PreToolUse]]` — `Confab-Link:` commit trailer + `📝 [Confab link]` PR body injection (`Bash` matcher)
 - `[[hooks.PostToolUse]]` — commit/PR URL linking back to the session (`Bash` matcher)
 

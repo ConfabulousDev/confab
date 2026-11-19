@@ -26,6 +26,14 @@ const (
 	// SessionStart hook runs. It is part of the trusted-hook hash identity,
 	// so the TOML literal and the hash input must both come from here.
 	codexSessionStartStatusMessage = "Starting Confabulous Code sync"
+
+	// codexSessionStartMatcher selects which SessionStart sources run the
+	// hook. "fork" is what Codex sends when the user branches a thread
+	// ("branch in new chat" -> thread/fork); a fork is a new user thread with
+	// no spawn edge, so it needs its own daemon. "compact" is left out on
+	// purpose: it fires for a thread that already has a daemon. Like the
+	// status message, the matcher is part of the trusted-hook hash identity.
+	codexSessionStartMatcher = "startup|resume|clear|fork"
 )
 
 // InstallCodexHooks installs the Confabulous Code hooks into Codex's
@@ -165,7 +173,7 @@ func codexHooksTOML(configPath, binPath string, idx codexHookGroupIndices) strin
 	preToolUseCommand := binPath + " hook pre-tool-use --provider codex"
 	postToolUseCommand := binPath + " hook post-tool-use --provider codex"
 
-	sessionStartHash := codexTrustedHookHash("session_start", "startup|resume|clear", sessionStartCommand, codexSessionStartStatusMessage)
+	sessionStartHash := codexTrustedHookHash("session_start", codexSessionStartMatcher, sessionStartCommand, codexSessionStartStatusMessage)
 	preToolUseHash := codexTrustedHookHash("pre_tool_use", "Bash", preToolUseCommand, "")
 	postToolUseHash := codexTrustedHookHash("post_tool_use", "Bash", postToolUseCommand, "")
 
@@ -174,7 +182,7 @@ func codexHooksTOML(configPath, binPath string, idx codexHookGroupIndices) strin
 	postToolUseKey := tomlQuoteString(fmt.Sprintf("%s:post_tool_use:%d:0", configPath, idx.postToolUse))
 
 	return fmt.Sprintf(`[[hooks.SessionStart]]
-matcher = "startup|resume|clear"
+matcher = %s
 [[hooks.SessionStart.hooks]]
 type = "command"
 command = "%s hook session-start --provider codex"
@@ -203,6 +211,7 @@ trusted_hash = "%s"
 [hooks.state.%s]
 trusted_hash = "%s"
 `,
+		tomlQuoteString(codexSessionStartMatcher),
 		escapedBinaryPath,
 		tomlQuoteString(codexSessionStartStatusMessage),
 		escapedBinaryPath,
