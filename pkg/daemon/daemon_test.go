@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	stdsync "sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -503,18 +504,28 @@ func TestDaemonRecoversFromAuthErrorDuringInit(t *testing.T) {
 	t.Logf("API keys used in order: %v", allKeys)
 }
 
-// TestShutdownTimeout verifies that shutdown doesn't hang when backend is slow.
+// TestShutdownTimeout verifies that shutdown doesn't hang when the backend is
+// slow during the final sync goroutine. The slowness is exercised through the
+// session_end event send, which runs in that goroutine after the final SyncAll
+// and under the same shutdownTimeout.
+//
+// It asserts behaviour, not an upper wall-clock bound: Run must return while
+// the backend is still holding the request, which can only happen through the
+// timeout. A bound of "timeout + slack" flakes on a CPU-throttled runner
+// (kata kczs).
 func TestShutdownTimeout(t *testing.T) {
 	// Save and restore the original timeout
 	originalTimeout := shutdownTimeout
 	shutdownTimeout = 200 * time.Millisecond
 	defer func() { shutdownTimeout = originalTimeout }()
 
-	// Track chunk requests to only delay the second one (during shutdown)
-	var chunkCount int
-	var chunkMu stdsync.Mutex
+	var chunkCount, eventCount atomic.Int32
+	eventArrived := make(chan struct{})  // closed when the first event request arrives
+	eventReturned := make(chan struct{}) // closed when that request's handler returns
+	release := make(chan struct{})       // closed by the test to unblock the handler
 
-	// Create a mock server that's fast initially but slow during shutdown
+	// Mock server: init and chunk are fast, the session_end event never
+	// completes until the test releases it.
 	slowServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/sync/init":
@@ -524,22 +535,32 @@ func TestShutdownTimeout(t *testing.T) {
 				Files:     map[string]sync.FileState{},
 			})
 		case "/api/v1/sync/chunk":
-			chunkMu.Lock()
-			chunkCount++
-			count := chunkCount
-			chunkMu.Unlock()
-
-			// First chunk (initial sync) is fast, subsequent ones are slow
-			if count > 1 {
-				time.Sleep(2 * time.Second)
-			}
+			chunkCount.Add(1)
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(sync.ChunkResponse{LastSyncedLine: 1})
+		case "/api/v1/sync/event":
+			// Client retries can hit this more than once; only the first
+			// request drives the channels.
+			if eventCount.Add(1) == 1 {
+				close(eventArrived)
+				defer close(eventReturned)
+			}
+			// Also return when the request is abandoned, so a failed test
+			// can't hang slowServer.Close().
+			select {
+			case <-release:
+			case <-r.Context().Done():
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(sync.EventResponse{})
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
+	// Deferred calls run in reverse order: release the handler first, because
+	// Close waits for in-flight handlers.
 	defer slowServer.Close()
+	defer close(release)
 
 	tmpDir := t.TempDir()
 
@@ -556,11 +577,12 @@ func TestShutdownTimeout(t *testing.T) {
 	transcriptPath := filepath.Join(tmpDir, "transcript.jsonl")
 	os.WriteFile(transcriptPath, []byte(`{"type":"user","message":"hello"}`+"\n"), 0644)
 
+	const externalID = "shutdown-timeout-test"
 	d := New(Config{
-		ExternalID:     "shutdown-timeout-test",
+		ExternalID:     externalID,
 		TranscriptPath: transcriptPath,
 		CWD:            tmpDir,
-		SyncInterval:   10 * time.Second, // Long interval so no sync is in progress
+		SyncInterval:   10 * time.Second, // Long interval so only the initial and final syncs run
 	})
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -571,38 +593,70 @@ func TestShutdownTimeout(t *testing.T) {
 		errCh <- d.Run(ctx)
 	}()
 
-	// Wait for daemon to initialize and complete initial sync
-	time.Sleep(500 * time.Millisecond)
+	// Wait for the initial sync to start. Once a chunk request has been served
+	// the main loop is inside its first tick, so the Stop below is only handled
+	// after init and that sync have returned: the engine is initialized at
+	// shutdown and the final sync goroutine runs. Poll instead of sleeping a
+	// fixed amount, so a loaded machine can't eat the margin.
+	deadline := time.Now().Add(10 * time.Second)
+	for chunkCount.Load() == 0 {
+		if time.Now().After(deadline) {
+			cancel()
+			<-errCh
+			t.Fatal("timed out waiting for the initial sync to upload a chunk")
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
 
-	// Add more content to transcript so shutdown has something to sync
-	f, _ := os.OpenFile(transcriptPath, os.O_APPEND|os.O_WRONLY, 0644)
-	f.WriteString(`{"type":"assistant","message":"world"}` + "\n")
-	f.Close()
+	// Queue a session_end event so the final sync goroutine has a request the
+	// backend will hold. This is the path Run stores in d.state.InboxPath.
+	inboxPath, err := GetInboxPathForProvider(d.providerName, externalID)
+	if err != nil {
+		t.Fatalf("failed to resolve inbox path: %v", err)
+	}
+	hookInput := &types.ClaudeHookInput{
+		SessionID:      externalID,
+		TranscriptPath: transcriptPath,
+		CWD:            tmpDir,
+		Reason:         "test",
+		HookEventName:  "SessionEnd",
+	}
+	if err := writeInboxEvent(inboxPath, "session_end", hookInput); err != nil {
+		t.Fatalf("failed to write inbox event: %v", err)
+	}
 
 	// Trigger shutdown
 	shutdownStart := time.Now()
 	d.Stop()
 
+	// Hang guard only; deliberately far above shutdownTimeout.
 	select {
 	case <-errCh:
-		elapsed := time.Since(shutdownStart)
-		// Shutdown should complete within timeout + buffer, not wait for slow server
-		maxExpected := shutdownTimeout + 100*time.Millisecond
-		if elapsed > maxExpected {
-			t.Errorf("shutdown took %v, expected less than %v", elapsed, maxExpected)
-		}
-		t.Logf("shutdown completed in %v (timeout was %v)", elapsed, shutdownTimeout)
-
-		// Verify we actually hit the slow sync path (2+ chunk requests)
-		chunkMu.Lock()
-		finalCount := chunkCount
-		chunkMu.Unlock()
-		if finalCount < 2 {
-			t.Errorf("expected at least 2 chunk requests (initial + shutdown), got %d", finalCount)
-		}
-		t.Logf("total chunk requests: %d", finalCount)
-	case <-time.After(3 * time.Second):
+	case <-time.After(10 * time.Second):
 		t.Fatal("shutdown hung - timeout did not work")
+	}
+	elapsed := time.Since(shutdownStart)
+	t.Logf("shutdown completed in %v (timeout was %v)", elapsed, shutdownTimeout)
+
+	// Run returned while the backend still holds the event request, so
+	// shutdown ended through the timeout rather than a finished final sync.
+	select {
+	case <-eventReturned:
+		t.Error("session_end request completed before shutdown returned; shutdown did not go through the timeout")
+	default:
+	}
+	// A lower bound can't flake under load: the timer starts after Stop.
+	if elapsed < shutdownTimeout {
+		t.Errorf("shutdown took %v, expected at least the %v timeout", elapsed, shutdownTimeout)
+	}
+
+	// The final sync goroutine did reach the slow call. It keeps running after
+	// the timeout, so on a stalled machine the request may arrive after Run
+	// returned; wait for it rather than checking once.
+	select {
+	case <-eventArrived:
+	case <-time.After(10 * time.Second):
+		t.Error("session_end request never reached the backend; the slow final-sync path was not exercised")
 	}
 }
 
