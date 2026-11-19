@@ -9,6 +9,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
+	"github.com/ConfabulousDev/confab/pkg/hookconfig"
 	"github.com/ConfabulousDev/confab/pkg/types"
 )
 
@@ -602,6 +603,83 @@ func TestCodexInstallHooksWritesToConfigPath(t *testing.T) {
 	}
 	if strings.Contains(string(data), "hook session-start --provider codex") {
 		t.Errorf("config.toml still contains SessionStart hook after UninstallHooks; got:\n%s", data)
+	}
+}
+
+// TestCodexRefreshHooksUpdatesOutdatedInstall guards the HookRefresher seam:
+// an installed-but-outdated config reports outdated, RefreshHooks rewrites
+// it at ConfigPath, and Codex-owned tables that sit between the old marker
+// comments survive (kata cd4q).
+func TestCodexRefreshHooksUpdatesOutdatedInstall(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv(CodexStateDirEnv, tmpDir)
+	origBin := hookconfig.BinaryPath
+	hookconfig.BinaryPath = func() (string, error) { return "/usr/local/bin/confab", nil }
+	t.Cleanup(func() { hookconfig.BinaryPath = origBin })
+
+	var refresher HookRefresher = Codex{}
+	configPath := filepath.Join(tmpDir, "config.toml")
+	outdated := `[features]
+hooks = true
+
+# >>> confab codex hooks >>>
+[[hooks.SessionStart]]
+matcher = "startup|resume|clear"
+[[hooks.SessionStart.hooks]]
+type = "command"
+command = "/usr/local/bin/confab hook session-start --provider codex"
+statusMessage = "Starting Confab sync"
+
+[[hooks.PreToolUse]]
+matcher = "Bash"
+[[hooks.PreToolUse.hooks]]
+type = "command"
+command = "/usr/local/bin/confab hook pre-tool-use --provider codex"
+statusMessage = ""
+
+[[hooks.PostToolUse]]
+matcher = "Bash"
+[[hooks.PostToolUse.hooks]]
+type = "command"
+command = "/usr/local/bin/confab hook post-tool-use --provider codex"
+statusMessage = ""
+
+[desktop]
+sidebar = true
+# <<< confab codex hooks <<<
+`
+	if err := os.WriteFile(configPath, []byte(outdated), 0600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	isOutdated, err := refresher.HooksOutdated()
+	if err != nil || !isOutdated {
+		t.Fatalf("HooksOutdated() = %v, %v; want true, nil", isOutdated, err)
+	}
+	gotPath, err := refresher.RefreshHooks()
+	if err != nil {
+		t.Fatalf("RefreshHooks() error = %v", err)
+	}
+	if gotPath != configPath {
+		t.Errorf("RefreshHooks() returned %q, want %q", gotPath, configPath)
+	}
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	content := string(data)
+	for _, want := range []string{"[desktop]\nsidebar = true\n", `statusMessage = "Starting Confabulous Code sync"`, ":session_start:0:0"} {
+		if !strings.Contains(content, want) {
+			t.Errorf("refreshed config missing %q\n%s", want, content)
+		}
+	}
+	for _, notWant := range []string{"confab codex hooks", "Starting Confab sync"} {
+		if strings.Contains(content, notWant) {
+			t.Errorf("refreshed config still contains %q\n%s", notWant, content)
+		}
+	}
+	if isOutdated, err := refresher.HooksOutdated(); err != nil || isOutdated {
+		t.Fatalf("HooksOutdated() after refresh = %v, %v; want false, nil", isOutdated, err)
 	}
 }
 

@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"time"
 
@@ -29,55 +28,56 @@ const (
 	codexSessionStartStatusMessage = "Starting Confabulous Code sync"
 )
 
-// InstallCodexHooks writes the managed Confabulous Code hook block into Codex's
-// config.toml at configPath, preserving user content and creating a
-// backup. Returns the configPath that was written.
+// InstallCodexHooks installs the Confabulous Code hooks into Codex's
+// config.toml at configPath: its own hook groups are replaced in place (or
+// appended on a first install), [features] hooks is set to true, and every
+// other byte of the file is preserved. Returns the configPath.
 func InstallCodexHooks(configPath string) (string, error) {
-	if err := os.MkdirAll(filepath.Dir(configPath), 0700); err != nil {
-		return "", fmt.Errorf("failed to create Codex state directory: %w", err)
-	}
+	return editCodexHooks(configPath, codexModeInstall)
+}
 
-	var existing []byte
-	if data, err := os.ReadFile(configPath); err == nil {
-		existing = data
-		if err := backupFile(configPath, data); err != nil {
-			return "", err
-		}
-	} else if !os.IsNotExist(err) {
-		return "", fmt.Errorf("failed to read Codex config: %w", err)
-	}
+// UninstallCodexHooks removes the Confabulous Code hook and trust-state
+// tables from Codex's config.toml, preserving the rest of the file
+// (including [features] hooks). Returns the configPath even if no hooks
+// were present.
+func UninstallCodexHooks(configPath string) (string, error) {
+	return editCodexHooks(configPath, codexModeUninstall)
+}
 
-	binPath, err := config.GetBinaryPath()
+// RefreshCodexHooks brings an installed but outdated set of Confabulous Code
+// hooks in configPath up to date. Unlike InstallCodexHooks it leaves an
+// explicit [features] hooks = false and the extra keys Codex keeps in
+// confab's trust-state tables. See CodexHooksOutdated.
+func RefreshCodexHooks(configPath string) (string, error) {
+	return editCodexHooks(configPath, codexModeRefresh)
+}
+
+// editCodexHooks runs one ownership-based edit of configPath (see
+// codex_edit.go) and returns configPath.
+func editCodexHooks(configPath string, mode codexEditMode) (string, error) {
+	ed, err := newCodexEditor()
 	if err != nil {
 		return "", err
 	}
-
-	updated := ensureCodexHooksConfig(string(existing), configPath, binPath)
-	if err := writeFileAtomic(configPath, []byte(updated), 0600); err != nil {
-		return "", fmt.Errorf("failed to write Codex config: %w", err)
+	if err := ed.apply(configPath, mode); err != nil {
+		return "", err
 	}
 	return configPath, nil
 }
 
-// UninstallCodexHooks removes the managed Confabulous Code hook block from
-// Codex's config.toml, preserving the rest of the file. Returns the
-// configPath even if no block was present.
-func UninstallCodexHooks(configPath string) (string, error) {
-	data, err := os.ReadFile(configPath)
+// BinaryPath resolves the confab binary written into Codex hook commands.
+// It is a variable so tests can pin a path named "confab": test binaries
+// have another name, which IsCodexHooksInstalled does not recognise.
+var BinaryPath = config.GetBinaryPath
+
+// CodexHooksOutdated reports whether configPath carries a full set of
+// Confabulous Code hooks that differs from what this binary would write.
+func CodexHooksOutdated(configPath string) (bool, error) {
+	binPath, err := BinaryPath()
 	if err != nil {
-		if os.IsNotExist(err) {
-			return configPath, nil
-		}
-		return "", fmt.Errorf("failed to read Codex config: %w", err)
+		return false, err
 	}
-	if err := backupFile(configPath, data); err != nil {
-		return "", err
-	}
-	updated := removeManagedBlock(string(data), confabCodexHooksStart, confabCodexHooksEnd)
-	if err := writeFileAtomic(configPath, []byte(strings.TrimRight(updated, "\n")+"\n"), 0600); err != nil {
-		return "", fmt.Errorf("failed to write Codex config: %w", err)
-	}
-	return configPath, nil
+	return codexHooksOutdated(configPath, binPath)
 }
 
 // codexHookGroup is one [[hooks.<EventName>]] block from config.toml as
@@ -116,16 +116,18 @@ func hasConfabCommand(groups []codexHookGroup) bool {
 // IsCodexHooksInstalled parses configPath and returns true only when all
 // three Confabulous Code hook events (SessionStart, PreToolUse, PostToolUse) carry
 // a confab command. Existing SessionStart-only installs (pre-CF-492) read
-// as "not installed" so `confab setup` re-emits the managed block and
+// as "not installed" so `confab setup` installs the missing events and
 // transparently upgrades them.
 func IsCodexHooksInstalled(configPath string) (bool, error) {
-	data, err := os.ReadFile(configPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return false, nil
-		}
-		return false, fmt.Errorf("failed to read Codex config: %w", err)
+	data, exists, err := readCodexConfig(configPath)
+	if err != nil || !exists {
+		return false, err
 	}
+	return codexHooksInstalledIn(data)
+}
+
+// codexHooksInstalledIn is IsCodexHooksInstalled on already-read config data.
+func codexHooksInstalledIn(data []byte) (bool, error) {
 	var cfg codexHooksConfig
 	if err := toml.Unmarshal(data, &cfg); err != nil {
 		return false, fmt.Errorf("failed to parse Codex config: %w", err)
@@ -135,92 +137,8 @@ func IsCodexHooksInstalled(configPath string) (bool, error) {
 		hasConfabCommand(cfg.Hooks.PostToolUse), nil
 }
 
-func ensureCodexHooksConfig(config, configPath, binPath string) string {
-	config = removeManagedBlock(config, confabCodexHooksStart, confabCodexHooksEnd)
-	config = ensureCodexHooksFeature(config)
-	// Count groups per event AFTER stripping our managed block so re-installs
-	// produce stable positional trust keys. Each event is counted
-	// independently — the user may have pre-existing unmanaged blocks for
-	// any subset of events.
-	groupIndices := codexHookGroupIndices{
-		sessionStart: countCodexHookMatcherGroups(config, "SessionStart"),
-		preToolUse:   countCodexHookMatcherGroups(config, "PreToolUse"),
-		postToolUse:  countCodexHookMatcherGroups(config, "PostToolUse"),
-	}
-	return appendTOMLBlock(config, confabCodexHooksStart+"\n"+codexHooksTOML(configPath, binPath, groupIndices)+confabCodexHooksEnd+"\n")
-}
-
-func ensureCodexHooksFeature(config string) string {
-	config = removeCodexHooksDeprecatedFeature(config)
-
-	re := regexp.MustCompile(`(?m)^hooks\s*=\s*false\s*$`)
-	if re.MatchString(config) {
-		return re.ReplaceAllString(config, "hooks = true")
-	}
-	re = regexp.MustCompile(`(?m)^hooks\s*=\s*true\s*$`)
-	if re.MatchString(config) {
-		return config
-	}
-	if strings.Contains(config, "[features]") {
-		lines := strings.Split(config, "\n")
-		for i, line := range lines {
-			if strings.TrimSpace(line) == "[features]" {
-				next := append([]string{}, lines[:i+1]...)
-				next = append(next, "hooks = true")
-				next = append(next, lines[i+1:]...)
-				return strings.Join(next, "\n")
-			}
-		}
-	}
-	return appendTOMLBlock(config, "[features]\nhooks = true\n")
-}
-
-func removeCodexHooksDeprecatedFeature(config string) string {
-	lines := strings.Split(config, "\n")
-	out := lines[:0]
-	for _, line := range lines {
-		if regexp.MustCompile(`^\s*codex_hooks\s*=`).MatchString(line) {
-			continue
-		}
-		out = append(out, line)
-	}
-	return strings.Join(out, "\n")
-}
-
-func appendTOMLBlock(config, block string) string {
-	config = strings.TrimRight(config, "\n")
-	if config == "" {
-		return block
-	}
-	return config + "\n\n" + block
-}
-
-func removeManagedBlock(config, start, end string) string {
-	startIdx := strings.Index(config, start)
-	if startIdx == -1 {
-		return config
-	}
-	endIdx := strings.Index(config[startIdx:], end)
-	if endIdx == -1 {
-		return config
-	}
-	endIdx += startIdx + len(end)
-	for endIdx < len(config) && (config[endIdx] == '\n' || config[endIdx] == '\r') {
-		endIdx++
-	}
-	return strings.TrimRight(config[:startIdx], "\n") + "\n" + config[endIdx:]
-}
-
-func countCodexHookMatcherGroups(config, eventName string) int {
-	re := regexp.MustCompile(`(?m)^\s*\[\[\s*hooks\.` + regexp.QuoteMeta(eventName) + `\s*\]\]\s*(?:#.*)?$`)
-	return len(re.FindAllStringIndex(config, -1))
-}
-
-// codexHookGroupIndices carries the per-event group offset we use to build
-// each event's positional trust-state key. Counted by
-// countCodexHookMatcherGroups against the post-strip config so the keys
-// land on our hook even when the user has pre-existing unmanaged blocks
-// for any subset of the three events.
+// codexHookGroupIndices carries the per-event group index used to build
+// each event's positional trust-state key.
 type codexHookGroupIndices struct {
 	sessionStart int
 	preToolUse   int
@@ -332,13 +250,14 @@ func tomlQuoteString(s string) string {
 }
 
 // backupFile writes data to a timestamped "<path>.confab-backup-<ts>" sibling
-// file, preserving prior config content before an in-place rewrite.
-func backupFile(path string, data []byte) error {
+// file, preserving prior config content before an in-place rewrite. It
+// returns the backup's path.
+func backupFile(path string, data []byte) (string, error) {
 	backupPath := fmt.Sprintf("%s.confab-backup-%s", path, time.Now().Format("20060102-150405"))
 	if err := os.WriteFile(backupPath, data, 0600); err != nil {
-		return fmt.Errorf("failed to create backup: %w", err)
+		return "", fmt.Errorf("failed to create backup: %w", err)
 	}
-	return nil
+	return backupPath, nil
 }
 
 func writeFileAtomic(path string, data []byte, perm os.FileMode) error {

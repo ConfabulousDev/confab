@@ -90,20 +90,35 @@ func printProviderBlock(p provider.Provider) {
 		fmt.Println("  CLI: ✗ not on PATH")
 	}
 
-	hooksInstalled, err := p.IsHooksInstalled()
-	switch {
-	case err != nil:
-		logger.Error("Failed to check hook status for %s: %v", p.Name(), err)
-		fmt.Printf("  Hooks: ? (error: %v)\n", err)
-	case hooksInstalled:
-		fmt.Println("  Hooks: ✓ Installed")
-	default:
-		fmt.Println("  Hooks: ✗ Not installed")
-	}
-
+	printHooksRow(p)
 	printSkillsRow(p)
 
 	fmt.Println()
+}
+
+// printHooksRow renders the per-provider Hooks line: not installed,
+// installed, or installed but outdated (providers that can tell).
+func printHooksRow(p provider.Provider) {
+	installed, err := p.IsHooksInstalled()
+	if err != nil {
+		logger.Error("Failed to check hook status for %s: %v", p.Name(), err)
+		fmt.Printf("  Hooks: ? (error: %v)\n", err)
+		return
+	}
+	if !installed {
+		fmt.Println("  Hooks: ✗ Not installed")
+		return
+	}
+	outdated, err := hooksOutdated(p, true)
+	switch {
+	case err != nil:
+		logger.Error("Failed to check whether %s hooks are up to date: %v", p.Name(), err)
+		fmt.Printf("  Hooks: ✓ Installed (could not check whether they are up to date: %v)\n", err)
+	case outdated:
+		fmt.Println("  Hooks: ✓ Installed, but outdated (run 'confab setup' to update)")
+	default:
+		fmt.Println("  Hooks: ✓ Installed")
+	}
 }
 
 // printSkillsRow renders the per-provider Skills line for shipped skills.

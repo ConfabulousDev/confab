@@ -28,7 +28,7 @@ func (Codex) CLIBinaryName() string { return "codex" }
 
 // SupportsCommitLinking reports that Codex installs PreToolUse +
 // PostToolUse hooks that drive bidirectional GitHub linking. See
-// pkg/hookconfig/codex.go for the managed-block contents.
+// pkg/hookconfig/codex.go for the hook tables it writes.
 func (Codex) SupportsCommitLinking() bool { return true }
 
 // ParseSessionHook reads a Codex SessionStart hook payload and returns
@@ -228,13 +228,33 @@ func (Codex) WriteHookResponse(w io.Writer, suppressOutput bool, systemMessage s
 
 // IsHooksInstalled delegates to pkg/hookconfig, which parses
 // ~/.codex/config.toml and returns true iff a confab command is
-// registered under [[hooks.SessionStart]].
+// registered under each of SessionStart, PreToolUse and PostToolUse.
 func (p Codex) IsHooksInstalled() (bool, error) {
 	configPath, err := p.ConfigPath()
 	if err != nil {
 		return false, err
 	}
 	return hookconfig.IsCodexHooksInstalled(configPath)
+}
+
+var _ HookRefresher = Codex{}
+
+// HooksOutdated delegates to pkg/hookconfig.
+func (p Codex) HooksOutdated() (bool, error) {
+	configPath, err := p.ConfigPath()
+	if err != nil {
+		return false, err
+	}
+	return hookconfig.CodexHooksOutdated(configPath)
+}
+
+// RefreshHooks delegates to pkg/hookconfig.
+func (p Codex) RefreshHooks() (string, error) {
+	configPath, err := p.ConfigPath()
+	if err != nil {
+		return "", err
+	}
+	return hookconfig.RefreshCodexHooks(configPath)
 }
 
 // FindParentPID walks up the process tree to find the Codex process.

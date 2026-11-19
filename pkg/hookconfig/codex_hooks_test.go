@@ -5,21 +5,33 @@ import (
 	"testing"
 )
 
-// These tests cover the internal Codex TOML helpers
-// (ensureCodexHooksConfig, codexTrustedHookHash, codexHooksTOML). They
-// were originally in pkg/provider/codex_test.go before CF-396 moved the
-// helpers here.
+// These tests cover the internal Codex TOML helpers (the install transform,
+// codexTrustedHookHash, codexHooksTOML). They were originally in
+// pkg/provider/codex_test.go before CF-396 moved the helpers here.
+
+// installCodexHooksInto runs the install transform on input and checks the
+// result against the pre-write verification.
+func installCodexHooksInto(t *testing.T, input, configPath, binPath string) string {
+	t.Helper()
+	got, _, err := transformCodexConfig(input, configPath, binPath, codexModeInstall)
+	if err != nil {
+		t.Fatalf("install transform: %v\n%s", err, input)
+	}
+	if err := verifyCodexEdit(input, got, configPath, binPath, codexModeInstall); err != nil {
+		t.Fatalf("install output fails verification: %v\n%s", err, got)
+	}
+	return got
+}
 
 func TestCodexEnsureHooksConfig(t *testing.T) {
 	input := `[projects."/repo"]
 trust_level = "trusted"
 `
 
-	got := ensureCodexHooksConfig(input, "/Users/test/.codex/config.toml", "/usr/local/bin/confab")
+	got := installCodexHooksInto(t, input, "/Users/test/.codex/config.toml", "/usr/local/bin/confab")
 	for _, want := range []string{
 		"[features]",
 		"hooks = true",
-		confabCodexHooksStart,
 		// SessionStart event + trust block.
 		"[[hooks.SessionStart]]",
 		"command = \"/usr/local/bin/confab hook session-start --provider codex\"",
@@ -34,7 +46,6 @@ trust_level = "trusted"
 		"command = \"/usr/local/bin/confab hook post-tool-use --provider codex\"",
 		`[hooks.state."/Users/test/.codex/config.toml:post_tool_use:0:0"]`,
 		`trusted_hash = "sha256:`,
-		confabCodexHooksEnd,
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("expected generated config to contain %q\n%s", want, got)
@@ -49,19 +60,19 @@ trust_level = "trusted"
 		`[hooks.state."/Users/test/.codex/config.toml:user_prompt_submit:0:0"]`,
 	} {
 		if strings.Contains(got, notWant) {
-			t.Fatalf("expected managed block to omit %q\n%s", notWant, got)
+			t.Fatalf("expected installed hooks to omit %q\n%s", notWant, got)
 		}
 	}
 }
 
 func TestCodexEnsureHooksConfigIsIdempotent(t *testing.T) {
-	once := ensureCodexHooksConfig("[features]\ncodex_hooks = false\n", "/Users/test/.codex/config.toml", "/usr/local/bin/confab")
-	twice := ensureCodexHooksConfig(once, "/Users/test/.codex/config.toml", "/usr/local/bin/confab")
+	once := installCodexHooksInto(t, "[features]\ncodex_hooks = false\n", "/Users/test/.codex/config.toml", "/usr/local/bin/confab")
+	twice := installCodexHooksInto(t, once, "/Users/test/.codex/config.toml", "/usr/local/bin/confab")
 	if once != twice {
 		t.Fatalf("expected idempotent config update\nonce:\n%s\n\ntwice:\n%s", once, twice)
 	}
-	if strings.Count(twice, confabCodexHooksStart) != 1 {
-		t.Fatalf("expected one managed block, got:\n%s", twice)
+	if strings.Count(twice, "[[hooks.SessionStart]]") != 1 {
+		t.Fatalf("expected one SessionStart group, got:\n%s", twice)
 	}
 	if strings.Contains(twice, "codex_hooks") {
 		t.Fatalf("expected deprecated feature flag to be removed:\n%s", twice)
@@ -78,7 +89,7 @@ matcher = "startup"
 type = "command"
 command = "/usr/bin/other start"
 `
-	got := ensureCodexHooksConfig(input, "/Users/test/.codex/config.toml", "/usr/local/bin/confab")
+	got := installCodexHooksInto(t, input, "/Users/test/.codex/config.toml", "/usr/local/bin/confab")
 	if want := `[hooks.state."/Users/test/.codex/config.toml:session_start:1:0"]`; !strings.Contains(got, want) {
 		t.Fatalf("expected generated config to contain %q\n%s", want, got)
 	}
@@ -99,7 +110,7 @@ matcher = "Edit"
 type = "command"
 command = "/usr/bin/other pre"
 `
-	got := ensureCodexHooksConfig(input, "/Users/test/.codex/config.toml", "/usr/local/bin/confab")
+	got := installCodexHooksInto(t, input, "/Users/test/.codex/config.toml", "/usr/local/bin/confab")
 	if want := `[hooks.state."/Users/test/.codex/config.toml:pre_tool_use:1:0"]`; !strings.Contains(got, want) {
 		t.Fatalf("expected generated config to contain %q\n%s", want, got)
 	}
@@ -117,7 +128,7 @@ matcher = "Write"
 type = "command"
 command = "/usr/bin/other post"
 `
-	got := ensureCodexHooksConfig(input, "/Users/test/.codex/config.toml", "/usr/local/bin/confab")
+	got := installCodexHooksInto(t, input, "/Users/test/.codex/config.toml", "/usr/local/bin/confab")
 	if want := `[hooks.state."/Users/test/.codex/config.toml:post_tool_use:1:0"]`; !strings.Contains(got, want) {
 		t.Fatalf("expected generated config to contain %q\n%s", want, got)
 	}
@@ -149,7 +160,7 @@ func TestCodexTrustedHookHashMatchesKnownCodexHashes(t *testing.T) {
 // does not raise a first-run trust prompt).
 func TestCodexSessionStartStatusMessageNamesConfabulousCode(t *testing.T) {
 	const bin = "/usr/local/bin/confab"
-	got := ensureCodexHooksConfig("", "/Users/test/.codex/config.toml", bin)
+	got := installCodexHooksInto(t, "", "/Users/test/.codex/config.toml", bin)
 	if want := `statusMessage = "Starting Confabulous Code sync"`; !strings.Contains(got, want) {
 		t.Fatalf("expected generated config to contain %q\n%s", want, got)
 	}
@@ -164,9 +175,9 @@ func TestCodexSessionStartStatusMessageNamesConfabulousCode(t *testing.T) {
 }
 
 // TestCodexEnsureHooksConfigUpgradesPreRenameBlock covers the upgrade path
-// for installs written before the rename: re-running setup must replace the
-// whole managed block, rewriting the status message and its trusted hash
-// together, and leave exactly one managed block.
+// for installs written before the rename: reinstalling must rewrite the
+// status message and its trusted hash together, and leave exactly one
+// SessionStart group.
 func TestCodexEnsureHooksConfigUpgradesPreRenameBlock(t *testing.T) {
 	const (
 		configPath = "/Users/test/.codex/config.toml"
@@ -180,16 +191,16 @@ func TestCodexEnsureHooksConfigUpgradesPreRenameBlock(t *testing.T) {
 
 	// Build a pre-rename install: the current block with the old message
 	// and the old (self-consistent) hash substituted back in.
-	current := ensureCodexHooksConfig("[projects.\"/repo\"]\ntrust_level = \"trusted\"\n", configPath, bin)
+	current := installCodexHooksInto(t, "[projects.\"/repo\"]\ntrust_level = \"trusted\"\n", configPath, bin)
 	preRename := strings.ReplaceAll(current, `statusMessage = "`+newMsg+`"`, `statusMessage = "`+oldMsg+`"`)
 	preRename = strings.ReplaceAll(preRename, newHash, oldHash)
 	if !strings.Contains(preRename, oldMsg) || !strings.Contains(preRename, oldHash) {
 		t.Fatalf("fixture did not produce a pre-rename block\n%s", preRename)
 	}
 
-	got := ensureCodexHooksConfig(preRename, configPath, bin)
-	if n := strings.Count(got, confabCodexHooksStart); n != 1 {
-		t.Fatalf("expected exactly one managed block, got %d\n%s", n, got)
+	got := installCodexHooksInto(t, preRename, configPath, bin)
+	if got != current {
+		t.Fatalf("upgrade must yield exactly the current install\ngot:\n%s\nwant:\n%s", got, current)
 	}
 	if strings.Contains(got, oldMsg) || strings.Contains(got, oldHash) {
 		t.Fatalf("upgraded config still carries the pre-rename message or hash\n%s", got)
