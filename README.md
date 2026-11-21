@@ -55,6 +55,10 @@ confab sync status
 
 # Remove hooks
 confab hooks remove
+
+# Pause / resume automatic sync (stops running daemons; hooks stay installed)
+confab disable
+confab enable
 ```
 
 The sync daemon uploads transcript chunks while you work, reducing data loss if the session exits unexpectedly.
@@ -157,11 +161,19 @@ Cursor writes per-session transcripts to disk at `~/.cursor/projects/<workspace>
 - **Hybrid shutdown.** The CLI fires `sessionEnd` reliably, but the IDE only fires it on window/app close (not per chat-tab). The daemon's parent-PID liveness on the shared `Cursor.app` process is the primary IDE shutdown — a long IDE session with several chats keeps per-session daemons alive (still syncing incrementally) until the window closes.
 - Bundled skills (`/retro`) install under `~/.cursor/skills/`.
 
+## Uninstalling
+
+```bash
+confab uninstall          # asks for confirmation; --yes to skip
+```
+
+This stops every running sync daemon, turns automatic sync off, and removes Confabulous Code's hooks, OpenCode plugin and skills from every provider (including Claude Code dirs set up with `--config-dir`). Your own hooks and settings are left as they were. It keeps `~/.confab` (credentials, logs, settings) and the binary, and prints the command to delete the binary plus any `*.confab-backup-*` files earlier installs left. Agent sessions that were already open keep calling their hooks, which do nothing while sync is off. Run `confab setup` to reinstall; it turns sync back on.
+
 ## Configuration
 
 | File | Purpose |
 |------|---------|
-| `~/.confab/config.json` | Backend URL, API key, per-config-dir backend bindings, redaction, log level, and auto-update settings |
+| `~/.confab/config.json` | Backend URL, API key, per-config-dir backend bindings, redaction, log level, auto-update and `sync_disabled` settings |
 | `~/.confab/logs/confab.log` | Operation logs (auto-rotated, 14 day retention) |
 
 ## Environment Variables

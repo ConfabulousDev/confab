@@ -262,32 +262,35 @@ func tomlQuoteString(s string) string {
 // file, preserving prior config content before an in-place rewrite. It
 // returns the backup's path.
 func backupFile(path string, data []byte) (string, error) {
-	backupPath := fmt.Sprintf("%s.confab-backup-%s", path, time.Now().Format("20060102-150405"))
+	backupPath := fmt.Sprintf("%s%s%s", path, backupInfix, time.Now().Format("20060102-150405"))
 	if err := os.WriteFile(backupPath, data, 0600); err != nil {
 		return "", fmt.Errorf("failed to create backup: %w", err)
 	}
 	return backupPath, nil
 }
 
-func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
-	dir := filepath.Dir(path)
-	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".tmp-*")
-	if err != nil {
-		return err
-	}
-	tmpPath := tmp.Name()
-	defer os.Remove(tmpPath)
+// backupInfix separates a config file's name from its backup timestamp:
+// <file>.confab-backup-<yyyymmdd-hhmmss>.
+const backupInfix = ".confab-backup-"
 
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		return err
+// ListBackups returns the backups backupFile wrote next to path (kata 7ams),
+// sorted by name. Names are matched by prefix, not globbed, so glob
+// metacharacters in a user's path can't misfire. A missing dir yields none.
+func ListBackups(path string) []string {
+	dir, base := filepath.Split(path)
+	if dir == "" {
+		dir = "."
 	}
-	if err := tmp.Chmod(perm); err != nil {
-		tmp.Close()
-		return err
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
 	}
-	if err := tmp.Close(); err != nil {
-		return err
+	prefix := base + backupInfix
+	var out []string
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasPrefix(e.Name(), prefix) {
+			out = append(out, filepath.Join(dir, e.Name()))
+		}
 	}
-	return os.Rename(tmpPath, path)
+	return out
 }

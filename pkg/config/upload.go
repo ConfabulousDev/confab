@@ -25,6 +25,11 @@ type UploadConfig struct {
 	LogLevel   string           `json:"log_level,omitempty"`   // debug, info, warn, error (default: info)
 	AutoUpdate *bool            `json:"auto_update,omitempty"` // nil = enabled (default), false = disabled
 	Redaction  *RedactionConfig `json:"redaction,omitempty"`
+	// SyncDisabled is set by `confab disable` / `confab uninstall` and cleared
+	// by `confab enable` / `confab setup` (kata 2n1f). While true every
+	// `confab hook …` handler is a silent no-op and sync daemons exit without
+	// uploading. Global, like AutoUpdate — not per binding.
+	SyncDisabled bool `json:"sync_disabled,omitempty"`
 	// Bindings maps provider -> canonical config dir -> credentials.
 	Bindings map[string]map[string]BindingCreds `json:"bindings,omitempty"`
 }
@@ -33,6 +38,48 @@ type UploadConfig struct {
 // Defaults to true when AutoUpdate is nil (not set in config).
 func (c *UploadConfig) IsAutoUpdateEnabled() bool {
 	return c.AutoUpdate == nil || *c.AutoUpdate
+}
+
+// IsSyncDisabled reports whether automatic sync is disabled
+// (`sync_disabled` in ~/.confab/config.json). A missing config reads as
+// enabled. A read or parse error is returned so the caller can choose how
+// lenient to be (hooks treat an error as enabled).
+func IsSyncDisabled() (bool, error) {
+	cfg, err := GetUploadConfig()
+	if err != nil {
+		return false, err
+	}
+	return cfg.SyncDisabled, nil
+}
+
+// SyncDisabledLenient is IsSyncDisabled for the automatic-sync paths (hooks
+// and the daemon): a config read error is logged and treated as enabled, so
+// a transient failure never stops a user's sync or breaks their agent.
+func SyncDisabledLenient() bool {
+	disabled, err := IsSyncDisabled()
+	if err != nil {
+		logger.Warn("Failed to read sync_disabled flag (treating sync as enabled): %v", err)
+		return false
+	}
+	return disabled
+}
+
+// SetSyncDisabled sets or clears the global sync_disabled flag, preserving
+// every other config field. It reports whether the flag changed; when it did
+// not, nothing is written (so enabling with no config file creates none).
+func SetSyncDisabled(disabled bool) (changed bool, err error) {
+	cfg, err := GetUploadConfig()
+	if err != nil {
+		return false, err
+	}
+	if cfg.SyncDisabled == disabled {
+		return false, nil
+	}
+	cfg.SyncDisabled = disabled
+	if err := SaveUploadConfig(cfg); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // RedactionConfig holds redaction settings
@@ -117,12 +164,38 @@ func SaveUploadConfig(config *UploadConfig) error {
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}
 
-	// Write to file
-	if err := os.WriteFile(configPath, data, 0600); err != nil {
+	// Atomic so a concurrent reader (every hook reads the sync_disabled
+	// flag) never sees a partially written file.
+	if err := WriteFileAtomic(configPath, data, 0600); err != nil {
 		return fmt.Errorf("failed to write config: %w", err)
 	}
-
 	return nil
+}
+
+// WriteFileAtomic writes data to path via a temp file in the same directory
+// plus rename, so readers see either the old or the new content, never a
+// partial write.
+func WriteFileAtomic(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Chmod(perm); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpPath, path)
 }
 
 func getConfigPath() (string, error) {

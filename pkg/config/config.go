@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -257,9 +258,25 @@ func AtomicUpdateSettingsAt(settingsPath string, updateFn func(*ClaudeSettings) 
 			return fmt.Errorf("failed to read settings: %w", err)
 		}
 
+		before, err := json.Marshal(settings.raw)
+		if err != nil {
+			return fmt.Errorf("failed to marshal settings: %w", err)
+		}
+
 		// Apply user's modifications
 		if err := updateFn(settings); err != nil {
 			return fmt.Errorf("update function failed: %w", err)
+		}
+
+		// Nothing changed: leave the file (and its directory) exactly as it
+		// was, or uncreated when it did not exist (kata 2n1f). Marshalled maps
+		// are key-sorted, so equal bytes mean equal settings.
+		after, err := json.Marshal(settings.raw)
+		if err != nil {
+			return fmt.Errorf("failed to marshal settings: %w", err)
+		}
+		if bytes.Equal(before, after) {
+			return nil
 		}
 
 		// Try to write with mtime check

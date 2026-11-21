@@ -111,8 +111,9 @@ func InstallCursorHooks(hooksPath string) (string, error) {
 }
 
 // UninstallCursorHooks removes Confabulous Code's managed hook entries from Cursor's
-// hooks.json, preserving every other hook and top-level key. A missing file
-// is a no-op. Returns the hooksPath.
+// hooks.json, preserving every other hook and top-level key. A missing file,
+// or one holding no confab entry, is a true no-op: nothing is backed up or
+// rewritten (kata 2n1f). Returns the hooksPath.
 func UninstallCursorHooks(hooksPath string) (string, error) {
 	top, err := readCursorHooksRaw(hooksPath)
 	if err != nil {
@@ -121,13 +122,16 @@ func UninstallCursorHooks(hooksPath string) (string, error) {
 	if top.fileMissing {
 		return hooksPath, nil
 	}
+	removed := 0
+	for _, event := range []string{cursorSessionStartEvent, cursorSessionEndEvent, cursorPreToolUseEvent, cursorPostToolUseEvent} {
+		removed += top.removeConfabEntries(event)
+	}
+	if removed == 0 {
+		return hooksPath, nil
+	}
 	if err := backupCursorHooks(hooksPath); err != nil {
 		return "", err
 	}
-	top.removeConfabEntries(cursorSessionStartEvent)
-	top.removeConfabEntries(cursorSessionEndEvent)
-	top.removeConfabEntries(cursorPreToolUseEvent)
-	top.removeConfabEntries(cursorPostToolUseEvent)
 	return writeCursorHooks(hooksPath, top)
 }
 
@@ -242,20 +246,27 @@ func (r *cursorHooksRaw) ensureEntry(event string, entry cursorHookEntry) error 
 
 // removeConfabEntries drops every confab command entry from the event array,
 // pruning the event key entirely when it becomes empty so uninstall restores
-// a hand-authored file as closely as possible.
-func (r *cursorHooksRaw) removeConfabEntries(event string) {
-	kept := r.hooks[event][:0]
-	for _, raw := range r.hooks[event] {
+// a hand-authored file as closely as possible. It returns how many entries it
+// removed; when that is zero the model is left untouched.
+func (r *cursorHooksRaw) removeConfabEntries(event string) int {
+	entries := r.hooks[event]
+	kept := make([]json.RawMessage, 0, len(entries))
+	for _, raw := range entries {
 		if rawIsConfabEntry(raw) {
 			continue
 		}
 		kept = append(kept, raw)
 	}
+	removed := len(entries) - len(kept)
+	if removed == 0 {
+		return 0
+	}
 	if len(kept) == 0 {
 		delete(r.hooks, event)
-		return
+		return removed
 	}
 	r.hooks[event] = kept
+	return removed
 }
 
 // rawIsConfabEntry reports whether a raw hook entry is a confab command hook.
@@ -282,7 +293,7 @@ func writeCursorHooks(hooksPath string, r *cursorHooksRaw) (string, error) {
 		return "", fmt.Errorf("failed to encode Cursor hooks file: %w", err)
 	}
 	out = append(out, '\n')
-	if err := writeFileAtomic(hooksPath, out, 0600); err != nil {
+	if err := config.WriteFileAtomic(hooksPath, out, 0600); err != nil {
 		return "", fmt.Errorf("failed to write Cursor hooks: %w", err)
 	}
 	return hooksPath, nil
