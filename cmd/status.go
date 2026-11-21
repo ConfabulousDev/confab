@@ -38,6 +38,9 @@ func printBackendSection() {
 		fmt.Println()
 		return
 	}
+	if cfg.SyncDisabled {
+		fmt.Println("  Sync: disabled (run 'confab enable' or 'confab setup')")
+	}
 	if cfg.APIKey == "" {
 		fmt.Println("  Status: ✗ Not configured")
 		fmt.Println("  Run 'confab login' to authenticate")

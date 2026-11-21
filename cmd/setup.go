@@ -25,6 +25,7 @@ This command:
 1. Authenticates with the backend (if not already logged in)
 2. Detects installed providers (claude, codex, opencode, cursor) and installs hooks for each
 3. Installs provider-specific skills
+4. Re-enables sync if 'confab disable' or 'confab uninstall' turned it off
 
 If --provider is set, only that provider is configured. If unset, hooks
 are installed for every provider that is used locally — detected by its
@@ -52,6 +53,16 @@ func runSetup(cmd *cobra.Command, args []string) error {
 	backendURL, needsLogin, err := runSetupAuth(cmd, binding)
 	if err != nil {
 		return err
+	}
+
+	// Setup includes `confab enable` (kata 2n1f): re-running setup after
+	// `confab disable` / `uninstall` turns sync back on.
+	reenabled, err := config.SetSyncDisabled(false)
+	if err != nil {
+		return fmt.Errorf("failed to re-enable sync: %w", err)
+	}
+	if reenabled {
+		fmt.Println("Sync re-enabled.")
 	}
 
 	if setupProviderName != "" {

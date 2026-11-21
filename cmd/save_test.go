@@ -12,6 +12,7 @@ import (
 
 	"github.com/ConfabulousDev/confab/pkg/backendtest"
 	"github.com/ConfabulousDev/confab/pkg/codextest"
+	"github.com/ConfabulousDev/confab/pkg/config"
 	"github.com/ConfabulousDev/confab/pkg/provider"
 	"github.com/ConfabulousDev/confab/pkg/sync"
 )
@@ -446,5 +447,23 @@ func TestSaveCodex_StateDBMissing_FallsBackToSingleRolloutSync_NoCrash(t *testin
 	if backend.chunkCount != 1 {
 		t.Errorf("chunks = %d, want 1 (root only — no DB to discover children)",
 			backend.chunkCount)
+	}
+}
+
+// Manual save is not gated by `confab disable` (kata 2n1f): the flag only
+// stops automatic sync.
+func TestSaveWorksWhileSyncDisabled(t *testing.T) {
+	backend := &saveTestBackend{}
+	server := httptest.NewServer(backend)
+	defer server.Close()
+
+	_, sessionID, _ := setupSaveTestEnv(t, server.URL)
+	seedConfigAt(t, os.Getenv("CONFAB_CONFIG_PATH"), config.UploadConfig{BackendURL: server.URL, APIKey: "test-key-12345678", SyncDisabled: true})
+
+	if err := saveViaDefault(t, provider.ClaudeCode{}, []string{sessionID}); err != nil {
+		t.Fatalf("save must work while sync is disabled: %v", err)
+	}
+	if backend.chunkCount != 1 {
+		t.Errorf("expected the session to upload, got %d chunk calls", backend.chunkCount)
 	}
 }

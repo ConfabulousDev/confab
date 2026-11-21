@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"sort"
 
+	"github.com/ConfabulousDev/confab/pkg/config"
 	"github.com/ConfabulousDev/confab/pkg/logger"
 )
 
@@ -298,7 +299,7 @@ func (e codexEditor) apply(configPath string, mode codexEditMode) error {
 		} else if err := os.MkdirAll(filepath.Dir(configPath), 0700); err != nil {
 			return fmt.Errorf("failed to create Codex state directory: %w", err)
 		}
-		if err := writeFileAtomic(configPath, []byte(output), 0600); err != nil {
+		if err := config.WriteFileAtomic(configPath, []byte(output), 0600); err != nil {
 			return fmt.Errorf("failed to write Codex config: %w", err)
 		}
 		e.announce(notices)

@@ -215,3 +215,72 @@ func TestHasBindingsShortCircuit(t *testing.T) {
 		t.Errorf("HasBindings(with binding) = %v,%v; want true,nil", has, err)
 	}
 }
+
+func TestSyncDisabledMissingConfigReadsEnabled(t *testing.T) {
+	path := withTempConfig(t, nil)
+	disabled, err := IsSyncDisabled()
+	if err != nil || disabled {
+		t.Fatalf("missing config must read as enabled, got disabled=%v err=%v", disabled, err)
+	}
+	changed, err := SetSyncDisabled(false)
+	if err != nil || changed {
+		t.Fatalf("enabling an absent config is a no-op, got changed=%v err=%v", changed, err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("enabling must not create config.json")
+	}
+}
+
+func TestSyncDisabledRoundTripPreservesOtherFields(t *testing.T) {
+	withTempConfig(t, nil)
+	off := false
+	orig := &UploadConfig{
+		BackendURL: "https://example.com",
+		APIKey:     "cfb_abcdefghijklmnopqrstuvwxyz0123456789ABCD",
+		LogLevel:   "debug",
+		AutoUpdate: &off,
+		Bindings:   map[string]map[string]BindingCreds{"claude-code": {"/x": {BackendURL: "https://b.example", APIKey: "cfb_zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"}}},
+	}
+	if err := SaveUploadConfig(orig); err != nil {
+		t.Fatal(err)
+	}
+	changed, err := SetSyncDisabled(true)
+	if err != nil || !changed {
+		t.Fatalf("SetSyncDisabled(true): changed=%v err=%v", changed, err)
+	}
+	if changed, _ := SetSyncDisabled(true); changed {
+		t.Error("setting the flag twice must report no change")
+	}
+	if d, _ := IsSyncDisabled(); !d {
+		t.Fatal("flag must read back as disabled")
+	}
+	got, err := GetUploadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.BackendURL != orig.BackendURL || got.APIKey != orig.APIKey || got.LogLevel != "debug" ||
+		got.AutoUpdate == nil || *got.AutoUpdate || got.Bindings["claude-code"]["/x"].APIKey != orig.Bindings["claude-code"]["/x"].APIKey {
+		t.Errorf("other fields must be preserved, got %+v", got)
+	}
+	if changed, err := SetSyncDisabled(false); err != nil || !changed {
+		t.Fatalf("SetSyncDisabled(false): changed=%v err=%v", changed, err)
+	}
+	if d, _ := IsSyncDisabled(); d {
+		t.Error("flag must read back as enabled")
+	}
+}
+
+func TestSyncDisabledReadErrorIsReturned(t *testing.T) {
+	path := withTempConfig(t, nil)
+	os.WriteFile(path, []byte("{not json"), 0600)
+	if _, err := IsSyncDisabled(); err == nil {
+		t.Error("a corrupt config must surface an error so callers can choose leniency")
+	}
+	if SyncDisabledLenient() {
+		t.Error("the automatic-sync paths must treat an unreadable flag as enabled")
+	}
+	os.WriteFile(path, []byte(`{"sync_disabled":true}`), 0600)
+	if !SyncDisabledLenient() {
+		t.Error("a readable disabled flag must read as disabled")
+	}
+}

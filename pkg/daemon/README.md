@@ -9,6 +9,7 @@ Background sync daemon for provider transcripts: Claude Code transcript JSONL, C
 | `daemon.go` | `Daemon` struct, `Run` loop, sync cycles, shutdown, inbox I/O, parent monitoring. Parent-PID liveness lives in a dedicated `monitorParent` goroutine that ticks at `parentCheckInterval` (5s; `var` so tests can override) and closes `parentDeathCh` on death; the main loop's `select` drains that and shuts down with reason `"parent process exited"`. The goroutine runs under a `context.WithCancel(ctx)` deferred-cancel so it exits on every `Run()` return path, not just when the caller's ctx cancels. For OpenCode (`d.providerName == provider.NameOpencode`) also starts/stops the root `provider.OpenCodeCollector` goroutine (backed by `provider.OpenCodeDBReader`) and derives the materialized transcript path. Holds the shared `dbReader`, `childCollectorBase` context, `childCollectorCancel`, and `childCollectors` map used by the CF-538 subagent sidechain logic in `opencode_children.go`. Carries `configDir` (from `Config.ConfigDir`, set by the SessionStart hook); `binding()` resolves it via `provider.BindingFor` and `tryInit` reads the backend via `config.EnsureAuthenticatedFor`, so a custom config dir syncs to its own backend (kata hpec) — a missing binding surfaces as not-authenticated (retry; never falls back to the default backend). Also carries `model` (from `Config.Model`, Cursor only — sourced from the `sessionStart` hook) and forwards it to `EngineConfig.Model`, which stamps it onto transcript chunk metadata (spm9). |
 | `opencode_children.go` | CF-538 OpenCode subagent sidechain capture: `opencodeChildCollector` (per-descendant cancel/done handles), `opencodeRegistrar` (the `provider.OpencodeDescendantRegistrar` implementation injected via `engine.SetDescendantRegistrar`), `startChildCollector` (idempotent goroutine spawn under the daemon's `childCollectorBase` context), `childCollectorDones` (snapshot for shutdown to wait on), and `waitForCollectors` (single shared timeout for root + children). |
 | `state.go` | `State` persistence (`~/.confab/sync/{provider}/{id}.json`, with legacy flat-path fallback), process liveness checks, listing. Path builders are thin wrappers over `pkg/confabpath`. `(*State).DeleteWithInbox` removes both the state file and the inbox file together — used by both `shutdown` and the reaper so the two-file cleanup stays consistent. |
+| `stop.go` | `StopAllDaemons(timeout)` (kata 2n1f, used by `confab disable`/`uninstall`): SIGTERMs every live daemon from `ListAllStates`, polls liveness until `timeout` (`DefaultStopAllTimeout()` = `shutdownTimeout`+5s), then SIGKILLs stragglers. Returns a `StopResult` (`stopped`/`killed`/`stale`/`failed`) per state. State + inbox of killed and stale daemons are removed by `deleteStateIfOwned`, which only deletes while the on-disk state still records the same PID (a newer daemon for the same session keeps its file). |
 | `reaper.go` | `ReapStaleStates()` — provider-agnostic sweep that removes state + inbox files whose PID is no longer alive. Files younger than `reapMinAge` (5s) are skipped to protect freshly-spawned daemons. Called as a goroutine from `cmd/hook_sessionstart.go` on every session-start so cleanup is opportunistic and invisible to the user (CF-549 F-up A). |
 
 ## Lifecycle
@@ -20,8 +21,12 @@ spawn ──> waitForTranscript (poll 2s, timeout 60s)
          save state file
               │
               ▼
+         sync_disabled? ── yes ──> shutdown without final sync
+              │
+              ▼
          sync loop ◄──────────────────┐
            │                          │
+           ├── sync_disabled? → exit  │
            ├── tryInit (lazy auth)    │
            ├── SyncAll (engine)       │
            └── sleep(interval+jitter)─┘
@@ -60,6 +65,7 @@ spawn ──> waitForTranscript (poll 2s, timeout 60s)
 - **Daemon must be resilient to backend unavailability.** Never crash on network errors. Log the error and retry on the next sync interval.
 - **Inbox file must be cleaned up on shutdown.** Stale inbox files don't cause bugs but are unnecessary clutter.
 - **`Stop()` is idempotent** (uses `sync.Once`). Multiple callers (signal handler, parent monitor, explicit stop) can all call `Stop()` safely.
+- **`sync_disabled` is checked only after the state file is saved** (at startup, then before every regular cycle; kata 2n1f). This is what makes `confab disable` race-free: it sets the flag before listing states, so a daemon missing from the listing saved its state later and necessarily reads the flag after it was set. When the daemon sees the flag it exits through `shutdown` with `skipFinalSync` set (cleanup, no upload). A daemon stopped by `disable`'s SIGTERM does its normal final flush. A config read error counts as enabled (`config.SyncDisabledLenient`).
 - **Consecutive 404 detection.** After 3 consecutive 404 errors (`maxConsecutiveNotFound`), the daemon shuts down — the session was deleted from the backend.
 - **Auth recovery.** On `ErrUnauthorized`, the engine is reset to force config re-read on the next cycle. This allows users to fix their API key without restarting the daemon.
 - **Codex: one daemon per root tree, not per rollout.** The hook handler walks every Codex `SessionStart` event up to its top-most root before spawning, so state files are keyed by root UUID. The running root daemon calls provider descendant discovery each sync cycle and uploads verified subagent rollouts as sidechain files. `SessionStart` events for already-running trees become no-ops.

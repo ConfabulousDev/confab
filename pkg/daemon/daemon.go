@@ -89,6 +89,10 @@ type Daemon struct {
 	doneCh              chan struct{}
 	consecutiveNotFound int // tracks consecutive 404 errors for session deletion detection
 
+	// skipFinalSync is set when the daemon exits because sync is disabled
+	// (kata 2n1f): shutdown then cleans up without uploading.
+	skipFinalSync bool
+
 	// collectorCancel stops the OpenCode collector goroutine (nil for
 	// Claude/Codex); collectorDone closes when that goroutine has exited.
 	// shutdown() cancels then waits on these so the final sync reads a quiesced
@@ -220,6 +224,13 @@ func (d *Daemon) Run(ctx context.Context) error {
 		logger.Warn("Failed to save initial state: %v", err)
 	}
 
+	// Checked only AFTER the state file is saved (kata 2n1f): a daemon that
+	// `confab disable` did not see in its listing saved its state after the
+	// listing, so this read necessarily happens after the flag was written.
+	if d.syncDisabled() {
+		return d.shutdownSyncDisabled()
+	}
+
 	// OpenCode has no upstream file to tail: derive a local materialized
 	// path and start a goroutine that polls OpenCode's SQLite DB
 	// (~/.local/share/opencode/opencode.db or CONFAB_OPENCODE_DB) and
@@ -326,6 +337,12 @@ func (d *Daemon) Run(ctx context.Context) error {
 			return d.shutdown("parent process exited")
 
 		case <-timer.C:
+			// `confab disable` / `uninstall` set the flag: exit without
+			// uploading anything more (no final sync either).
+			if d.syncDisabled() {
+				return d.shutdownSyncDisabled()
+			}
+
 			// For OpenCode, the collector materializes the transcript file
 			// asynchronously. Stay lifecycle-only — monitor the parent but
 			// never contact the backend — until at least one complete
@@ -523,6 +540,26 @@ func (d *Daemon) Stop() {
 	})
 }
 
+// isSyncDisabled reads the global sync_disabled flag, treating a read error
+// as enabled. A package var so tests can observe when the daemon checks it.
+var isSyncDisabled = config.SyncDisabledLenient
+
+// syncDisabled reports whether `confab disable` / `uninstall` turned sync off.
+func (d *Daemon) syncDisabled() bool {
+	disabled := isSyncDisabled()
+	if disabled {
+		logger.Info("Sync is disabled (confab disable); exiting without uploading")
+	}
+	return disabled
+}
+
+// shutdownSyncDisabled exits because sync is disabled: the normal cleanup,
+// without the final sync.
+func (d *Daemon) shutdownSyncDisabled() error {
+	d.skipFinalSync = true
+	return d.shutdown("sync disabled")
+}
+
 // shutdown performs final sync and cleanup
 func (d *Daemon) shutdown(reason string) error {
 	defer close(d.doneCh)
@@ -562,8 +599,9 @@ func (d *Daemon) shutdown(reason string) error {
 		}
 	}
 
-	// Final sync with timeout - if backend is slow/unresponsive, don't hang forever
-	if d.engine != nil && d.engine.IsInitialized() {
+	// Final sync with timeout - if backend is slow/unresponsive, don't hang forever.
+	// Skipped when exiting because sync is disabled (kata 2n1f).
+	if !d.skipFinalSync && d.engine != nil && d.engine.IsInitialized() {
 		done := make(chan struct{})
 		go func() {
 			defer close(done)
@@ -680,17 +718,19 @@ func StopDaemonForProvider(providerName, externalID string, hookInput *types.Cla
 		}
 	}
 
-	// Send SIGTERM
+	return signalDaemon(state, syscall.SIGTERM)
+}
+
+// signalDaemon sends sig to the daemon process recorded in state.
+func signalDaemon(state *State, sig syscall.Signal) error {
 	process, err := os.FindProcess(state.PID)
 	if err != nil {
 		return fmt.Errorf("failed to find process: %w", err)
 	}
-
-	if err := process.Signal(syscall.SIGTERM); err != nil {
-		return fmt.Errorf("failed to send SIGTERM: %w", err)
+	if err := process.Signal(sig); err != nil {
+		return fmt.Errorf("failed to send %v: %w", sig, err)
 	}
-
-	logger.Info("Sent SIGTERM to daemon: pid=%d", state.PID)
+	logger.Info("Sent %v to daemon: pid=%d", sig, state.PID)
 	return nil
 }
 
