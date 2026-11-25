@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	gosync "sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -16,8 +17,9 @@ import (
 	"github.com/ConfabulousDev/confab/pkg/backendtest"
 	"github.com/ConfabulousDev/confab/pkg/codextest"
 	"github.com/ConfabulousDev/confab/pkg/config"
-	"github.com/ConfabulousDev/confab/pkg/opencodetest"
 	pkghttp "github.com/ConfabulousDev/confab/pkg/http"
+	"github.com/ConfabulousDev/confab/pkg/logger"
+	"github.com/ConfabulousDev/confab/pkg/opencodetest"
 	"github.com/ConfabulousDev/confab/pkg/provider"
 	"github.com/ConfabulousDev/confab/pkg/redactor"
 	"github.com/ConfabulousDev/confab/pkg/types"
@@ -1448,10 +1450,10 @@ func TestEngine_SyncAll_DirScanAfterRestart(t *testing.T) {
 	f.WriteString(`{"type":"agent","message":"new line after restart"}` + "\n")
 	f.Close()
 
-	// The fresh engine has no knownAgentIDs. It must discover agents via:
-	// 1. InitFromBackendState (backend told it about these files), AND/OR
-	// 2. Directory scan in DiscoverNewFiles
-	// Either way, the new agent line should be synced.
+	// The fresh engine has no knownAgentIDs, and InitFromBackendState only
+	// records the agents' backend positions (kata 38mv). The directory scan in
+	// DiscoverNewFiles finds them on disk, seeded from those positions, so only
+	// the new agent line is synced.
 	chunks2, err := engine2.SyncAll()
 	if err != nil {
 		t.Fatalf("Second SyncAll failed: %v", err)
@@ -2329,4 +2331,346 @@ func opencodeFixtureWithChild(t *testing.T, rootID, childID string) string {
 	b := opencodetest.NewDB(t)
 	b.AddSession(rootID, "").AddSession(childID, rootID)
 	return b.Path()
+}
+
+// ============================================================================
+// Restart: Init records positions only; discovery owns local paths (kata 38mv)
+// ============================================================================
+
+// backendFilesFromChunks builds an InitResponse.Files map from what a mock
+// backend has accepted so far: each file's highest uploaded line.
+func backendFilesFromChunks(reqs []ChunkRequest) map[string]FileState {
+	files := make(map[string]FileState)
+	for _, r := range reqs {
+		last := r.FirstLine + len(r.Lines) - 1
+		if last > files[r.FileName].LastSyncedLine {
+			files[r.FileName] = FileState{LastSyncedLine: last}
+		}
+	}
+	return files
+}
+
+// codexRestartSetup syncs a Codex root + one child with a first engine, then
+// points the mock's Init response at what was uploaded and returns a fresh
+// (not yet Init'ed) second engine plus the child builder.
+func codexRestartSetup(t *testing.T, mock *mockBackend) (*codextest.Fixture, *Engine, *codextest.RolloutBuilder, string) {
+	t.Helper()
+	fixture, engine1, root := codexEngineSetup(t, mock)
+	child := fixture.AddSubagent(root.ThreadUUID(), "child-thread", codextest.SubagentOpts{}).
+		WithSessionMeta("/workdir").WithUserMessage("child task")
+	if _, err := engine1.SyncAll(); err != nil {
+		t.Fatalf("engine 1 SyncAll: %v", err)
+	}
+	childName := filepath.Base(child.Path())
+	if _, ok := findChunkForFile(mock.chunkRequests, childName); !ok {
+		t.Fatalf("engine 1 never uploaded the child %s", childName)
+	}
+	mock.initResponse.Files = backendFilesFromChunks(mock.chunkRequests)
+
+	engine2 := newEngineWithBackend(t, engine1.backend, nil, EngineConfig{
+		Provider:       (provider.Codex{}).Name(),
+		ExternalID:     root.ThreadUUID(),
+		TranscriptPath: root.Path(),
+		CWD:            "/workdir",
+	})
+	return fixture, engine2, child, childName
+}
+
+// Regression for GitHub #102: after a restart, a Codex child the backend
+// already knows about resumes at last_synced_line+1 instead of failing every
+// cycle with "failed to open file: <root>/subagents/<child>.jsonl".
+func TestEngine_SyncAll_CodexRestart_ChildResumesAtBackendPosition(t *testing.T) {
+	mock := newMockBackend(t)
+	_, engine2, child, childName := codexRestartSetup(t, mock)
+	backendLines := mock.initResponse.Files[childName].LastSyncedLine
+
+	if err := engine2.Init(); err != nil {
+		t.Fatalf("engine 2 Init: %v", err)
+	}
+	child.WithRawLine(`{"type":"event_msg","payload":{"type":"agent_message","message":"after restart"}}`)
+	before := len(mock.chunkRequests)
+
+	if _, err := engine2.SyncAll(); err != nil {
+		t.Fatalf("engine 2 SyncAll must not fail for a backend-known Codex child: %v", err)
+	}
+	got, ok := findChunkForFile(mock.chunkRequests[before:], childName)
+	if !ok {
+		t.Fatalf("child's new line was never uploaded after restart")
+	}
+	if got.FirstLine != backendLines+1 {
+		t.Errorf("child chunk FirstLine = %d, want %d (backend last_synced_line + 1)", got.FirstLine, backendLines+1)
+	}
+	if len(got.Lines) != 1 {
+		t.Errorf("child chunk carried %d lines, want 1 (only the new line)", len(got.Lines))
+	}
+	if u := engine2.UnmatchedBackendFiles(); len(u) != 0 {
+		t.Errorf("UnmatchedBackendFiles = %v, want empty (child was rediscovered)", u)
+	}
+}
+
+// Spec: with the Codex state DB gone, a restart neither errors nor uploads the
+// child; the root still syncs and the child is reported as unmatched.
+func TestEngine_SyncAll_CodexRestart_StateDBMissing_ChildUnmatchedNoError(t *testing.T) {
+	mock := newMockBackend(t)
+	fixture, engine2, _, childName := codexRestartSetup(t, mock)
+	t.Setenv(provider.CodexStateDBEnv, filepath.Join(fixture.Dir, "missing.sqlite"))
+	provider.ResetStateDBPathCacheForTest()
+
+	if err := engine2.Init(); err != nil {
+		t.Fatalf("engine 2 Init: %v", err)
+	}
+	rootPath := engine2.transcriptPath
+	f, err := os.OpenFile(rootPath, os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.WriteString(`{"type":"event_msg","payload":{"type":"agent_message","message":"root after restart"}}` + "\n")
+	f.Close()
+	before := len(mock.chunkRequests)
+
+	if _, err := engine2.SyncAll(); err != nil {
+		t.Fatalf("SyncAll must not fail when the child is undiscoverable: %v", err)
+	}
+	if _, ok := findChunkForFile(mock.chunkRequests[before:], filepath.Base(rootPath)); !ok {
+		t.Error("root's new line was not uploaded")
+	}
+	if _, ok := findChunkForFile(mock.chunkRequests[before:], childName); ok {
+		t.Error("child uploaded although its path is unknown")
+	}
+	if u := engine2.UnmatchedBackendFiles(); len(u) != 1 || u[0] != childName {
+		t.Errorf("UnmatchedBackendFiles = %v, want [%s]", u, childName)
+	}
+}
+
+// Spec: a Cursor subagent (beside the root transcript, not under
+// <session>/subagents) resumes at the backend position after a restart.
+func TestEngine_SyncAll_CursorRestart_SubagentResumes(t *testing.T) {
+	mock := newMockBackend(t)
+	server := httptest.NewServer(mock)
+	defer server.Close()
+	tmpDir, transcriptPath := setupTestEnv(t, server.URL)
+	os.WriteFile(transcriptPath, []byte(`{"role":"user","message":{"content":[{"type":"text","text":"hi"}]}}`+"\n"), 0o644)
+	subDir := filepath.Join(filepath.Dir(transcriptPath), "subagents")
+	os.MkdirAll(subDir, 0o755)
+	subPath := filepath.Join(subDir, "sub-1.jsonl")
+	os.WriteFile(subPath, []byte(`{"role":"assistant","n":1}`+"\n"+`{"role":"assistant","n":2}`+"\n"), 0o644)
+
+	cfg := EngineConfig{Provider: provider.NameCursor, ExternalID: "cursor-restart", TranscriptPath: transcriptPath, CWD: tmpDir}
+	engine1 := newEngineWithBackend(t, mustNewClient(t, server.URL, tmpDir), nil, cfg)
+	if err := engine1.Init(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := engine1.SyncAll(); err != nil {
+		t.Fatalf("engine 1 SyncAll: %v", err)
+	}
+	mock.initResponse.Files = backendFilesFromChunks(mock.chunkRequests)
+	if mock.initResponse.Files["subagents/sub-1.jsonl"].LastSyncedLine != 2 {
+		t.Fatalf("engine 1 did not sync the Cursor subagent: %v", mock.initResponse.Files)
+	}
+
+	engine2 := newEngineWithBackend(t, mustNewClient(t, server.URL, tmpDir), nil, cfg)
+	if err := engine2.Init(); err != nil {
+		t.Fatal(err)
+	}
+	f, _ := os.OpenFile(subPath, os.O_APPEND|os.O_WRONLY, 0o644)
+	f.WriteString(`{"role":"assistant","n":3}` + "\n")
+	f.Close()
+	before := len(mock.chunkRequests)
+
+	if _, err := engine2.SyncAll(); err != nil {
+		t.Fatalf("engine 2 SyncAll: %v", err)
+	}
+	got, ok := findChunkForFile(mock.chunkRequests[before:], "subagents/sub-1.jsonl")
+	if !ok {
+		t.Fatal("Cursor subagent's new line not uploaded after restart")
+	}
+	if got.FirstLine != 3 || len(got.Lines) != 1 {
+		t.Errorf("Cursor subagent chunk = (first_line %d, %d lines), want (3, 1)", got.FirstLine, len(got.Lines))
+	}
+}
+
+// Spec: Claude workflow files resume at the backend position after a restart.
+func TestEngine_SyncAll_WorkflowRestart_Resumes(t *testing.T) {
+	mock := newMockBackend(t)
+	mock.caps = &Capabilities{WorkflowFiles: true, WorkflowJournal: true}
+	server := httptest.NewServer(mock)
+	defer server.Close()
+	tmpDir, transcriptPath := setupTestEnv(t, server.URL)
+	subagents := writeWorkflowSessionTree(t, transcriptPath, "wf_run1")
+
+	cfg := EngineConfig{ExternalID: "wf-restart", TranscriptPath: transcriptPath, CWD: tmpDir}
+	engine1 := newEngineWithBackend(t, mustNewClient(t, server.URL, tmpDir), nil, cfg)
+	if err := engine1.Init(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := engine1.SyncAll(); err != nil {
+		t.Fatalf("engine 1 SyncAll: %v", err)
+	}
+	mock.initResponse.Files = backendFilesFromChunks(mock.chunkRequests)
+
+	engine2 := newEngineWithBackend(t, mustNewClient(t, server.URL, tmpDir), nil, cfg)
+	if err := engine2.Init(); err != nil {
+		t.Fatal(err)
+	}
+	runDir := filepath.Join(subagents, "workflows", "wf_run1")
+	for _, name := range []string{"agent-aaaaaaa11.jsonl", "journal.jsonl"} {
+		f, _ := os.OpenFile(filepath.Join(runDir, name), os.O_APPEND|os.O_WRONLY, 0o644)
+		f.WriteString(`{"type":"y"}` + "\n")
+		f.Close()
+	}
+	before := len(mock.chunkRequests)
+
+	if _, err := engine2.SyncAll(); err != nil {
+		t.Fatalf("engine 2 SyncAll: %v", err)
+	}
+	for _, name := range []string{"subagents/workflows/wf_run1/agent-aaaaaaa11.jsonl", "subagents/workflows/wf_run1/journal.jsonl"} {
+		got, ok := findChunkForFile(mock.chunkRequests[before:], name)
+		if !ok {
+			t.Errorf("%s: new line not uploaded after restart", name)
+			continue
+		}
+		if got.FirstLine != 2 || len(got.Lines) != 1 {
+			t.Errorf("%s chunk = (first_line %d, %d lines), want (2, 1)", name, got.FirstLine, len(got.Lines))
+		}
+	}
+}
+
+// Spec (D0b): the unmatched-file warning fires when the unmatched set gains a
+// name, not every cycle; a later new name warns again for that name only.
+func TestEngine_SyncAll_UnmatchedBackendFiles_WarnsOnce(t *testing.T) {
+	logDir := logger.SetupForTesting(t)
+	mock := newMockBackend(t)
+	server := httptest.NewServer(mock)
+	defer server.Close()
+	tmpDir, transcriptPath := setupTestEnv(t, server.URL)
+	os.WriteFile(transcriptPath, []byte(`{"type":"system"}`+"\n"), 0o644)
+	mock.initResponse.Files = map[string]FileState{
+		"transcript.jsonl":  {LastSyncedLine: 1},
+		"agent-gone1.jsonl": {LastSyncedLine: 4},
+		"subagents/x.jsonl": {LastSyncedLine: 2},
+	}
+
+	engine := newEngineWithBackend(t, mustNewClient(t, server.URL, tmpDir), nil, EngineConfig{
+		ExternalID: "warn-once", TranscriptPath: transcriptPath, CWD: tmpDir,
+	})
+	if err := engine.Init(); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 3; i++ {
+		if _, err := engine.SyncAll(); err != nil {
+			t.Fatalf("SyncAll #%d: %v", i+1, err)
+		}
+	}
+	logPath := filepath.Join(logDir, "confab.log")
+	countWarnings := func() int {
+		data, _ := os.ReadFile(logPath)
+		return strings.Count(string(data), "not found locally")
+	}
+	if n := countWarnings(); n != 1 {
+		t.Errorf("unmatched warning logged %d times over 3 cycles, want 1", n)
+	}
+	data, _ := os.ReadFile(logPath)
+	if !strings.Contains(string(data), "agent-gone1.jsonl") || !strings.Contains(string(data), "subagents/x.jsonl") {
+		t.Errorf("warning does not name the unmatched files; log:\n%s", data)
+	}
+
+	// The backend learns of another file (e.g. a second process uploaded it).
+	mock.initResponse.Files["agent-gone2.jsonl"] = FileState{LastSyncedLine: 1}
+	if err := engine.refreshStateFromBackend(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := engine.SyncAll(); err != nil {
+		t.Fatal(err)
+	}
+	if n := countWarnings(); n != 2 {
+		t.Errorf("after a new unmatched name: %d warnings, want 2", n)
+	}
+	if got := engine.UnmatchedBackendFiles(); len(got) != 3 {
+		t.Errorf("UnmatchedBackendFiles = %v, want 3 names", got)
+	}
+}
+
+// Spec (D1): a refresh triggered by one file's failed upload mid-cycle must not
+// orphan the progress of files uploaded later in the same cycle.
+func TestEngine_SyncAll_RefreshMidCycle_KeepsLaterProgress(t *testing.T) {
+	var mu gosync.Mutex
+	serverState := map[string]int{}
+	failTranscript := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		body, _ := backendtest.ReadRequestBody(r)
+		mu.Lock()
+		defer mu.Unlock()
+		switch r.URL.Path {
+		case "/api/v1/capabilities":
+			w.WriteHeader(http.StatusNotFound)
+		case "/api/v1/sync/init":
+			files := map[string]FileState{}
+			for k, v := range serverState {
+				files[k] = FileState{LastSyncedLine: v}
+			}
+			json.NewEncoder(w).Encode(InitResponse{SessionID: "s", Files: files})
+		case "/api/v1/sync/chunk":
+			var req ChunkRequest
+			json.Unmarshal(body, &req)
+			if failTranscript && req.FileName == "transcript.jsonl" {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				return
+			}
+			if req.FirstLine != serverState[req.FileName]+1 {
+				w.WriteHeader(http.StatusBadRequest)
+				json.NewEncoder(w).Encode(map[string]string{"error": "first_line must be contiguous"})
+				return
+			}
+			serverState[req.FileName] = req.FirstLine + len(req.Lines) - 1
+			json.NewEncoder(w).Encode(ChunkResponse{LastSyncedLine: serverState[req.FileName]})
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	tmpDir, transcriptPath := setupTestEnv(t, server.URL)
+	subagentsDir := filepath.Join(filepath.Dir(transcriptPath), "transcript", "subagents")
+	os.MkdirAll(subagentsDir, 0o755)
+	os.WriteFile(transcriptPath, []byte(`{"type":"system"}`+"\n"), 0o644)
+	agents := []string{"agent-a1.jsonl", "agent-a2.jsonl", "agent-a3.jsonl", "agent-a4.jsonl", "agent-a5.jsonl"}
+	for _, a := range agents {
+		os.WriteFile(filepath.Join(subagentsDir, a), []byte(`{"n":1}`+"\n"), 0o644)
+	}
+
+	engine := newEngineWithBackend(t, mustNewClient(t, server.URL, tmpDir), nil, EngineConfig{
+		ExternalID: "refresh-mid-cycle", TranscriptPath: transcriptPath, CWD: tmpDir,
+	})
+	if err := engine.Init(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := engine.SyncAll(); err != nil {
+		t.Fatalf("SyncAll #1: %v", err)
+	}
+
+	// Every file gains a line; the transcript's upload fails and forces a
+	// refresh at some point during the cycle.
+	appendLine := func(p string) {
+		f, _ := os.OpenFile(p, os.O_APPEND|os.O_WRONLY, 0o644)
+		f.WriteString(`{"n":2}` + "\n")
+		f.Close()
+	}
+	appendLine(transcriptPath)
+	for _, a := range agents {
+		appendLine(filepath.Join(subagentsDir, a))
+	}
+	mu.Lock()
+	failTranscript = true
+	mu.Unlock()
+	if _, err := engine.SyncAll(); err == nil {
+		t.Fatal("SyncAll #2: expected the transcript upload error")
+	}
+
+	stats := engine.GetSyncStats()
+	for _, a := range agents {
+		if stats[a] != 2 {
+			t.Errorf("%s: tracker LastSyncedLine = %d after the cycle, want 2 (progress orphaned by refresh)", a, stats[a])
+		}
+	}
 }

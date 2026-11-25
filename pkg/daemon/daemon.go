@@ -625,6 +625,9 @@ func (d *Daemon) shutdown(reason string) error {
 			for file, lines := range stats {
 				logger.Info("Final state: file=%s lines_synced=%d", file, lines)
 			}
+			for _, file := range d.engine.UnmatchedBackendFiles() {
+				logger.Info("Final state: file=%s not found locally", file)
+			}
 
 			// Send session_end event to backend (after final sync completes)
 			if sessionEndEvent != nil {
