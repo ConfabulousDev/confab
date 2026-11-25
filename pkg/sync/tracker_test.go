@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ConfabulousDev/confab/pkg/config"
 	"github.com/ConfabulousDev/confab/pkg/redactor"
@@ -258,7 +259,7 @@ func TestFileTracker_ReadChunk_AllLines(t *testing.T) {
 	})
 
 	file := ft.GetTranscriptFile()
-	chunk, err := ft.ReadChunk(file, nil, DefaultMaxChunkBytes)
+	chunk, _, err := ft.ReadChunk(file, nil, DefaultMaxChunkBytes)
 	if err != nil {
 		t.Fatalf("failed to read chunk: %v", err)
 	}
@@ -298,7 +299,7 @@ func TestFileTracker_ReadChunk_Incremental(t *testing.T) {
 	})
 
 	file := ft.GetTranscriptFile()
-	chunk, err := ft.ReadChunk(file, nil, DefaultMaxChunkBytes)
+	chunk, _, err := ft.ReadChunk(file, nil, DefaultMaxChunkBytes)
 	if err != nil {
 		t.Fatalf("failed to read chunk: %v", err)
 	}
@@ -335,7 +336,7 @@ func TestFileTracker_ReadChunk_NoNewLines(t *testing.T) {
 	})
 
 	file := ft.GetTranscriptFile()
-	chunk, err := ft.ReadChunk(file, nil, DefaultMaxChunkBytes)
+	chunk, _, err := ft.ReadChunk(file, nil, DefaultMaxChunkBytes)
 	if err != nil {
 		t.Fatalf("failed to read chunk: %v", err)
 	}
@@ -364,7 +365,7 @@ func TestFileTracker_ReadChunk_ExtractsAgentIDs(t *testing.T) {
 	})
 
 	file := ft.GetTranscriptFile()
-	chunk, err := ft.ReadChunk(file, nil, DefaultMaxChunkBytes)
+	chunk, _, err := ft.ReadChunk(file, nil, DefaultMaxChunkBytes)
 	if err != nil {
 		t.Fatalf("failed to read chunk: %v", err)
 	}
@@ -446,7 +447,7 @@ func TestFileTracker_ReadChunk_DoesNotExtractFromOtherFields(t *testing.T) {
 		"transcript.jsonl": {LastSyncedLine: 0},
 	})
 
-	chunk, err := ft.ReadChunk(ft.GetTranscriptFile(), nil, DefaultMaxChunkBytes)
+	chunk, _, err := ft.ReadChunk(ft.GetTranscriptFile(), nil, DefaultMaxChunkBytes)
 	if err != nil {
 		t.Fatalf("failed to read chunk: %v", err)
 	}
@@ -505,7 +506,7 @@ func TestFileTracker_ReadChunk_AppliesRedactor(t *testing.T) {
 				"transcript.jsonl": {LastSyncedLine: 0},
 			})
 
-			chunk, err := ft.ReadChunk(ft.GetTranscriptFile(), r, DefaultMaxChunkBytes)
+			chunk, _, err := ft.ReadChunk(ft.GetTranscriptFile(), r, DefaultMaxChunkBytes)
 			if err != nil {
 				t.Fatalf("ReadChunk: %v", err)
 			}
@@ -540,7 +541,7 @@ func TestFileTracker_ReadChunk_ExtractsGitInfo(t *testing.T) {
 	})
 
 	file := ft.GetTranscriptFile()
-	chunk, err := ft.ReadChunk(file, nil, DefaultMaxChunkBytes)
+	chunk, _, err := ft.ReadChunk(file, nil, DefaultMaxChunkBytes)
 	if err != nil {
 		t.Fatalf("failed to read chunk: %v", err)
 	}
@@ -612,7 +613,7 @@ func TestFileTracker_ReadChunk_CodexSessionMeta_ExtractsGitInfo(t *testing.T) {
 		"transcript.jsonl": {LastSyncedLine: 0},
 	})
 
-	chunk, err := ft.ReadChunk(ft.GetTranscriptFile(), nil, DefaultMaxChunkBytes)
+	chunk, _, err := ft.ReadChunk(ft.GetTranscriptFile(), nil, DefaultMaxChunkBytes)
 	if err != nil {
 		t.Fatalf("ReadChunk: %v", err)
 	}
@@ -677,7 +678,7 @@ func TestFileTracker_ReadChunk_CodexSessionMeta_AgentFile_ExtractsGitInfo(t *tes
 		LastSyncedLine: 0,
 	}
 
-	chunk, err := ft.ReadChunk(ft.files[filepath.Base(agentPath)], nil, DefaultMaxChunkBytes)
+	chunk, _, err := ft.ReadChunk(ft.files[filepath.Base(agentPath)], nil, DefaultMaxChunkBytes)
 	if err != nil {
 		t.Fatalf("ReadChunk: %v", err)
 	}
@@ -710,7 +711,7 @@ func TestFileTracker_ByteOffset_Seeking(t *testing.T) {
 	file := ft.GetTranscriptFile()
 
 	// First read - should get all 3 lines
-	chunk1, err := ft.ReadChunk(file, nil, DefaultMaxChunkBytes)
+	chunk1, _, err := ft.ReadChunk(file, nil, DefaultMaxChunkBytes)
 	if err != nil {
 		t.Fatalf("first read failed: %v", err)
 	}
@@ -734,7 +735,7 @@ func TestFileTracker_ByteOffset_Seeking(t *testing.T) {
 	file.LastModTime = file.LastModTime.Add(-1)
 
 	// Second read - should only get lines 4-5 using byte offset
-	chunk2, err := ft.ReadChunk(file, nil, DefaultMaxChunkBytes)
+	chunk2, _, err := ft.ReadChunk(file, nil, DefaultMaxChunkBytes)
 	if err != nil {
 		t.Fatalf("second read failed: %v", err)
 	}
@@ -776,7 +777,8 @@ func TestFileTracker_HasFileChanged(t *testing.T) {
 		t.Error("expected HasFileChanged to return true on first call")
 	}
 
-	// HasFileChanged does NOT cache values - only UpdateAfterSync does.
+	// HasFileChanged does NOT cache values - only UpdateAfterSync (after an
+	// upload) and MarkUnchanged (after a read with no new lines) do.
 	// So calling it again should still return true (file still needs syncing)
 	if !ft.HasFileChanged(tracked) {
 		t.Error("expected HasFileChanged to return true again (no sync happened)")
@@ -916,7 +918,7 @@ also not valid
 	})
 
 	file := ft.GetTranscriptFile()
-	chunk, err := ft.ReadChunk(file, nil, DefaultMaxChunkBytes)
+	chunk, _, err := ft.ReadChunk(file, nil, DefaultMaxChunkBytes)
 	if err != nil {
 		t.Fatalf("failed to read chunk: %v", err)
 	}
@@ -951,7 +953,7 @@ func TestFileTracker_ReadChunk_EmptyFile(t *testing.T) {
 	})
 
 	file := ft.GetTranscriptFile()
-	chunk, err := ft.ReadChunk(file, nil, DefaultMaxChunkBytes)
+	chunk, _, err := ft.ReadChunk(file, nil, DefaultMaxChunkBytes)
 	if err != nil {
 		t.Fatalf("failed to read chunk: %v", err)
 	}
@@ -985,7 +987,7 @@ func TestFileTracker_ReadChunk_LargeLines(t *testing.T) {
 	})
 
 	file := ft.GetTranscriptFile()
-	chunk, err := ft.ReadChunk(file, nil, DefaultMaxChunkBytes)
+	chunk, _, err := ft.ReadChunk(file, nil, DefaultMaxChunkBytes)
 	if err != nil {
 		t.Fatalf("failed to read chunk: %v", err)
 	}
@@ -1020,7 +1022,7 @@ func TestFileTracker_ReadChunk_ByteLimit(t *testing.T) {
 	maxBytes := 300
 
 	// First read
-	chunk1, err := ft.ReadChunk(file, nil, maxBytes)
+	chunk1, _, err := ft.ReadChunk(file, nil, maxBytes)
 	if err != nil {
 		t.Fatalf("first read failed: %v", err)
 	}
@@ -1043,7 +1045,7 @@ func TestFileTracker_ReadChunk_ByteLimit(t *testing.T) {
 	ft.UpdateAfterSync(file, len(chunk1.Lines), chunk1.NewOffset)
 
 	// Second read
-	chunk2, err := ft.ReadChunk(file, nil, maxBytes)
+	chunk2, _, err := ft.ReadChunk(file, nil, maxBytes)
 	if err != nil {
 		t.Fatalf("second read failed: %v", err)
 	}
@@ -1064,7 +1066,7 @@ func TestFileTracker_ReadChunk_ByteLimit(t *testing.T) {
 	ft.UpdateAfterSync(file, chunk2.FirstLine+len(chunk2.Lines)-1, chunk2.NewOffset)
 
 	for {
-		chunk, err := ft.ReadChunk(file, nil, maxBytes)
+		chunk, _, err := ft.ReadChunk(file, nil, maxBytes)
 		if err != nil {
 			t.Fatalf("read failed: %v", err)
 		}
@@ -1103,7 +1105,7 @@ func TestFileTracker_ReadChunk_SingleLineExceedsByteLimit(t *testing.T) {
 	// Use limit smaller than first line - should return an error
 	maxBytes := 50
 
-	_, err := ft.ReadChunk(file, nil, maxBytes)
+	_, _, err := ft.ReadChunk(file, nil, maxBytes)
 	if err == nil {
 		t.Fatal("expected error when line exceeds max chunk size, got nil")
 	}
@@ -1139,7 +1141,7 @@ func TestFileTracker_ReadChunk_MiddleLineExceedsByteLimit(t *testing.T) {
 	maxBytes := 50
 
 	// First read should succeed with line 1
-	chunk1, err := ft.ReadChunk(file, nil, maxBytes)
+	chunk1, _, err := ft.ReadChunk(file, nil, maxBytes)
 	if err != nil {
 		t.Fatalf("first read failed: %v", err)
 	}
@@ -1150,7 +1152,7 @@ func TestFileTracker_ReadChunk_MiddleLineExceedsByteLimit(t *testing.T) {
 	ft.UpdateAfterSync(file, 1, chunk1.NewOffset)
 
 	// Second read should fail on line 2
-	_, err = ft.ReadChunk(file, nil, maxBytes)
+	_, _, err = ft.ReadChunk(file, nil, maxBytes)
 	if err == nil {
 		t.Fatal("expected error when line 2 exceeds max chunk size, got nil")
 	}
@@ -1237,7 +1239,7 @@ func TestFileTracker_ReadChunk_ByteLimitWithFileAppend(t *testing.T) {
 	maxBytes := 220
 
 	// First read - should get ~2 lines
-	chunk1, err := ft.ReadChunk(file, nil, maxBytes)
+	chunk1, _, err := ft.ReadChunk(file, nil, maxBytes)
 	if err != nil {
 		t.Fatalf("first read failed: %v", err)
 	}
@@ -1259,7 +1261,7 @@ func TestFileTracker_ReadChunk_ByteLimitWithFileAppend(t *testing.T) {
 	// Continue reading - should get remaining original lines plus new lines
 	totalLines := firstChunkLines
 	for {
-		chunk, err := ft.ReadChunk(file, nil, maxBytes)
+		chunk, _, err := ft.ReadChunk(file, nil, maxBytes)
 		if err != nil {
 			t.Fatalf("read failed: %v", err)
 		}
@@ -1356,7 +1358,7 @@ func TestFileTracker_NewFormatAgentID_EndToEnd(t *testing.T) {
 
 	// Read transcript chunk — should extract the 17-char agent ID
 	transcriptFile := ft.GetTranscriptFile()
-	chunk, err := ft.ReadChunk(transcriptFile, nil, DefaultMaxChunkBytes)
+	chunk, _, err := ft.ReadChunk(transcriptFile, nil, DefaultMaxChunkBytes)
 	if err != nil {
 		t.Fatalf("failed to read transcript chunk: %v", err)
 	}
@@ -1377,7 +1379,7 @@ func TestFileTracker_NewFormatAgentID_EndToEnd(t *testing.T) {
 	}
 
 	// Read the agent file
-	agentChunk, err := ft.ReadChunk(newFiles[0], nil, DefaultMaxChunkBytes)
+	agentChunk, _, err := ft.ReadChunk(newFiles[0], nil, DefaultMaxChunkBytes)
 	if err != nil {
 		t.Fatalf("failed to read agent chunk: %v", err)
 	}
@@ -1426,7 +1428,7 @@ func TestFileTracker_InitFromBackendState_ReadableAgentFile(t *testing.T) {
 	}
 
 	// Read chunk — should get only lines 2-3 (line 1 already synced)
-	chunk, err := ft.ReadChunk(agentFile, nil, DefaultMaxChunkBytes)
+	chunk, _, err := ft.ReadChunk(agentFile, nil, DefaultMaxChunkBytes)
 	if err != nil {
 		t.Fatalf("failed to read agent chunk: %v", err)
 	}
@@ -1469,7 +1471,7 @@ func TestFileTracker_ReadChunk_ByteLimitRespectsLineNumber(t *testing.T) {
 
 	var allChunks []*Chunk
 	for {
-		chunk, err := ft.ReadChunk(file, nil, maxBytes)
+		chunk, _, err := ft.ReadChunk(file, nil, maxBytes)
 		if err != nil {
 			t.Fatalf("read failed: %v", err)
 		}
@@ -1649,5 +1651,266 @@ func TestFileTracker_InitFromBackendState_RefreshResetsAbsentTranscript(t *testi
 	if transcript.LastSyncedLine != 0 || transcript.ByteOffset != 0 {
 		t.Errorf("transcript position = (%d, %d), want (0, 0) when the backend omits it",
 			transcript.LastSyncedLine, transcript.ByteOffset)
+	}
+}
+
+// --- kata m5zd: no re-read of unchanged files; complete lines only ---
+
+// writeTestFile writes content to path, failing the test on error.
+func writeTestFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatalf("failed to write %s: %v", path, err)
+	}
+}
+
+// appendTestFile appends content to path, failing the test on error.
+func appendTestFile(t *testing.T, path, content string) {
+	t.Helper()
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		t.Fatalf("failed to open %s for append: %v", path, err)
+	}
+	defer f.Close()
+	if _, err := f.WriteString(content); err != nil {
+		t.Fatalf("failed to append to %s: %v", path, err)
+	}
+}
+
+// newTranscriptTracker returns a tracker for path whose transcript resumes at
+// the backend's lastSyncedLine, as after a daemon restart.
+func newTranscriptTracker(t *testing.T, path string, lastSyncedLine int) (*FileTracker, *TrackedFile) {
+	t.Helper()
+	ft := NewFileTracker(path)
+	ft.InitFromBackendState(map[string]FileState{
+		filepath.Base(path): {LastSyncedLine: lastSyncedLine},
+	})
+	return ft, ft.GetTranscriptFile()
+}
+
+// readNoNewLines asserts ReadChunk finds no new complete lines and returns
+// the stat it reports for MarkUnchanged.
+func readNoNewLines(t *testing.T, ft *FileTracker, file *TrackedFile) os.FileInfo {
+	t.Helper()
+	chunk, info, err := ft.ReadChunk(file, nil, DefaultMaxChunkBytes)
+	if err != nil {
+		t.Fatalf("ReadChunk failed: %v", err)
+	}
+	if chunk != nil {
+		t.Fatalf("expected no new complete lines (nil chunk), got lines %q at FirstLine %d", chunk.Lines, chunk.FirstLine)
+	}
+	if info == nil {
+		t.Fatal("ReadChunk must return the file's stat when it finds no new lines")
+	}
+	return info
+}
+
+func TestFileTracker_UnchangedFileNotRereadAfterMarkUnchanged(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "transcript.jsonl")
+	writeTestFile(t, path, "{\"line\":1}\n{\"line\":2}\n")
+	ft, file := newTranscriptTracker(t, path, 2) // backend already has both lines
+
+	if !ft.HasFileChanged(file) {
+		t.Fatal("a freshly initialised file must be reported as changed (never read)")
+	}
+	info := readNoNewLines(t, ft, file)
+	ft.MarkUnchanged(file, info)
+
+	if ft.HasFileChanged(file) {
+		t.Error("an unchanged file must not be re-read after MarkUnchanged")
+	}
+	if file.LastSyncedLine != 2 || file.ByteOffset != 0 {
+		t.Errorf("MarkUnchanged must not touch the sync position, got LastSyncedLine=%d ByteOffset=%d", file.LastSyncedLine, file.ByteOffset)
+	}
+
+	appendTestFile(t, path, "{\"line\":3}\n")
+	if !ft.HasFileChanged(file) {
+		t.Fatal("a file that grew after MarkUnchanged must be reported as changed")
+	}
+	chunk, _, err := ft.ReadChunk(file, nil, DefaultMaxChunkBytes)
+	if err != nil {
+		t.Fatalf("ReadChunk failed: %v", err)
+	}
+	if chunk == nil || chunk.FirstLine != 3 || len(chunk.Lines) != 1 || chunk.Lines[0] != `{"line":3}` {
+		t.Fatalf("expected exactly line 3 at FirstLine 3, got %+v", chunk)
+	}
+}
+
+func TestFileTracker_FileShorterThanBackendKeepsSkippingUntilPastBackend(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "transcript.jsonl")
+	writeTestFile(t, path, "{\"line\":1}\n{\"line\":2}\n")
+	ft, file := newTranscriptTracker(t, path, 4) // backend is ahead of the local file
+
+	ft.MarkUnchanged(file, readNoNewLines(t, ft, file))
+	if ft.HasFileChanged(file) {
+		t.Fatal("an unchanged file shorter than the backend must not be re-read")
+	}
+
+	// Grows, but is still not past the backend's position.
+	appendTestFile(t, path, "{\"line\":3}\n{\"line\":4}\n")
+	if !ft.HasFileChanged(file) {
+		t.Fatal("expected a grown file to be reported as changed")
+	}
+	ft.MarkUnchanged(file, readNoNewLines(t, ft, file))
+	if file.ByteOffset != 0 {
+		t.Errorf("ByteOffset must stay 0 while skipping lines the backend already has, got %d", file.ByteOffset)
+	}
+	if ft.HasFileChanged(file) {
+		t.Error("expected no re-read after MarkUnchanged")
+	}
+
+	appendTestFile(t, path, "{\"line\":5}\n")
+	chunk, _, err := ft.ReadChunk(file, nil, DefaultMaxChunkBytes)
+	if err != nil {
+		t.Fatalf("ReadChunk failed: %v", err)
+	}
+	if chunk == nil || chunk.FirstLine != 5 || len(chunk.Lines) != 1 || chunk.Lines[0] != `{"line":5}` {
+		t.Fatalf("expected exactly line 5 at FirstLine 5, got %+v", chunk)
+	}
+}
+
+func TestFileTracker_SeekPathTouchWithoutGrowthMarkedUnchanged(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "transcript.jsonl")
+	content := "{\"line\":1}\n{\"line\":2}\n"
+	writeTestFile(t, path, content)
+	ft, file := newTranscriptTracker(t, path, 0)
+
+	chunk, _, err := ft.ReadChunk(file, nil, DefaultMaxChunkBytes)
+	if err != nil || chunk == nil {
+		t.Fatalf("first read: chunk=%v err=%v", chunk, err)
+	}
+	ft.UpdateAfterSync(file, 2, chunk.NewOffset)
+
+	later := time.Now().Add(time.Hour)
+	if err := os.Chtimes(path, later, later); err != nil {
+		t.Fatalf("Chtimes: %v", err)
+	}
+	if !ft.HasFileChanged(file) {
+		t.Fatal("a touched file must be reported as changed")
+	}
+	ft.MarkUnchanged(file, readNoNewLines(t, ft, file))
+	if ft.HasFileChanged(file) {
+		t.Error("a touched-but-not-grown file must not be re-read after MarkUnchanged")
+	}
+	if file.ByteOffset != int64(len(content)) || file.LastSyncedLine != 2 {
+		t.Errorf("sync position must be unchanged, got LastSyncedLine=%d ByteOffset=%d", file.LastSyncedLine, file.ByteOffset)
+	}
+}
+
+func TestFileTracker_ReadChunk_ReturnsPreScanStat(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "transcript.jsonl")
+	content := "{\"line\":1}\n"
+	writeTestFile(t, path, content)
+	ft, file := newTranscriptTracker(t, path, 0)
+
+	chunk, info, err := ft.ReadChunk(file, nil, DefaultMaxChunkBytes)
+	if err != nil || chunk == nil {
+		t.Fatalf("ReadChunk: chunk=%v err=%v", chunk, err)
+	}
+	if info == nil || info.Size() != int64(len(content)) {
+		t.Errorf("ReadChunk must return the file's stat with a chunk too, got %v", info)
+	}
+
+	missing := &TrackedFile{Path: filepath.Join(t.TempDir(), "missing.jsonl"), Name: "missing.jsonl", Type: "agent"}
+	chunk, info, err = ft.ReadChunk(missing, nil, DefaultMaxChunkBytes)
+	if err == nil || chunk != nil || info != nil {
+		t.Errorf("a failed read must return (nil, nil, err), got chunk=%v info=%v err=%v", chunk, info, err)
+	}
+}
+
+func TestFileTracker_ReadChunk_HoldsBackUnterminatedFinalLine(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "transcript.jsonl")
+	complete := "{\"line\":1}\n{\"line\":2}\n"
+	writeTestFile(t, path, complete+`{"line":3,"par`)
+	ft, file := newTranscriptTracker(t, path, 0)
+
+	chunk, _, err := ft.ReadChunk(file, nil, DefaultMaxChunkBytes)
+	if err != nil || chunk == nil {
+		t.Fatalf("ReadChunk: chunk=%v err=%v", chunk, err)
+	}
+	if len(chunk.Lines) != 2 {
+		t.Fatalf("an unterminated final line must not be uploaded, got lines %q", chunk.Lines)
+	}
+	if chunk.NewOffset != int64(len(complete)) {
+		t.Errorf("NewOffset must end after the last complete line: want %d, got %d", len(complete), chunk.NewOffset)
+	}
+	ft.UpdateAfterSync(file, 2, chunk.NewOffset)
+
+	if !ft.HasFileChanged(file) {
+		t.Fatal("a held-back tail must keep the file reported as changed")
+	}
+	readNoNewLines(t, ft, file) // still unterminated in seek mode
+
+	appendTestFile(t, path, "tial\":true}\n")
+	chunk, _, err = ft.ReadChunk(file, nil, DefaultMaxChunkBytes)
+	if err != nil || chunk == nil {
+		t.Fatalf("ReadChunk after completion: chunk=%v err=%v", chunk, err)
+	}
+	if chunk.FirstLine != 3 || len(chunk.Lines) != 1 || chunk.Lines[0] != `{"line":3,"partial":true}` {
+		t.Errorf("the completed line must be uploaded once, intact, at FirstLine 3, got FirstLine %d lines %q", chunk.FirstLine, chunk.Lines)
+	}
+}
+
+func TestFileTracker_ReadChunk_PartialTailNotCountedInSkipRegion(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "transcript.jsonl")
+	writeTestFile(t, path, "{\"line\":1}\n{\"line\":2}\n{\"line\":3,\"par")
+	ft, file := newTranscriptTracker(t, path, 2)
+
+	readNoNewLines(t, ft, file)
+}
+
+func TestFileTracker_ReadChunk_OnlyUnterminatedLineReturnsNil(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "transcript.jsonl")
+	writeTestFile(t, path, `{"line":1,"par`)
+	ft, file := newTranscriptTracker(t, path, 0)
+
+	readNoNewLines(t, ft, file)
+}
+
+func TestFileTracker_ReadChunk_CRLFLinesHaveExactOffset(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "transcript.jsonl")
+	content := "{\"line\":1}\r\n{\"line\":2}\r\n"
+	writeTestFile(t, path, content)
+	ft, file := newTranscriptTracker(t, path, 0)
+
+	chunk, _, err := ft.ReadChunk(file, nil, DefaultMaxChunkBytes)
+	if err != nil || chunk == nil {
+		t.Fatalf("ReadChunk: chunk=%v err=%v", chunk, err)
+	}
+	if len(chunk.Lines) != 2 || chunk.Lines[0] != `{"line":1}` || chunk.Lines[1] != `{"line":2}` {
+		t.Errorf("CRLF lines must be returned without the \\r, got %q", chunk.Lines)
+	}
+	if chunk.NewOffset != int64(len(content)) {
+		t.Errorf("NewOffset must count the \\r\\n bytes exactly: want %d, got %d", len(content), chunk.NewOffset)
+	}
+
+	// The skip region must count CRLF bytes exactly too.
+	appendTestFile(t, path, "{\"line\":3}\r\n")
+	ft2, file2 := newTranscriptTracker(t, path, 2)
+	chunk, _, err = ft2.ReadChunk(file2, nil, DefaultMaxChunkBytes)
+	if err != nil || chunk == nil {
+		t.Fatalf("ReadChunk after skip: chunk=%v err=%v", chunk, err)
+	}
+	if chunk.FirstLine != 3 || len(chunk.Lines) != 1 || chunk.NewOffset != int64(len(content)+len("{\"line\":3}\r\n")) {
+		t.Errorf("expected line 3 ending at the file's end, got FirstLine %d lines %q NewOffset %d", chunk.FirstLine, chunk.Lines, chunk.NewOffset)
+	}
+}
+
+func TestFileTracker_ReadChunk_CRLFSkipRegionOffsetExactAtByteLimit(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "transcript.jsonl")
+	line := "{\"line\":1}\r\n" // 12 bytes on disk; 10 + 4 against the chunk limit
+	writeTestFile(t, path, line+line+line)
+	ft, file := newTranscriptTracker(t, path, 1)
+
+	// Room for exactly one line: skip line 1, read line 2, stop before line 3.
+	chunk, _, err := ft.ReadChunk(file, nil, 20)
+	if err != nil || chunk == nil {
+		t.Fatalf("ReadChunk: chunk=%v err=%v", chunk, err)
+	}
+	if chunk.FirstLine != 2 || len(chunk.Lines) != 1 {
+		t.Fatalf("expected only line 2, got FirstLine %d lines %q", chunk.FirstLine, chunk.Lines)
+	}
+	if want := int64(2 * len(line)); chunk.NewOffset != want {
+		t.Errorf("NewOffset must be the exact start of line 3: want %d, got %d", want, chunk.NewOffset)
 	}
 }

@@ -74,7 +74,7 @@ value). Observed line types are `started`/`result`; treat the set as open.
 Thin wrapper around `pkg/http.Client` that marshals/unmarshals request types for the sync API endpoints: `/api/v1/sync/init`, `/api/v1/sync/chunk`, `/api/v1/sync/event`, and session-specific endpoints for summaries and GitHub links.
 
 ### FileTracker (file I/O + state)
-Manages the mapping between files on disk and their sync state. `ReadChunk()` seeks to the last known byte offset, reads new lines up to the chunk size limit, applies redaction, and extracts agent IDs. `DiscoverNewFiles()` finds new agent files both from collected agent IDs and by scanning the subagents directory.
+Manages the mapping between files on disk and their sync state. `ReadChunk()` seeks to the last known byte offset, reads new **complete** (newline-terminated) lines up to the chunk size limit, applies redaction, and extracts agent IDs. It also returns the file's stat, taken on the open handle before scanning; when it finds no new lines the engine records that stat with `MarkUnchanged()`, so `HasFileChanged()` stays false until the file changes (kata m5zd). `DiscoverNewFiles()` finds new agent files both from collected agent IDs and by scanning the subagents directory.
 
 Per-chunk `git_info` extraction (CF-493) is provider-agnostic with two paths in `ReadChunk`, each guarded by the `gitInfo == nil` first-wins check:
 - `gitInfoFromClaudeMessage` — Claude transcript messages carry inline `gitBranch` + `cwd`; populates `Branch`, `RepoURL`, `Remotes`, `TrackingRemote`.
@@ -88,13 +88,15 @@ SyncAll() loop:
        │yes
        ▼
   ReadChunk(maxBytes)
+    ├── stat the open file (before scanning)
     ├── seek to ByteOffset
-    ├── read lines until maxBytes
+    ├── read complete lines until maxBytes (hold back an unterminated tail)
     ├── extract agent IDs (pre-redaction)
     ├── extract metadata (pre-redaction)
     ├── apply redaction
-    └── return Chunk
+    └── return Chunk + stat
        │
+       ├── chunk == nil ──> MarkUnchanged (record stat) → next file
        ▼
   UploadChunk (redacted lines + redacted metadata)
        │
@@ -130,7 +132,9 @@ SyncAll() loop:
 - **Agent discovery uses BFS with cycle detection.** The `knownAgentIDs` set prevents infinite loops when agents reference each other. Max 10 BFS iterations as a safety bound.
 - **Redaction must happen in `ReadChunk()` before lines leave the tracker.** Never upload unredacted content. The same call site covers Claude transcripts, Claude agent files, and Codex rollouts; `redactor.RedactJSONLine` is JSON-shape-agnostic, so no per-provider branching is needed.
 - **Metadata is extracted before redaction, then redacted.** Summaries and first user messages need the original text for meaningful extraction, but must be redacted before upload.
-- **Byte offsets must be maintained accurately.** `ReadChunk` returns `NewOffset` which is the byte position after the last line read. `UpdateAfterSync` stores this for the next read. Incorrect offsets cause duplicate or missing lines.
+- **Byte offsets must be maintained accurately.** `ReadChunk` returns `NewOffset` which is the exact byte position after the last line read, counted from the bytes consumed (including `\n` or `\r\n`). `UpdateAfterSync` stores this for the next read. Incorrect offsets cause duplicate or missing lines.
+- **Only complete lines are uploaded (kata m5zd).** `ReadChunk` reads only newline-terminated lines; an unterminated final line (a write in progress, or a crash-truncated line) is neither counted nor uploaded, including on the final sync and `confab save`. Offsets advance only over complete lines and only via `UpdateAfterSync`.
+- **A no-new-lines read records the pre-scan stat via `MarkUnchanged`.** It sets only `LastModTime`/`LastSize`, never `LastSyncedLine`/`ByteOffset`, so a file shorter than the backend's position keeps re-counting from the start when it next changes. The stat must be taken before the scan: one taken after could record growth that was never read.
 - **Init never invents local paths; discovery is the sole path authority (kata 38mv).** The backend stores only `file_name` + `last_synced_line`, so `InitFromBackendState` records positions and creates no entry for any non-transcript file. A file is tracked only once its provider's discovery finds it on disk (Claude `agent-*` via the `DiscoverNewFiles` dir scan; workflow, Cursor, OpenCode and Codex at the top of `SyncAll`), and registration seeds its position from the backend's — the backend rejects any chunk whose `first_line` isn't `last_synced_line + 1`, so a rediscovered file must never restart at line 0. A backend file no discovery finds (deleted, moved, Codex state DB missing, capability probe still pending) is listed by `UnmatchedBackendFiles` and skipped without an error; it syncs again once discovery finds it. Guessing a Claude-layout path here is what broke Codex children after a restart (GitHub #102).
 - **Directory scan in `DiscoverNewFiles` catches agents from already-synced lines.** After a daemon restart, agent IDs from previously-synced lines are lost from memory. The directory scan recovers them.
 - **`codex_rollout` metadata rides on first chunks only.** `provider.Codex.AnnotateChunk` attaches `ChunkMetadata.CodexRollout` whenever `c.FirstLine() == 1` and the tracked file carries a `CodexRollout`. On retry after a failed upload, `FirstLine` remains 1 so the metadata is automatically resent — the backend upsert is idempotent. `refreshStateFromBackend` updates tracked entries in place, so `TrackedFile.CodexRollout` survives and retries don't lose the payload.
