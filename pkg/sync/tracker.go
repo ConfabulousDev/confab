@@ -2,6 +2,7 @@ package sync
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -305,21 +306,44 @@ func gitInfoFromCodexSessionMeta(msg map[string]interface{}) *git.GitInfo {
 	}
 }
 
-// ReadChunk reads new lines from a file starting after LastSyncedLine.
+// scanCompleteLines is a bufio.SplitFunc that yields only newline-terminated
+// lines, each token including its "\n" (and any "\r" before it) so the caller
+// can count consumed bytes exactly. Unlike bufio.ScanLines it never yields an
+// unterminated final line: at EOF the remainder is left unconsumed, so a line
+// still being written is neither counted nor uploaded.
+func scanCompleteLines(data []byte, _ bool) (advance int, token []byte, err error) {
+	if i := bytes.IndexByte(data, '\n'); i >= 0 {
+		return i + 1, data[:i+1], nil
+	}
+	return 0, nil, nil // Need more data; at EOF, hold back the unterminated tail
+}
+
+// ReadChunk reads the new complete lines of a file, starting after
+// LastSyncedLine. Only newline-terminated lines are read: an unterminated
+// final line (a partial write) is held back until its newline arrives.
 // Uses ByteOffset to seek directly to the right position if available.
 // Applies redaction if a redactor is provided.
 // Stops reading when accumulated bytes would exceed maxBytes (aligned to line boundary).
-// Returns nil if there are no new lines.
-func (t *FileTracker) ReadChunk(file *TrackedFile, r *redactor.Redactor, maxBytes int) (*Chunk, error) {
+//
+// Returns a nil chunk if there are no new complete lines. On success it also
+// returns the file's stat, taken on the open handle before scanning (nil if
+// that stat failed), which the caller records via MarkUnchanged when the
+// chunk is nil. Error returns carry a nil stat.
+func (t *FileTracker) ReadChunk(file *TrackedFile, r *redactor.Redactor, maxBytes int) (*Chunk, os.FileInfo, error) {
 	f, err := os.Open(file.Path)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open file: %w", err)
+		return nil, nil, fmt.Errorf("failed to open file: %w", err)
 	}
 	defer f.Close()
 
+	// Stat the open handle before scanning, so the stat describes no more than
+	// the scan can see. Data appended during the scan then leaves the file
+	// larger than the recorded size, and the next HasFileChanged catches it; a
+	// stat taken after the scan could record growth that was never read.
+	info, _ := f.Stat() // nil on error: the caller then records nothing
+
 	var lines []string
 	var metadata *ChunkMetadata
-	var newOffset int64
 	var totalBytes int
 	var currentOffset int64
 	var readingFromStart bool // true if we're reading from start (offset 0)
@@ -333,7 +357,7 @@ func (t *FileTracker) ReadChunk(file *TrackedFile, r *redactor.Redactor, maxByte
 			logger.Debug("Seek to offset %d failed, falling back to start: %v", file.ByteOffset, err)
 			readingFromStart = true
 			if _, err := f.Seek(0, io.SeekStart); err != nil {
-				return nil, fmt.Errorf("failed to seek to start: %w", err)
+				return nil, nil, fmt.Errorf("failed to seek to start: %w", err)
 			}
 		} else {
 			currentOffset = file.ByteOffset
@@ -349,6 +373,7 @@ func (t *FileTracker) ReadChunk(file *TrackedFile, r *redactor.Redactor, maxByte
 	scanner := bufio.NewScanner(f)
 	maxLineSize := maxBytes + types.MaxJSONLLineSize // maxBytes + 10MB headroom
 	scanner.Buffer(make([]byte, bufio.MaxScanTokenSize), maxLineSize)
+	scanner.Split(scanCompleteLines)
 
 	lineNum := file.LastSyncedLine // Start counting from where we left off
 	if readingFromStart {
@@ -368,15 +393,15 @@ func (t *FileTracker) ReadChunk(file *TrackedFile, r *redactor.Redactor, maxByte
 
 	for scanner.Scan() {
 		lineNum++
-		lineWithNewline := len(scanner.Bytes()) + 1 // +1 for newline
+		consumed := int64(len(scanner.Bytes())) // the line plus its terminator
 
 		// If we're reading from start and need to skip already-synced lines
 		if readingFromStart && lineNum <= file.LastSyncedLine {
-			currentOffset += int64(lineWithNewline)
+			currentOffset += consumed
 			continue
 		}
 
-		line := scanner.Text()
+		line := strings.TrimSuffix(strings.TrimSuffix(scanner.Text(), "\n"), "\r")
 
 		// Check if adding this line would exceed the chunk size limit
 		// Account for JSON array overhead: quotes, comma, etc. (~4 bytes per line)
@@ -385,15 +410,14 @@ func (t *FileTracker) ReadChunk(file *TrackedFile, r *redactor.Redactor, maxByte
 		if totalBytes+lineBytes > maxBytes {
 			if totalBytes == 0 {
 				// First line of chunk exceeds limit - cannot proceed past this line
-				return nil, fmt.Errorf("line %d exceeds max chunk size (%d bytes > %d bytes)", lineNum, lineBytes, maxBytes)
+				return nil, nil, fmt.Errorf("line %d exceeds max chunk size (%d bytes > %d bytes)", lineNum, lineBytes, maxBytes)
 			}
-			// Would exceed limit - stop here, this line will be read next time
-			// newOffset stays at current position (before this line)
-			newOffset = currentOffset
+			// Would exceed limit - stop here, this line will be read next time.
+			// currentOffset stays at the start of this line.
 			break
 		}
 		totalBytes += lineBytes
-		currentOffset += int64(lineWithNewline)
+		currentOffset += consumed
 
 		// Extract metadata from transcript and agent lines
 		if extractMetadata {
@@ -444,28 +468,11 @@ func (t *FileTracker) ReadChunk(file *TrackedFile, r *redactor.Redactor, maxByte
 	}
 
 	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("failed to scan file: %w", err)
+		return nil, nil, fmt.Errorf("failed to scan file: %w", err)
 	}
 
 	if len(lines) == 0 {
-		return nil, nil // No new lines
-	}
-
-	// Get the current file position as the new offset (if not already set by early break).
-	//
-	// Note: Using Seek after a bufio.Scanner relies on the scanner having consumed
-	// all buffered data, which holds true for complete reads of JSONL files where
-	// every line ends with a newline (as Claude Code transcripts do). For malformed
-	// files without trailing newlines, Seek and the tracked currentOffset could differ.
-	// This is acceptable since Claude Code always writes properly formatted JSONL.
-	if newOffset == 0 {
-		seekOffset, _ := f.Seek(0, io.SeekCurrent)
-		// Detect offset discrepancy that could indicate a malformed file
-		if seekOffset != currentOffset {
-			logger.Debug("Offset discrepancy in %s: tracked=%d, seek=%d (possible missing trailing newline)",
-				file.Path, currentOffset, seekOffset)
-		}
-		newOffset = seekOffset
+		return nil, info, nil // No new complete lines
 	}
 
 	// Build metadata for backend (git info only)
@@ -480,10 +487,10 @@ func (t *FileTracker) ReadChunk(file *TrackedFile, r *redactor.Redactor, maxByte
 		FileType:  file.Type,
 		FirstLine: file.LastSyncedLine + 1,
 		Lines:     lines,
-		NewOffset: newOffset,
+		NewOffset: currentOffset, // Exact: the end of the last line read
 		Metadata:  metadata,
 		AgentIDs:  agentIDs, // Local use only, not sent to backend
-	}, nil
+	}, info, nil
 }
 
 // UpdateAfterSync updates the tracked file state after a successful sync.
@@ -498,6 +505,21 @@ func (t *FileTracker) UpdateAfterSync(file *TrackedFile, lastLine int, newOffset
 		file.LastModTime = info.ModTime()
 		file.LastSize = info.Size()
 	}
+}
+
+// MarkUnchanged records info, the stat ReadChunk returned with a nil chunk,
+// as the file's last known mtime and size, so HasFileChanged reports false
+// until the file changes again. Without it, a file with no new lines is
+// re-read from the start every cycle until it gains one, which for a finished
+// sidechain file is forever. It touches neither LastSyncedLine nor ByteOffset:
+// a file shorter than the backend's position must keep re-counting from the
+// start when it next changes. A nil info is a no-op.
+func (t *FileTracker) MarkUnchanged(file *TrackedFile, info os.FileInfo) {
+	if info == nil {
+		return
+	}
+	file.LastModTime = info.ModTime()
+	file.LastSize = info.Size()
 }
 
 // DiscoverNewFiles checks for new agent files based on agent IDs

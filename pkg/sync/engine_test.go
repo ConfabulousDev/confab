@@ -2674,3 +2674,99 @@ func TestEngine_SyncAll_RefreshMidCycle_KeepsLaterProgress(t *testing.T) {
 		}
 	}
 }
+
+// TestEngine_SyncAll_RestartFullySynced_UnchangedFilesNotReread covers kata
+// m5zd: after a restart on a session the backend already has in full, the
+// first SyncAll finds nothing new and records each file's stat, so no tracked
+// file is re-read on later cycles.
+func TestEngine_SyncAll_RestartFullySynced_UnchangedFilesNotReread(t *testing.T) {
+	mock := newMockBackend(t)
+	server := httptest.NewServer(mock)
+	defer server.Close()
+
+	tmpDir, transcriptPath := setupTestEnv(t, server.URL)
+	subagentsDir := filepath.Join(filepath.Dir(transcriptPath), "transcript", "subagents")
+	if err := os.MkdirAll(subagentsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, transcriptPath, `{"type":"system","message":"start"}`+"\n"+
+		`{"type":"user","toolUseResult":{"agentId":"a3eaf63159a07953f","result":"done"}}`+"\n")
+	writeTestFile(t, filepath.Join(subagentsDir, "agent-a3eaf63159a07953f.jsonl"), `{"type":"agent","message":"done"}`+"\n")
+
+	mock.initResponse.Files = map[string]FileState{
+		"transcript.jsonl":              {LastSyncedLine: 2},
+		"agent-a3eaf63159a07953f.jsonl": {LastSyncedLine: 1},
+	}
+	engine := newEngineWithBackend(t, mustNewClient(t, server.URL, tmpDir), nil, EngineConfig{
+		ExternalID:     "restart-unchanged-test",
+		TranscriptPath: transcriptPath,
+		CWD:            tmpDir,
+	})
+	if err := engine.Init(); err != nil {
+		t.Fatalf("Init failed: %v", err)
+	}
+
+	chunks, err := engine.SyncAll()
+	if err != nil || chunks != 0 {
+		t.Fatalf("first SyncAll after restart: want 0 chunks and nil error, got %d, %v", chunks, err)
+	}
+	files := engine.tracker.GetTrackedFiles()
+	if len(files) != 2 {
+		t.Fatalf("expected transcript + agent tracked, got %d files", len(files))
+	}
+	for _, f := range files {
+		if engine.tracker.HasFileChanged(f) {
+			t.Errorf("unchanged file %s must not be re-read after the first post-restart SyncAll", f.Name)
+		}
+	}
+
+	chunks, err = engine.SyncAll()
+	if err != nil || chunks != 0 {
+		t.Errorf("second SyncAll: want 0 chunks and nil error, got %d, %v", chunks, err)
+	}
+	if len(mock.chunkRequests) != 0 {
+		t.Errorf("expected no uploads, got %d", len(mock.chunkRequests))
+	}
+}
+
+// TestEngine_SyncAll_LineWrittenInTwoParts_UploadedOnceIntact covers kata
+// m5zd: a line caught mid-write is held back until its newline arrives, then
+// uploaded once, whole.
+func TestEngine_SyncAll_LineWrittenInTwoParts_UploadedOnceIntact(t *testing.T) {
+	mock := newMockBackend(t)
+	server := httptest.NewServer(mock)
+	defer server.Close()
+
+	tmpDir, transcriptPath := setupTestEnv(t, server.URL)
+	writeTestFile(t, transcriptPath, `{"type":"system","message":"start"}`+"\n"+`{"type":"user","mess`)
+	engine := newEngineWithBackend(t, mustNewClient(t, server.URL, tmpDir), nil, EngineConfig{
+		ExternalID:     "partial-line-test",
+		TranscriptPath: transcriptPath,
+		CWD:            tmpDir,
+	})
+	if err := engine.Init(); err != nil {
+		t.Fatalf("Init failed: %v", err)
+	}
+	if _, err := engine.SyncAll(); err != nil {
+		t.Fatalf("first SyncAll failed: %v", err)
+	}
+
+	appendTestFile(t, transcriptPath, `age":"hi"}`+"\n")
+	if _, err := engine.SyncAll(); err != nil {
+		t.Fatalf("second SyncAll failed: %v", err)
+	}
+
+	var uploaded []string
+	for _, req := range mock.chunkRequests {
+		if req.FileName == "transcript.jsonl" {
+			if req.FirstLine != len(uploaded)+1 {
+				t.Errorf("chunk FirstLine %d is not contiguous with %d uploaded lines", req.FirstLine, len(uploaded))
+			}
+			uploaded = append(uploaded, req.Lines...)
+		}
+	}
+	want := []string{`{"type":"system","message":"start"}`, `{"type":"user","message":"hi"}`}
+	if fmt.Sprint(uploaded) != fmt.Sprint(want) {
+		t.Errorf("the split line must be uploaded once, intact:\nwant %q\ngot  %q", want, uploaded)
+	}
+}

@@ -355,7 +355,7 @@ func (e *Engine) SyncAll() (int, error) {
 			// Read and upload chunks until no more data (handles byte-limited chunks)
 			for {
 				// Read new lines
-				chunk, err := e.tracker.ReadChunk(file, e.redactor, DefaultMaxChunkBytes)
+				chunk, info, err := e.tracker.ReadChunk(file, e.redactor, DefaultMaxChunkBytes)
 				if err != nil {
 					logger.Error("Failed to read chunk: file=%s error=%v", file.Path, err)
 					if firstErr == nil {
@@ -365,7 +365,10 @@ func (e *Engine) SyncAll() (int, error) {
 				}
 
 				if chunk == nil {
-					break // No more lines
+					// No more complete lines: record the stat so an unchanged
+					// file isn't re-read next cycle (kata m5zd).
+					e.tracker.MarkUnchanged(file, info)
+					break
 				}
 
 				// Collect agent IDs for discovery (local use only)
