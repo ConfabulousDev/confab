@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -53,6 +54,12 @@ type FileTracker struct {
 	subagentsDir   string // <session-id>/subagents/ directory for agent files
 	files          map[string]*TrackedFile
 	knownAgentIDs  map[string]bool // Agent IDs we've already discovered
+
+	// backendPositions is the backend's last_synced_line per file_name from
+	// the latest Init/refresh. The backend stores no local paths, so a
+	// non-transcript file is only tracked once provider discovery finds it on
+	// disk; registration then seeds its position from here (see newTracked).
+	backendPositions map[string]int
 }
 
 // NewFileTracker creates a new file tracker for a session
@@ -62,67 +69,82 @@ func NewFileTracker(transcriptPath string) *FileTracker {
 	// subagents:  <project>/<session-id>/subagents/
 	base := strings.TrimSuffix(transcriptPath, filepath.Ext(transcriptPath))
 	return &FileTracker{
-		transcriptPath: transcriptPath,
-		subagentsDir:   filepath.Join(base, "subagents"),
-		files:          make(map[string]*TrackedFile),
-		knownAgentIDs:  make(map[string]bool),
+		transcriptPath:   transcriptPath,
+		subagentsDir:     filepath.Join(base, "subagents"),
+		files:            make(map[string]*TrackedFile),
+		knownAgentIDs:    make(map[string]bool),
+		backendPositions: make(map[string]int),
 	}
 }
 
-// InitFromBackendState initializes the tracker with state from the backend.
-// This sets up tracking for the transcript and any files the backend knows about.
+// InitFromBackendState applies the backend's per-file sync state.
 //
 // Called from both Engine.Init() (first time) and Engine.refreshStateFromBackend()
-// (after a chunk-upload failure). On refresh, any per-file metadata that the
-// engine has already set on a tracked file (notably Codex rollout metadata)
-// must survive — otherwise a retried first chunk would lose its codex_rollout
-// payload. We preserve CodexRollout for existing entries and only refresh the
-// fields that can legitimately drift (sync position).
+// (after a chunk-upload failure). The backend knows only each file's name and
+// last_synced_line, never its local path, so this never invents a path:
+//   - The root transcript entry is created if missing, and always takes the
+//     backend's position (0 if the backend doesn't list it).
+//   - Every name's position is recorded in backendPositions, from which
+//     discovery seeds a file when it registers it (newTracked).
+//   - An already-tracked file is updated in place: LastSyncedLine takes the
+//     backend value and ByteOffset resets so the next read re-counts lines.
+//     Path, Type and CodexRollout are never touched, and the *TrackedFile
+//     pointer is kept, so a refresh mid-SyncAll doesn't orphan the pointers
+//     the BFS loop is still holding.
 func (t *FileTracker) InitFromBackendState(backendFiles map[string]FileState) {
+	t.backendPositions = make(map[string]int, len(backendFiles))
+	for name, state := range backendFiles {
+		t.backendPositions[name] = state.LastSyncedLine
+	}
+
 	transcriptName := filepath.Base(t.transcriptPath)
+	transcript, ok := t.files[transcriptName]
+	if !ok {
+		transcript = t.newTracked(t.transcriptPath, transcriptName, provider.FileTypeTranscript)
+	}
+	// The transcript always takes the backend's position, 0 when it's absent
+	// (e.g. the backend session was recreated), so it re-uploads from line 1.
+	transcript.LastSyncedLine = t.backendPositions[transcriptName]
+	transcript.ByteOffset = 0 // Will be set on next read
 
-	// Add transcript
-	transcriptState := backendFiles[transcriptName]
-	t.files[transcriptName] = t.buildTrackedFromState(TrackedFile{
-		Path:           t.transcriptPath,
-		Name:           transcriptName,
-		Type:           provider.FileTypeTranscript,
-		LastSyncedLine: transcriptState.LastSyncedLine,
-		ByteOffset:     0, // Will be set on first read
-	})
-
-	// Add any other files from backend state (agent files)
-	for fileName, state := range backendFiles {
-		if fileName == transcriptName {
-			continue
+	for name, state := range backendFiles {
+		if f, ok := t.files[name]; ok && name != transcriptName {
+			f.LastSyncedLine = state.LastSyncedLine
+			f.ByteOffset = 0 // Will be set on next read
 		}
-
-		path := ""
-		if prev, ok := t.files[fileName]; ok {
-			path = prev.Path
-		}
-		if path == "" {
-			// First time we've seen this file; default to subagents dir.
-			// Codex children, when present in the tracker, already have an
-			// absolute rollout path from AddCodexRollout, so this branch is
-			// only taken for genuinely-new Claude agent files.
-			path = filepath.Join(t.subagentsDir, fileName)
-		}
-		t.files[fileName] = t.buildTrackedFromState(TrackedFile{
-			Path:           path,
-			Name:           fileName,
-			Type:           provider.FileTypeAgent,
-			LastSyncedLine: state.LastSyncedLine,
-			ByteOffset:     0, // Will be set on first read
-		})
 	}
 }
 
-func (t *FileTracker) buildTrackedFromState(next TrackedFile) *TrackedFile {
-	if prev, ok := t.files[next.Name]; ok {
-		next.CodexRollout = prev.CodexRollout
+// newTracked starts tracking the file at path under the backend file_name
+// name, seeding LastSyncedLine from the recorded backend position (0 for a
+// name the backend doesn't know). Every registration path goes through here:
+// the backend rejects any chunk whose first_line isn't last_synced_line+1, so
+// a file rediscovered after a restart must resume where the backend is.
+func (t *FileTracker) newTracked(path, name, fileType string) *TrackedFile {
+	tracked := &TrackedFile{
+		Path:           path,
+		Name:           name,
+		Type:           fileType,
+		LastSyncedLine: t.backendPositions[name],
 	}
-	return &next
+	t.files[name] = tracked
+	return tracked
+}
+
+// UnmatchedBackendFiles returns, sorted, the backend-known file names that
+// aren't tracked locally: the backend has them, but no provider discovery has
+// found them on disk (deleted, moved, or not discoverable right now). Their
+// new lines, if any, aren't uploaded. The root transcript is never listed.
+func (t *FileTracker) UnmatchedBackendFiles() []string {
+	transcriptName := filepath.Base(t.transcriptPath)
+	var names []string
+	for name := range t.backendPositions {
+		if name != transcriptName && !t.IsTracked(name) {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	return names
 }
 
 // SetCodexRollout assigns Codex rollout metadata to this tracked file, used
@@ -168,21 +190,18 @@ func (t *FileTracker) RootTranscriptPath() string {
 // forward-slash path-encoded backend file_name; path is its absolute
 // location on disk; fileType is "agent" or provider.FileTypeWorkflowJournal.
 //
-// Returns true when a new file is tracked. When the name is already tracked
-// (e.g. a stale entry rebuilt from backend state on daemon restart), it
+// Returns true when a new file is tracked; its position is seeded from the
+// backend's (see newTracked), so a file the backend already has resumes
+// incrementally after a restart. When the name is already tracked, it
 // overwrites Path+Type in place and returns false, preserving the sync
-// position (LastSyncedLine/ByteOffset) so the file resumes incrementally.
+// position (LastSyncedLine/ByteOffset).
 func (t *FileTracker) RegisterSidechainFile(path, name, fileType string) bool {
 	if existing, ok := t.files[name]; ok {
 		existing.Path = path
 		existing.Type = fileType
 		return false
 	}
-	t.files[name] = &TrackedFile{
-		Path: path,
-		Name: name,
-		Type: fileType,
-	}
+	t.newTracked(path, name, fileType)
 	return true
 }
 
@@ -533,13 +552,7 @@ func (t *FileTracker) trackAgentFile(fileName string) *TrackedFile {
 	if _, err := os.Stat(agentPath); err != nil {
 		return nil
 	}
-	tracked := &TrackedFile{
-		Path: agentPath,
-		Name: fileName,
-		Type: provider.FileTypeAgent,
-	}
-	t.files[fileName] = tracked
-	return tracked
+	return t.newTracked(agentPath, fileName, provider.FileTypeAgent)
 }
 
 // GetTranscriptFile returns the transcript file being tracked
@@ -560,7 +573,8 @@ func (t *FileTracker) GetTranscriptFile() *TrackedFile {
 //
 // Idempotent: a second call for an already-tracked path returns the
 // existing TrackedFile without modifying it. The caller can use this to
-// avoid maintaining a separate "already added" set.
+// avoid maintaining a separate "already added" set. A new entry's position
+// is seeded from the backend's (see newTracked).
 func (t *FileTracker) AddCodexRollout(path, fileName string, isRoot bool, meta CodexRolloutMetadata) *TrackedFile {
 	if existing, ok := t.files[fileName]; ok {
 		return existing
@@ -569,12 +583,7 @@ func (t *FileTracker) AddCodexRollout(path, fileName string, isRoot bool, meta C
 	if isRoot {
 		fileType = provider.FileTypeTranscript
 	}
-	tracked := &TrackedFile{
-		Path:         path,
-		Name:         fileName,
-		Type:         fileType,
-		CodexRollout: &meta,
-	}
-	t.files[fileName] = tracked
+	tracked := t.newTracked(path, fileName, fileType)
+	tracked.CodexRollout = &meta
 	return tracked
 }

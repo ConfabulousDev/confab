@@ -2,10 +2,13 @@ package cmd
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
+	gosync "sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -465,5 +468,138 @@ func TestSaveWorksWhileSyncDisabled(t *testing.T) {
 	}
 	if backend.chunkCount != 1 {
 		t.Errorf("expected the session to upload, got %d chunk calls", backend.chunkCount)
+	}
+}
+
+// statefulSaveBackend is a stateful test backend (kata 38mv, D3): it records
+// last_synced_line per file_name, reports it from /api/v1/sync/init, and
+// rejects non-contiguous chunks with 400 like confab-web does. Kept separate
+// from saveTestBackend so the stateless tests stay unchanged.
+type statefulSaveBackend struct {
+	mu     gosync.Mutex
+	lines  map[string]int
+	chunks []sync.ChunkRequest
+}
+
+func newStatefulSaveBackend() *statefulSaveBackend {
+	return &statefulSaveBackend{lines: map[string]int{}}
+}
+
+func (b *statefulSaveBackend) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	w.Header().Set("Content-Type", "application/json")
+	body, _ := backendtest.ReadRequestBody(r)
+	switch r.URL.Path {
+	case "/api/v1/sync/init":
+		files := map[string]sync.FileState{}
+		for name, n := range b.lines {
+			files[name] = sync.FileState{LastSyncedLine: n}
+		}
+		json.NewEncoder(w).Encode(sync.InitResponse{SessionID: "internal-123", Files: files})
+	case "/api/v1/sync/chunk":
+		var req sync.ChunkRequest
+		json.Unmarshal(body, &req)
+		if want := b.lines[req.FileName] + 1; req.FirstLine != want {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{
+				"error": fmt.Sprintf("first_line must be %d (got %d) - chunks must be contiguous", want, req.FirstLine),
+			})
+			return
+		}
+		b.chunks = append(b.chunks, req)
+		b.lines[req.FileName] = req.FirstLine + len(req.Lines) - 1
+		json.NewEncoder(w).Encode(sync.ChunkResponse{LastSyncedLine: b.lines[req.FileName]})
+	default:
+		w.WriteHeader(http.StatusNotFound)
+	}
+}
+
+// codexSaveTwiceSetup saves a Codex root + child once against a stateful
+// backend and returns the child builder, its backend file_name and the root ID.
+func codexSaveTwiceSetup(t *testing.T, backend *statefulSaveBackend) (*codextest.RolloutBuilder, string, string) {
+	t.Helper()
+	server := httptest.NewServer(backend)
+	t.Cleanup(server.Close)
+	fixture := setupCodexSaveEnv(t, server.URL)
+	rootID := uuidStr(t, 0x80)
+	childID := uuidStr(t, 0x81)
+	fixture.AddRoot(rootID).WithSessionMeta("/work").WithUserMessage("root")
+	child := fixture.AddSubagent(rootID, childID, codextest.SubagentOpts{AgentRole: "c"}).
+		WithSessionMeta("/work").WithUserMessage("child")
+	childName := filepath.Base(child.Path())
+
+	out := captureStdout(t, func() {
+		if err := saveViaDefault(t, provider.Codex{}, []string{rootID}); err != nil {
+			t.Fatalf("first save: %v", err)
+		}
+	})
+	if strings.Contains(out, "Error uploading") {
+		t.Fatalf("first save failed:\n%s", out)
+	}
+	if backend.lines[childName] != 2 {
+		t.Fatalf("first save: backend has %d child lines, want 2", backend.lines[childName])
+	}
+	return child, childName, rootID
+}
+
+// Regression for GitHub #102 through the CLI: a second `confab save` of a Codex
+// tree uploads the child's new line at last_synced_line+1 instead of failing.
+func TestSaveCodex_SaveTwice_ChildResumesAtBackendPosition(t *testing.T) {
+	backend := newStatefulSaveBackend()
+	child, childName, rootID := codexSaveTwiceSetup(t, backend)
+	child.WithRawLine(`{"type":"event_msg","payload":{"type":"agent_message","message":"later"}}`)
+	before := len(backend.chunks)
+
+	out := captureStdout(t, func() {
+		if err := saveViaDefault(t, provider.Codex{}, []string{rootID}); err != nil {
+			t.Fatalf("second save: %v", err)
+		}
+	})
+	if strings.Contains(out, "Error uploading") {
+		t.Fatalf("second save must not fail for a backend-known Codex child:\n%s", out)
+	}
+	if strings.Contains(out, "weren't found locally") {
+		t.Errorf("second save warned about unmatched files although the child exists:\n%s", out)
+	}
+	var got *sync.ChunkRequest
+	for i := range backend.chunks[before:] {
+		if c := backend.chunks[before+i]; c.FileName == childName {
+			got = &c
+		}
+	}
+	if got == nil {
+		t.Fatalf("child's new line not uploaded on the second save:\n%s", out)
+	}
+	if got.FirstLine != 3 || len(got.Lines) != 1 {
+		t.Errorf("child chunk = (first_line %d, %d lines), want (3, 1)", got.FirstLine, len(got.Lines))
+	}
+}
+
+// Spec (D0b/D2): when a backend-known file is gone locally, `confab save`
+// prints a ⚠ line naming it on stdout and still exits successfully.
+func TestSaveCodex_SaveTwice_DeletedChild_WarnsUnmatched(t *testing.T) {
+	backend := newStatefulSaveBackend()
+	child, childName, rootID := codexSaveTwiceSetup(t, backend)
+	if err := os.Remove(child.Path()); err != nil {
+		t.Fatal(err)
+	}
+
+	var saveErr error
+	out := captureStdout(t, func() {
+		saveErr = saveViaDefault(t, provider.Codex{}, []string{rootID})
+	})
+	if saveErr != nil {
+		t.Fatalf("save must succeed (exit 0) when a backend file is missing locally: %v", saveErr)
+	}
+	if strings.Contains(out, "Error uploading") {
+		t.Errorf("a missing child must not be an upload error:\n%s", out)
+	}
+	want := "⚠ 1 file(s) on the backend weren't found locally and weren't updated: " + childName
+	if !strings.Contains(out, want) {
+		t.Errorf("output missing %q:\n%s", want, out)
+	}
+	if !strings.Contains(out, "✓ Uploaded") {
+		t.Errorf("output missing the ✓ line:\n%s", out)
 	}
 }

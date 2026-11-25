@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/ConfabulousDev/confab/pkg/config"
 	"github.com/ConfabulousDev/confab/pkg/provider"
@@ -99,9 +100,13 @@ func saveSessionsForProvider(cfg *config.UploadConfig, p provider.Provider, sess
 		result := uploadSingleSession(cfg, p.Name(), fullID, transcriptPath, cwd)
 		if result.Error != nil {
 			fmt.Printf("  Error uploading: %v\n", result.Error)
-			continue
+		} else {
+			fmt.Printf("  ✓ Uploaded (%d chunks)\n", result.FilesUploaded)
 		}
-		fmt.Printf("  ✓ Uploaded (%d chunks)\n", result.FilesUploaded)
+		if n := len(result.Unmatched); n > 0 {
+			fmt.Printf("  ⚠ %d file(s) on the backend weren't found locally and weren't updated: %s\n",
+				n, strings.Join(result.Unmatched, ", "))
+		}
 	}
 	return nil
 }
@@ -111,7 +116,11 @@ type UploadResult struct {
 	SessionID     string
 	InternalID    string
 	FilesUploaded int
-	Error         error
+	// Unmatched lists backend-known files that weren't found locally, so
+	// their new lines (if any) weren't uploaded. Set after SyncAll, even
+	// when SyncAll returned an error.
+	Unmatched []string
+	Error     error
 }
 
 // uploadSingleSession runs the sync engine for one session.
@@ -145,6 +154,7 @@ func uploadSingleSession(cfg *config.UploadConfig, providerName, sessionID, tran
 	result.InternalID = engine.SessionID()
 
 	chunks, err := engine.SyncAll()
+	result.Unmatched = engine.UnmatchedBackendFiles()
 	if err != nil {
 		result.Error = err
 		return result

@@ -62,6 +62,11 @@ type Engine struct {
 	// per-child collector spawn through the same provider seam Codex uses.
 	// See SetDescendantRegistrar.
 	descendantReg provider.DescendantRegistrar
+
+	// warnedUnmatched holds the backend file names already reported as not
+	// found locally, so SyncAll warns when the unmatched set gains a name
+	// rather than every cycle (kata 38mv).
+	warnedUnmatched map[string]bool
 }
 
 // setProviderForTest substitutes the engine's resolved Provider with a stub.
@@ -440,7 +445,38 @@ func (e *Engine) SyncAll() (int, error) {
 		filesToProcess = newFiles
 	}
 
+	e.warnNewUnmatchedFiles()
+
 	return totalChunks, firstErr
+}
+
+// warnNewUnmatchedFiles logs one Warn listing the backend-known files that no
+// discovery found locally and that haven't been reported before. A name that
+// stays unmatched is not reported again.
+func (e *Engine) warnNewUnmatchedFiles() {
+	var fresh []string
+	for _, name := range e.tracker.UnmatchedBackendFiles() {
+		if e.warnedUnmatched[name] {
+			continue
+		}
+		if e.warnedUnmatched == nil {
+			e.warnedUnmatched = make(map[string]bool)
+		}
+		e.warnedUnmatched[name] = true
+		fresh = append(fresh, name)
+	}
+	if len(fresh) == 0 {
+		return
+	}
+	logger.Warn("backend has %d file(s) not found locally, not updated: %s (deleted, moved, or not discoverable right now)",
+		len(fresh), strings.Join(fresh, ", "))
+}
+
+// UnmatchedBackendFiles returns, sorted, the backend-known files that aren't
+// tracked locally, so their new lines (if any) aren't uploaded. Meaningful
+// after SyncAll, whose discovery pass registers every file it can find.
+func (e *Engine) UnmatchedBackendFiles() []string {
+	return e.tracker.UnmatchedBackendFiles()
 }
 
 // resolveCaps lazily probes and caches the backend's workflow capabilities

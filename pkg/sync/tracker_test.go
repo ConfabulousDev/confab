@@ -31,6 +31,9 @@ func TestNewFileTracker(t *testing.T) {
 	}
 }
 
+// Spec (kata 38mv): InitFromBackendState creates only the root transcript
+// entry. Every other backend-known file is recorded as a sync position only;
+// no TrackedFile (and so no guessed local path) exists until discovery finds it.
 func TestFileTracker_InitFromBackendState(t *testing.T) {
 	tmpDir := t.TempDir()
 	transcriptPath := filepath.Join(tmpDir, "transcript.jsonl")
@@ -46,35 +49,191 @@ func TestFileTracker_InitFromBackendState(t *testing.T) {
 	ft.InitFromBackendState(state)
 
 	files := ft.GetTrackedFiles()
-	if len(files) != 3 {
-		t.Errorf("expected 3 tracked files, got %d", len(files))
+	if len(files) != 1 {
+		t.Fatalf("Init must create only the transcript entry; got %d tracked files", len(files))
+	}
+	transcript := ft.GetTranscriptFile()
+	if transcript == nil {
+		t.Fatal("transcript not found in tracked files")
+	}
+	if transcript.Type != "transcript" {
+		t.Errorf("expected transcript type, got %q", transcript.Type)
+	}
+	if transcript.LastSyncedLine != 100 {
+		t.Errorf("expected LastSyncedLine 100, got %d", transcript.LastSyncedLine)
+	}
+	if transcript.Path != transcriptPath {
+		t.Errorf("transcript Path = %q, want %q", transcript.Path, transcriptPath)
 	}
 
-	// Check transcript
-	found := false
-	for _, f := range files {
-		if f.Name == "transcript.jsonl" {
-			found = true
-			if f.Type != "transcript" {
-				t.Errorf("expected transcript type, got %q", f.Type)
-			}
-			if f.LastSyncedLine != 100 {
-				t.Errorf("expected LastSyncedLine 100, got %d", f.LastSyncedLine)
-			}
+	for _, name := range []string{"agent-abc12345.jsonl", "agent-def67890.jsonl"} {
+		if ft.IsTracked(name) {
+			t.Errorf("Init must not track %s (it would have to invent a local path)", name)
 		}
-	}
-	if !found {
-		t.Error("transcript not found in tracked files")
 	}
 
-	// Check agent files resolve to subagents directory
-	for _, f := range files {
-		if f.Type == "agent" {
-			expectedPath := filepath.Join(ft.subagentsDir, f.Name)
-			if f.Path != expectedPath {
-				t.Errorf("expected agent path %q, got %q", expectedPath, f.Path)
+	got := ft.UnmatchedBackendFiles()
+	want := []string{"agent-abc12345.jsonl", "agent-def67890.jsonl"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("UnmatchedBackendFiles = %v, want %v (sorted, transcript excluded)", got, want)
+	}
+}
+
+// Spec: the transcript is never reported as unmatched, and an empty backend
+// response yields no unmatched files.
+func TestFileTracker_UnmatchedBackendFiles_ExcludesTranscriptAndEmpty(t *testing.T) {
+	ft := NewFileTracker(filepath.Join(t.TempDir(), "transcript.jsonl"))
+	if got := ft.UnmatchedBackendFiles(); len(got) != 0 {
+		t.Errorf("before Init: UnmatchedBackendFiles = %v, want empty", got)
+	}
+	ft.InitFromBackendState(map[string]FileState{"transcript.jsonl": {LastSyncedLine: 4}})
+	if got := ft.UnmatchedBackendFiles(); len(got) != 0 {
+		t.Errorf("transcript-only backend: UnmatchedBackendFiles = %v, want empty", got)
+	}
+	ft.InitFromBackendState(map[string]FileState{})
+	if got := ft.UnmatchedBackendFiles(); len(got) != 0 {
+		t.Errorf("empty backend: UnmatchedBackendFiles = %v, want empty", got)
+	}
+}
+
+// Spec: a backend file drops off the unmatched list once discovery registers it.
+func TestFileTracker_UnmatchedBackendFiles_ClearsOnRegistration(t *testing.T) {
+	tmpDir := t.TempDir()
+	ft := NewFileTracker(filepath.Join(tmpDir, "transcript.jsonl"))
+	ft.InitFromBackendState(map[string]FileState{
+		"transcript.jsonl":      {LastSyncedLine: 1},
+		"subagents/child.jsonl": {LastSyncedLine: 2},
+		"rollout-x.jsonl":       {LastSyncedLine: 3},
+	})
+	ft.RegisterSidechainFile(filepath.Join(tmpDir, "child.jsonl"), "subagents/child.jsonl", "agent")
+	got := ft.UnmatchedBackendFiles()
+	if len(got) != 1 || got[0] != "rollout-x.jsonl" {
+		t.Errorf("UnmatchedBackendFiles = %v, want [rollout-x.jsonl]", got)
+	}
+}
+
+// Spec: every registration path seeds LastSyncedLine from the recorded backend
+// position (the backend rejects chunks whose first_line != last_synced_line+1,
+// so a rediscovered file must never restart at line 0). A name the backend
+// doesn't know starts at 0.
+func TestFileTracker_RegistrationSeedsFromBackendPositions(t *testing.T) {
+	newTracker := func(t *testing.T) (*FileTracker, string) {
+		t.Helper()
+		tmpDir := t.TempDir()
+		ft := NewFileTracker(filepath.Join(tmpDir, "transcript.jsonl"))
+		if err := os.MkdirAll(ft.subagentsDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		ft.InitFromBackendState(map[string]FileState{
+			"transcript.jsonl": {LastSyncedLine: 9},
+			"agent-x.jsonl":    {LastSyncedLine: 3},
+		})
+		return ft, tmpDir
+	}
+
+	t.Run("trackAgentFile", func(t *testing.T) {
+		ft, _ := newTracker(t)
+		for _, name := range []string{"agent-x.jsonl", "agent-new.jsonl"} {
+			if err := os.WriteFile(filepath.Join(ft.subagentsDir, name), []byte("{}\n"), 0o644); err != nil {
+				t.Fatal(err)
 			}
 		}
+		ft.DiscoverNewFiles(nil)
+		assertSeeded(t, ft, "agent-x.jsonl", 3)
+		assertSeeded(t, ft, "agent-new.jsonl", 0)
+	})
+
+	t.Run("RegisterSidechainFile", func(t *testing.T) {
+		ft, dir := newTracker(t)
+		if !ft.RegisterSidechainFile(filepath.Join(dir, "x.jsonl"), "agent-x.jsonl", "agent") {
+			t.Fatal("RegisterSidechainFile returned false for an untracked name")
+		}
+		ft.RegisterSidechainFile(filepath.Join(dir, "n.jsonl"), "agent-new.jsonl", "agent")
+		assertSeeded(t, ft, "agent-x.jsonl", 3)
+		assertSeeded(t, ft, "agent-new.jsonl", 0)
+	})
+
+	t.Run("AddCodexRollout", func(t *testing.T) {
+		ft, dir := newTracker(t)
+		ft.AddCodexRollout(filepath.Join(dir, "x.jsonl"), "agent-x.jsonl", false, CodexRolloutMetadata{ThreadUUID: "x"})
+		ft.AddCodexRollout(filepath.Join(dir, "n.jsonl"), "agent-new.jsonl", false, CodexRolloutMetadata{ThreadUUID: "n"})
+		assertSeeded(t, ft, "agent-x.jsonl", 3)
+		assertSeeded(t, ft, "agent-new.jsonl", 0)
+	})
+}
+
+func assertSeeded(t *testing.T, ft *FileTracker, name string, want int) {
+	t.Helper()
+	f, ok := ft.files[name]
+	if !ok {
+		t.Errorf("%s not tracked after registration", name)
+		return
+	}
+	if f.LastSyncedLine != want {
+		t.Errorf("%s: LastSyncedLine = %d, want %d (seeded from backend position)", name, f.LastSyncedLine, want)
+	}
+	if f.ByteOffset != 0 {
+		t.Errorf("%s: ByteOffset = %d, want 0 on registration", name, f.ByteOffset)
+	}
+}
+
+// Spec (D1): a refresh (InitFromBackendState on an already-populated tracker)
+// updates tracked entries in place: LastSyncedLine takes the backend value and
+// ByteOffset resets, but Path, Type and CodexRollout are never touched and the
+// *TrackedFile pointer stays the same (the BFS loop holds these pointers).
+func TestFileTracker_InitFromBackendState_RefreshUpdatesInPlace(t *testing.T) {
+	tmpDir := t.TempDir()
+	transcriptPath := filepath.Join(tmpDir, "transcript.jsonl")
+	ft := NewFileTracker(transcriptPath)
+	ft.InitFromBackendState(map[string]FileState{"transcript.jsonl": {LastSyncedLine: 1}})
+
+	childPath := filepath.Join(tmpDir, "2026", "rollout-child.jsonl")
+	meta := CodexRolloutMetadata{ThreadUUID: "child", ParentThreadUUID: "root"}
+	child := ft.AddCodexRollout(childPath, "rollout-child.jsonl", false, meta)
+	child.LastSyncedLine = 5
+	child.ByteOffset = 500
+	transcript := ft.GetTranscriptFile()
+	transcript.ByteOffset = 77
+	transcriptMeta := &CodexRolloutMetadata{ThreadUUID: "root"}
+	transcript.CodexRollout = transcriptMeta
+	untouched := ft.AddCodexRollout(filepath.Join(tmpDir, "other.jsonl"), "other.jsonl", false, CodexRolloutMetadata{})
+	untouched.LastSyncedLine = 4
+	untouched.ByteOffset = 40
+
+	ft.InitFromBackendState(map[string]FileState{
+		"transcript.jsonl":    {LastSyncedLine: 3},
+		"rollout-child.jsonl": {LastSyncedLine: 7},
+	})
+
+	if got := ft.files["rollout-child.jsonl"]; got != child {
+		t.Fatal("refresh replaced the child *TrackedFile; pointer identity must be preserved")
+	}
+	if child.Path != childPath {
+		t.Errorf("refresh changed child Path to %q, want %q", child.Path, childPath)
+	}
+	if child.Type != "agent" {
+		t.Errorf("refresh changed child Type to %q, want agent", child.Type)
+	}
+	if child.CodexRollout == nil || child.CodexRollout.ThreadUUID != "child" {
+		t.Errorf("refresh lost child CodexRollout: %+v", child.CodexRollout)
+	}
+	if child.LastSyncedLine != 7 || child.ByteOffset != 0 {
+		t.Errorf("child position = (%d, %d), want (7, 0)", child.LastSyncedLine, child.ByteOffset)
+	}
+
+	if got := ft.GetTranscriptFile(); got != transcript {
+		t.Fatal("refresh replaced the transcript *TrackedFile; pointer identity must be preserved")
+	}
+	if transcript.CodexRollout != transcriptMeta {
+		t.Error("refresh lost transcript CodexRollout")
+	}
+	if transcript.LastSyncedLine != 3 || transcript.ByteOffset != 0 {
+		t.Errorf("transcript position = (%d, %d), want (3, 0)", transcript.LastSyncedLine, transcript.ByteOffset)
+	}
+
+	// A tracked file the backend didn't mention is left alone.
+	if untouched.LastSyncedLine != 4 || untouched.ByteOffset != 40 {
+		t.Errorf("file absent from backend changed to (%d, %d), want (4, 40)", untouched.LastSyncedLine, untouched.ByteOffset)
 	}
 }
 
@@ -1227,10 +1386,9 @@ func TestFileTracker_NewFormatAgentID_EndToEnd(t *testing.T) {
 	}
 }
 
-// TestFileTracker_InitFromBackendState_ReadableAgentFile tests that when
-// InitFromBackendState sets up an agent file that exists on disk in the
-// subagents directory, it can actually be read via ReadChunk with correct
-// incremental state.
+// TestFileTracker_InitFromBackendState_ReadableAgentFile: after Init records a
+// backend position for an agent file, the subagents dir scan discovers it at
+// its real path and ReadChunk resumes after the backend's last synced line.
 func TestFileTracker_InitFromBackendState_ReadableAgentFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	transcriptPath := filepath.Join(tmpDir, "transcript.jsonl")
@@ -1258,19 +1416,11 @@ func TestFileTracker_InitFromBackendState_ReadableAgentFile(t *testing.T) {
 		"agent-a3eaf63159a07953f.jsonl": {LastSyncedLine: 1},
 	})
 
-	// Find the agent file in tracked files
-	var agentFile *TrackedFile
-	for _, f := range ft.GetTrackedFiles() {
-		if f.Name == "agent-a3eaf63159a07953f.jsonl" {
-			agentFile = f
-			break
-		}
+	newFiles := ft.DiscoverNewFiles(nil)
+	if len(newFiles) != 1 {
+		t.Fatalf("expected the dir scan to discover 1 agent file, got %d", len(newFiles))
 	}
-	if agentFile == nil {
-		t.Fatal("agent file not found in tracked files")
-	}
-
-	// Verify path points to subagentsDir
+	agentFile := newFiles[0]
 	if agentFile.Path != agentPath {
 		t.Errorf("expected path %q, got %q", agentPath, agentFile.Path)
 	}
@@ -1478,5 +1628,26 @@ func TestFileTracker_RegisterSidechainFile_OverwritesPreservingPosition(t *testi
 	}
 	if got := len(tr.GetTrackedFiles()); got != 1 {
 		t.Errorf("tracked files = %d, want 1 (in-place correction, no dup)", got)
+	}
+}
+
+// Spec: the transcript always takes the backend's position, 0 when the backend
+// no longer lists it (e.g. the session was recreated), so it re-uploads from
+// line 1 instead of failing contiguity forever. Other tracked files the backend
+// doesn't list keep their position.
+func TestFileTracker_InitFromBackendState_RefreshResetsAbsentTranscript(t *testing.T) {
+	ft := NewFileTracker(filepath.Join(t.TempDir(), "transcript.jsonl"))
+	ft.InitFromBackendState(map[string]FileState{"transcript.jsonl": {LastSyncedLine: 12}})
+	transcript := ft.GetTranscriptFile()
+	transcript.ByteOffset = 300
+
+	ft.InitFromBackendState(map[string]FileState{})
+
+	if ft.GetTranscriptFile() != transcript {
+		t.Fatal("refresh replaced the transcript *TrackedFile")
+	}
+	if transcript.LastSyncedLine != 0 || transcript.ByteOffset != 0 {
+		t.Errorf("transcript position = (%d, %d), want (0, 0) when the backend omits it",
+			transcript.LastSyncedLine, transcript.ByteOffset)
 	}
 }
