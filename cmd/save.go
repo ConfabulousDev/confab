@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/ConfabulousDev/confab/pkg/config"
@@ -23,6 +24,10 @@ Examples:
   confab save --provider claude-code abc123de f9e8d7c6  # Upload multiple sessions`,
 	Args: cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// Flag/arg errors happen before RunE and still show usage. A runtime
+		// failure is printed once by Execute, without the usage dump (kata 89e5).
+		cmd.SilenceUsage = true
+		cmd.SilenceErrors = true
 		defer NotifyIfUpdateAvailable()
 		cfg, p, err := resolveSaveContext(saveProviderName, saveConfigDir)
 		if err != nil {
@@ -86,20 +91,27 @@ func resolveSaveContext(providerName, configDir string) (*config.UploadConfig, p
 // saveSessionsForProvider resolves each session ID via the provider's
 // FindSessionByID (which transparently walks Codex subagent UUIDs up to
 // their root) and uploads through the sync engine against cfg.
+//
+// Every ID is attempted. Lookup and upload failures are printed to stderr and
+// make it return an error counting them; backend files missing locally are
+// only a warning, not a failure (kata 38mv).
 func saveSessionsForProvider(cfg *config.UploadConfig, p provider.Provider, sessionIDs []string) error {
+	failed := 0
 	for _, sessionID := range sessionIDs {
 		fullID, transcriptPath, err := p.FindSessionByID(sessionID)
 		if err != nil {
-			fmt.Printf("Error: %v\n", err)
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			failed++
 			continue
 		}
 
 		cwd := p.DefaultCWD(transcriptPath)
-		fmt.Printf("Uploading session %s...\n", utils.TruncateSecret(fullID, 8, 0))
+		fmt.Printf("Uploading session %s\n", utils.TruncateSecret(fullID, 8, 0))
 
 		result := uploadSingleSession(cfg, p.Name(), fullID, transcriptPath, cwd)
 		if result.Error != nil {
-			fmt.Printf("  Error uploading: %v\n", result.Error)
+			fmt.Fprintf(os.Stderr, "  Error uploading: %v\n", result.Error)
+			failed++
 		} else {
 			fmt.Printf("  ✓ Uploaded (%d chunks)\n", result.FilesUploaded)
 		}
@@ -107,6 +119,9 @@ func saveSessionsForProvider(cfg *config.UploadConfig, p provider.Provider, sess
 			fmt.Printf("  ⚠ %d file(s) on the backend weren't found locally and weren't updated: %s\n",
 				n, strings.Join(result.Unmatched, ", "))
 		}
+	}
+	if failed > 0 {
+		return fmt.Errorf("%d of %d session(s) failed to save", failed, len(sessionIDs))
 	}
 	return nil
 }
