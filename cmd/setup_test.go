@@ -536,15 +536,27 @@ func TestRunSetupCursorProviderOutput(t *testing.T) {
 
 func captureStdout(t *testing.T, fn func()) string {
 	t.Helper()
+	return captureFile(t, &os.Stdout, fn)
+}
 
-	origStdout := os.Stdout
+func captureStderr(t *testing.T, fn func()) string {
+	t.Helper()
+	return captureFile(t, &os.Stderr, fn)
+}
+
+// captureFile redirects *target (os.Stdout or os.Stderr) into a pipe while fn
+// runs and returns what was written.
+func captureFile(t *testing.T, target **os.File, fn func()) string {
+	t.Helper()
+
+	orig := *target
 	r, w, err := os.Pipe()
 	if err != nil {
-		t.Fatalf("failed to create stdout pipe: %v", err)
+		t.Fatalf("failed to create capture pipe: %v", err)
 	}
-	os.Stdout = w
+	*target = w
 	defer func() {
-		os.Stdout = origStdout
+		*target = orig
 	}()
 
 	fn()
@@ -553,7 +565,7 @@ func captureStdout(t *testing.T, fn func()) string {
 
 	data, err := io.ReadAll(r)
 	if err != nil {
-		t.Fatalf("failed to read captured stdout: %v", err)
+		t.Fatalf("failed to read captured output: %v", err)
 	}
 	return string(data)
 }

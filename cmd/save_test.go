@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -205,13 +206,18 @@ func TestSaveSessionsByID(t *testing.T) {
 		}
 	})
 
-	t.Run("non-existent session continues", func(t *testing.T) {
+	t.Run("non-existent session fails but others continue", func(t *testing.T) {
 		atomic.StoreInt32(&backend.initCount, 0)
 
-		// Should not return error, just print error message
-		err := saveViaDefault(t, provider.ClaudeCode{}, []string{"nonexistent", sessionID})
-		if err != nil {
-			t.Fatalf("saveSessionsByID should not fail: %v", err)
+		var err error
+		stderr := captureStderr(t, func() {
+			err = saveViaDefault(t, provider.ClaudeCode{}, []string{"nonexistent", sessionID})
+		})
+		if err == nil || !strings.Contains(err.Error(), "1 of 2 session(s) failed") {
+			t.Fatalf("save with an unknown ID must fail with %q, got %v", "1 of 2 session(s) failed", err)
+		}
+		if !strings.Contains(stderr, "Error: ") {
+			t.Errorf("lookup failure must be printed to stderr, got %q", stderr)
 		}
 
 		// Should still upload the valid session
@@ -230,10 +236,70 @@ func TestSaveSessionsByID_UploadError(t *testing.T) {
 
 	_, sessionID, _ := setupSaveTestEnv(t, server.URL)
 
-	// Upload should continue even when individual uploads fail
-	err := saveViaDefault(t, provider.ClaudeCode{}, []string{sessionID})
-	if err != nil {
-		t.Fatalf("saveSessionsByID should not fail on upload error: %v", err)
+	var err error
+	var stderr string
+	stdout := captureStdout(t, func() {
+		stderr = captureStderr(t, func() {
+			err = saveViaDefault(t, provider.ClaudeCode{}, []string{sessionID})
+		})
+	})
+	if err == nil || !strings.Contains(err.Error(), "1 of 1 session(s) failed") {
+		t.Fatalf("save must fail with %q when the upload fails, got %v", "1 of 1 session(s) failed", err)
+	}
+	if !strings.Contains(stderr, "Error uploading") {
+		t.Errorf("upload error must be printed to stderr, got %q", stderr)
+	}
+	if strings.Contains(stdout, "Error uploading") {
+		t.Errorf("upload error must not be printed to stdout, got %q", stdout)
+	}
+	if !strings.Contains(stdout, "Uploading session aaaaaaaa...\n") {
+		t.Errorf("stdout must show progress as %q, got %q", "Uploading session aaaaaaaa...", stdout)
+	}
+	if strings.Contains(stdout, "aaaaaaaa....") {
+		t.Errorf("progress line must end the truncated ID with exactly three dots, got %q", stdout)
+	}
+}
+
+// A runtime failure through the cobra command must exit non-zero without
+// cobra's usage dump or its own "Error:" line (Execute prints the error once).
+func TestSaveCommand_UploadFailure_NoUsage(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	tmpDir, sessionID, _ := setupSaveTestEnv(t, server.URL)
+	t.Setenv("HOME", tmpDir)
+
+	var buf bytes.Buffer
+	origOut, origErr := rootCmd.OutOrStdout(), rootCmd.ErrOrStderr()
+	rootCmd.SetOut(&buf)
+	rootCmd.SetErr(&buf)
+	rootCmd.SetArgs([]string{"save", "--provider", "claude-code", sessionID})
+	t.Cleanup(func() {
+		rootCmd.SetOut(origOut)
+		rootCmd.SetErr(origErr)
+		rootCmd.SetArgs(nil)
+		// Undo the parsed --provider so later rootCmd tests see it unset.
+		f := saveCmd.Flags().Lookup("provider")
+		_ = f.Value.Set("")
+		f.Changed = false
+	})
+
+	var err error
+	captureStdout(t, func() {
+		captureStderr(t, func() {
+			err = rootCmd.Execute()
+		})
+	})
+	if err == nil || !strings.Contains(err.Error(), "1 of 1 session(s) failed") {
+		t.Fatalf("save must return %q, got %v", "1 of 1 session(s) failed", err)
+	}
+	if strings.Contains(buf.String(), "Usage:") {
+		t.Errorf("a runtime save failure must not print usage:\n%s", buf.String())
+	}
+	if strings.Contains(buf.String(), "Error:") {
+		t.Errorf("cobra must not print the error itself (Execute does):\n%s", buf.String())
 	}
 }
 
@@ -415,8 +481,9 @@ func TestSaveCodex_OneSessionFails_OthersContinue(t *testing.T) {
 	fixture.AddRoot(rootID).WithSessionMeta("/work").WithUserMessage("ok")
 
 	unknown := "ffffffff-ffff-ffff-ffff-ffffffffffff"
-	if err := saveViaDefault(t, provider.Codex{}, []string{unknown, rootID}); err != nil {
-		t.Fatalf("save should not return error on per-session failure: %v", err)
+	err := saveViaDefault(t, provider.Codex{}, []string{unknown, rootID})
+	if err == nil || !strings.Contains(err.Error(), "1 of 2 session(s) failed") {
+		t.Fatalf("save must fail with %q after attempting every ID, got %v", "1 of 2 session(s) failed", err)
 	}
 	if backend.initCount != 1 {
 		t.Errorf("init = %d, want 1 (valid root only)", backend.initCount)
@@ -529,14 +596,11 @@ func codexSaveTwiceSetup(t *testing.T, backend *statefulSaveBackend) (*codextest
 		WithSessionMeta("/work").WithUserMessage("child")
 	childName := filepath.Base(child.Path())
 
-	out := captureStdout(t, func() {
+	captureStdout(t, func() {
 		if err := saveViaDefault(t, provider.Codex{}, []string{rootID}); err != nil {
 			t.Fatalf("first save: %v", err)
 		}
 	})
-	if strings.Contains(out, "Error uploading") {
-		t.Fatalf("first save failed:\n%s", out)
-	}
 	if backend.lines[childName] != 2 {
 		t.Fatalf("first save: backend has %d child lines, want 2", backend.lines[childName])
 	}
@@ -556,9 +620,6 @@ func TestSaveCodex_SaveTwice_ChildResumesAtBackendPosition(t *testing.T) {
 			t.Fatalf("second save: %v", err)
 		}
 	})
-	if strings.Contains(out, "Error uploading") {
-		t.Fatalf("second save must not fail for a backend-known Codex child:\n%s", out)
-	}
 	if strings.Contains(out, "weren't found locally") {
 		t.Errorf("second save warned about unmatched files although the child exists:\n%s", out)
 	}
@@ -591,9 +652,6 @@ func TestSaveCodex_SaveTwice_DeletedChild_WarnsUnmatched(t *testing.T) {
 	})
 	if saveErr != nil {
 		t.Fatalf("save must succeed (exit 0) when a backend file is missing locally: %v", saveErr)
-	}
-	if strings.Contains(out, "Error uploading") {
-		t.Errorf("a missing child must not be an upload error:\n%s", out)
 	}
 	want := "⚠ 1 file(s) on the backend weren't found locally and weren't updated: " + childName
 	if !strings.Contains(out, want) {
